@@ -1,0 +1,56 @@
+---
+BasedOnStyle: LLVM
+Standard: Latest
+IndentWidth: 4
+UseTab: Never
+ColumnLimit: 100
+BreakBeforeBraces: Allman
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# Include ordering
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex:           '^<runeharbor/'
+    Priority:        1
+  - Regex:           '^<SDL3/'
+    Priority:        2
+  - Regex:           '^<(algorithm|array|atomic|bit|charconv|chrono|compare|concepts|condition_variable|coroutine|cstddef|cstdint|cstdlib|deque|exception|expected|filesystem|format|functional|future|initializer_list|iostream|iterator|limits|map|memory|memory_resource|mutex|new|numbers|numeric|optional|print|queue|random|ranges|ratio|regex|set|source_location|span|sstream|stack|stdexcept|stop_token|string|string_view|syncstream|system_error|thread|tuple|type_traits|typeindex|typeinfo|unordered_map|unordered_set|utility|variant|vector|version)>'
+    Priority:        3
+  - Regex:           '^<'
+    Priority:        4
+
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignOperands: true
+AlignTrailingComments: true
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakTemplateDeclarations: Yes
+BinPackArguments: true
+BinPackParameters: true
+BreakBeforeBinaryOperators: None
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: BeforeColon
+BreakInheritanceList: BeforeColon
+ConstructorInitializerIndentWidth: 4
+ContinuationIndentWidth: 4
+Cpp11BracedListStyle: true
+IndentCaseLabels: false
+IndentPPDirectives: AfterHash
+NamespaceIndentation: None
+ReflowComments: true
+SpaceAfterCStyleCast: false
+SpaceAfterTemplateKeyword: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCpp11BracedList: false
+SpaceBeforeParens: ControlStatements
+SpaceInEmptyParentheses: false
+SpacesInAngles: false
+SpacesInContainerLiterals: false
+SpacesInCStyleCastParentheses: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false

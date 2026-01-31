@@ -1,0 +1,28 @@
+# Build directories
+builddir
+build-*
+builddir-*
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Compiled files
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Meson cache
+.mesonpy-*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+/subprojects/Catch2-3.8.0/
