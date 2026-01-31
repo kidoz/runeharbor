@@ -29,6 +29,22 @@ run-with-data DATA_PATH: build
     ./builddir/src/runeharbor --data {{DATA_PATH}}
 
 # ============================================================================
+# LOD Archive Tools
+# ============================================================================
+
+# List files in a LOD archive
+lod-list ARCHIVE: build
+    ./builddir/tools/lod-extract list {{ARCHIVE}}
+
+# Extract a single file from LOD archive
+lod-extract ARCHIVE FILENAME OUTPUT="": build
+    ./builddir/tools/lod-extract extract {{ARCHIVE}} {{FILENAME}} {{OUTPUT}}
+
+# Extract all files from LOD archive
+lod-extract-all ARCHIVE OUTPUT_DIR: build
+    ./builddir/tools/lod-extract extract-all {{ARCHIVE}} {{OUTPUT_DIR}}
+
+# ============================================================================
 # Testing
 # ============================================================================
 

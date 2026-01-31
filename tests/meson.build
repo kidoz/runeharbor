@@ -34,6 +34,7 @@ test_sources = files(
     'test_main.cpp',
     'util/console_logger_test.cpp',
     'platform/window_test.cpp',
+    'formats/lod_archive_test.cpp',
     # Note: application_test.cpp temporarily disabled due to SIGBUS issue
     # TODO: Debug and re-enable
     # 'engine/application_test.cpp',
@@ -44,6 +45,10 @@ test_util_sources = files(
     '../src/util/console_logger.cpp',
 )
 
+test_formats_sources = files(
+    '../src/formats/lod_archive.cpp',
+)
+
 # Note: engine sources temporarily excluded
 # test_engine_sources = files(
 #     '../src/engine/application.cpp',
@@ -52,16 +57,28 @@ test_util_sources = files(
 # Note: We don't include sdl_window.cpp in tests because it requires SDL
 # We use mocks instead for testing
 
+# Get zlib dependency for LOD tests
+zlib_dep = dependency('zlib',
+    version: '>=1.2.11',
+    required: false,
+    fallback: ['zlib', 'zlib_dep']
+)
+
+if not zlib_dep.found()
+    error('zlib is required for LOD archive tests')
+endif
+
 # Test executable
 test_exe = executable(
     'runeharbor_tests',
     sources: [
         test_sources,
         test_util_sources,
+        test_formats_sources,
         # test_engine_sources,  # Temporarily excluded
     ],
     include_directories: inc_dirs,
-    dependencies: [catch2_dep, sdl3_dep],
+    dependencies: [catch2_dep, sdl3_dep, zlib_dep],
     build_by_default: true,
 )
 

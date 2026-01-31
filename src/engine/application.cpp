@@ -1,16 +1,22 @@
 // SPDX-License-Identifier: MIT
 #include "application.hpp"
 
+#include <algorithm>
+#include <filesystem>
+#include <format>
+#include <vector>
+
 #include <SDL3/SDL.h>
 
 #include "../platform/iwindow.hpp"
 #include "../util/ilogger.hpp"
+#include "virtual_filesystem.hpp"
 
 namespace runeharbor::engine
 {
 
 Application::Application(util::ILogger& logger, platform::IWindow& window)
-    : logger(logger), window(window)
+    : logger(logger), window(window), vfs(std::make_unique<VirtualFileSystem>(logger))
 {
 }
 
@@ -40,6 +46,112 @@ bool Application::initialize(const platform::WindowConfig& windowConfig)
     return true;
 }
 
+bool Application::loadGameData(const std::filesystem::path& dataPath)
+{
+    logger.info(std::format("Loading game data from: {}", dataPath.string()));
+
+    if (!std::filesystem::exists(dataPath))
+    {
+        logger.error(std::format("Game data path does not exist: {}", dataPath.string()));
+        return false;
+    }
+
+    // Text/data archives
+    const std::vector<std::string> textArchives = {
+        "Events.lod",
+        "GAMES.LOD",
+    };
+
+    // Image archives (use different format)
+    const std::vector<std::string> imageArchives = {
+        "BITMAPS.LOD",
+        "ICONS.LOD",
+        "SPRITES.LOD",
+    };
+
+    size_t mountedCount = 0;
+
+    // Mount text archives
+    for (const auto& archiveName : textArchives)
+    {
+        auto archivePath = dataPath / archiveName;
+
+        // Try both exact case and lowercase
+        if (!std::filesystem::exists(archivePath))
+        {
+            std::string lowerName = archiveName;
+            std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
+            archivePath = dataPath / lowerName;
+        }
+
+        if (std::filesystem::exists(archivePath))
+        {
+            if (vfs->mountArchive(archivePath))
+            {
+                mountedCount++;
+            }
+        }
+        else
+        {
+            logger.debug(std::format("Text archive not found (skipping): {}", archiveName));
+        }
+    }
+
+    // Mount image archives
+    for (const auto& archiveName : imageArchives)
+    {
+        auto archivePath = dataPath / archiveName;
+
+        // Try both exact case and lowercase
+        if (!std::filesystem::exists(archivePath))
+        {
+            std::string lowerName = archiveName;
+            std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
+            archivePath = dataPath / lowerName;
+        }
+
+        if (std::filesystem::exists(archivePath))
+        {
+            if (vfs->mountImageArchive(archivePath))
+            {
+                mountedCount++;
+            }
+        }
+        else
+        {
+            logger.debug(std::format("Image archive not found (skipping): {}", archiveName));
+        }
+    }
+
+    if (mountedCount == 0)
+    {
+        logger.error("No LOD archives were mounted");
+        return false;
+    }
+
+    logger.info(std::format("Successfully mounted {} LOD archive(s)", mountedCount));
+
+    // Demo: list some files
+    auto allFiles = vfs->listAllFiles();
+    logger.info(std::format("Total files available: {}", allFiles.size()));
+
+    // Demo: read a test file if available
+    if (vfs->fileExists("Global.txt"))
+    {
+        auto data = vfs->readFile("Global.txt");
+        if (data.has_value())
+        {
+            logger.info(std::format("Demo: Successfully read Global.txt ({} bytes)",
+                                    data->size()));
+        }
+    }
+
+    gameDataLoaded = true;
+    return true;
+}
+
 void Application::run()
 {
     if (!initialized)
@@ -65,6 +177,14 @@ void Application::shutdown()
     }
 
     logger.info("Shutting down...");
+
+    // Unmount all game data
+    if (gameDataLoaded && vfs)
+    {
+        vfs->unmountAll();
+        gameDataLoaded = false;
+    }
+
     window.shutdown();
     logger.info("Shutdown complete");
 
