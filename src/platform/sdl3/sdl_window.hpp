@@ -24,6 +24,7 @@ class SdlWindow : public IWindow
     void processEvents() override;
     bool shouldClose() const override;
     void swapBuffers() override;
+    SDL_Window* getSDLWindow() override { return window; }
 
   private:
     util::ILogger& logger;

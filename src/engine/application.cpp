@@ -10,6 +10,7 @@
 
 #include "../platform/iwindow.hpp"
 #include "../util/ilogger.hpp"
+#include "../graphics/sdl_renderer.hpp"
 #include "virtual_filesystem.hpp"
 
 namespace runeharbor::engine
@@ -40,6 +41,17 @@ bool Application::initialize(const platform::WindowConfig& windowConfig)
     }
 
     logger.info("Window created successfully");
+
+    // Create renderer
+    SDL_Window* sdlWindow = window.getSDLWindow();
+    if (!sdlWindow)
+    {
+        logger.error("Failed to get SDL window for renderer creation");
+        return false;
+    }
+
+    renderer = std::make_unique<graphics::SDLRenderer>(sdlWindow, logger);
+    logger.info("Renderer created successfully");
     logger.info("Press ESC or close window to exit");
 
     initialized = true;
@@ -160,13 +172,31 @@ void Application::run()
         return;
     }
 
+    if (!renderer)
+    {
+        logger.error("Cannot run application: renderer not initialized");
+        return;
+    }
+
+    logger.info("Entering main loop...");
+
     // Main loop
     while (!window.shouldClose())
     {
         window.processEvents();
-        window.swapBuffers();
+
+        // Clear screen (dark blue)
+        renderer->clear(20, 30, 60, 255);
+
+        // TODO: Render game content here
+
+        // Present frame
+        renderer->present();
+
         SDL_Delay(16); // ~60 FPS
     }
+
+    logger.info("Exited main loop");
 }
 
 void Application::shutdown()

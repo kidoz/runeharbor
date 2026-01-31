@@ -35,6 +35,8 @@ class MockWindow : public IWindow
 
     void swapBuffers() override { swapCount++; }
 
+    SDL_Window* getSDLWindow() override { return nullptr; }
+
     // Test control
     bool shouldSucceed = true;
     bool closeRequested = false;

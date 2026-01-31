@@ -16,6 +16,11 @@ namespace runeharbor::util
 class ILogger;
 }
 
+namespace runeharbor::graphics
+{
+class IRenderer;
+}
+
 namespace runeharbor::engine
 {
 class VirtualFileSystem;
@@ -39,6 +44,7 @@ class Application
     util::ILogger& logger;
     platform::IWindow& window;
     std::unique_ptr<VirtualFileSystem> vfs;
+    std::unique_ptr<graphics::IRenderer> renderer;
     bool initialized = false;
     bool gameDataLoaded = false;
 };

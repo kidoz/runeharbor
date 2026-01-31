@@ -20,6 +20,13 @@ formats_sources = files(
     'formats/image_lod_archive.cpp',
 )
 
+# Graphics sources
+graphics_sources = files(
+    'graphics/palette.cpp',
+    'graphics/image.cpp',
+    'graphics/sdl_renderer.cpp',
+)
+
 # Dependencies
 zlib_dep = dependency('zlib',
     version: '>=1.2.11',
@@ -40,6 +47,7 @@ executable(
         platform_sources,
         engine_sources,
         formats_sources,
+        graphics_sources,
     ],
     include_directories: inc_dirs,
     dependencies: [sdl3_dep, zlib_dep],

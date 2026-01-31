@@ -4,6 +4,9 @@
 #include <cstdint>
 #include <string>
 
+// Forward declaration
+struct SDL_Window;
+
 namespace runeharbor::platform
 {
 
@@ -26,6 +29,9 @@ class IWindow
     virtual void processEvents() = 0;
     virtual bool shouldClose() const = 0;
     virtual void swapBuffers() = 0;
+
+    /// Get the underlying SDL window (for advanced use)
+    virtual SDL_Window* getSDLWindow() = 0;
 };
 
 } // namespace runeharbor::platform
