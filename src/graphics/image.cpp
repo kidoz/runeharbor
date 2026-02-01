@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "image.hpp"
+
 #include <stdexcept>
 
 namespace runeharbor::graphics
@@ -17,8 +18,8 @@ Image::Image(uint32_t width, uint32_t height) : width(width), height(height)
 }
 
 std::unique_ptr<Image> Image::fromPalettedData(const std::vector<uint8_t>& palettedData,
-                                                 uint32_t width, uint32_t height,
-                                                 const Palette& palette)
+                                               uint32_t width, uint32_t height,
+                                               const Palette& palette)
 {
     if (width == 0 || height == 0)
     {

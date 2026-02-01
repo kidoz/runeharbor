@@ -16,7 +16,7 @@ class Image;
 /// Abstract renderer interface for drawing 2D graphics
 class IRenderer
 {
-public:
+  public:
     virtual ~IRenderer() = default;
 
     /// Clear the screen with a color

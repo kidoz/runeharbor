@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: MIT
 #include "lod_archive.hpp"
+
 #include <algorithm>
-#include <cstring>
 #include <format>
 #include <map>
+
+#include <cstring>
 #include <zlib.h>
 
 namespace runeharbor::formats
 {
 
-LODArchive::LODArchive(util::ILogger& logger) : logger(logger)
-{
-}
+LODArchive::LODArchive(util::ILogger& logger) : logger(logger) {}
 
 LODArchive::~LODArchive()
 {
@@ -184,9 +184,9 @@ std::optional<std::vector<uint8_t>> LODArchive::extractFile(const std::string& f
     std::sort(sortedFiles.begin(), sortedFiles.end(),
               [](const auto& a, const auto& b) { return a.second.offset < b.second.offset; });
 
-    // Filter out files that are too large to fit in this archive BEFORE finding file index
-    // (They're likely stored in other LOD files like ICONS.LOD, BITMAPS.LOD)
-    constexpr uint32_t MAX_REASONABLE_SIZE = 100000; // 100KB threshold
+    // Filter out files with unreasonably large sizes (likely garbage/corrupt entries)
+    // Note: Map files can be several MB, so we use a high threshold
+    constexpr uint32_t MAX_REASONABLE_SIZE = 50000000; // 50MB threshold
     std::vector<std::pair<std::string, LODDirectoryEntry>> validFiles;
     for (const auto& pair : sortedFiles)
     {
@@ -196,7 +196,7 @@ std::optional<std::vector<uint8_t>> LODArchive::extractFile(const std::string& f
         }
         else
         {
-            logger.debug(std::format("Skipping large file: {} ({} bytes - likely in different LOD)",
+            logger.debug(std::format("Skipping corrupt entry: {} ({} bytes - unreasonably large)",
                                      pair.first, pair.second.size));
         }
     }
@@ -248,8 +248,8 @@ std::optional<std::vector<uint8_t>> LODArchive::extractFile(const std::string& f
     }
 
     const auto& targetEntry = sortedFiles[fileIndex].second;
-    logger.debug(std::format("Extracting file #{}: {} (compressed size: {})",
-                             fileIndex, sortedFiles[fileIndex].first, targetEntry.size));
+    logger.debug(std::format("Extracting file #{}: {} (compressed size: {})", fileIndex,
+                             sortedFiles[fileIndex].first, targetEntry.size));
 
     // Calculate position in data section
     // Size field semantics:
@@ -294,7 +294,8 @@ std::optional<std::vector<uint8_t>> LODArchive::extractFile(const std::string& f
     file.read(reinterpret_cast<char*>(&uncompressedSize), 4);
     file.read(reinterpret_cast<char*>(&unknown), 4);
 
-    logger.debug(std::format("File header: uncompressed={}, unknown={}", uncompressedSize, unknown));
+    logger.debug(
+        std::format("File header: uncompressed={}, unknown={}", uncompressedSize, unknown));
 
     // Read compressed data
     std::vector<uint8_t> compressed(targetEntry.size);
@@ -317,8 +318,8 @@ std::optional<std::vector<uint8_t>> LODArchive::extractFile(const std::string& f
 
     if (decompressed.size() != uncompressedSize)
     {
-        logger.error(std::format("Size mismatch: expected {}, got {}",
-                                  uncompressedSize, decompressed.size()));
+        logger.error(std::format("Size mismatch: expected {}, got {}", uncompressedSize,
+                                 decompressed.size()));
     }
 
     logger.info(std::format("Successfully extracted: {} ({} bytes decompressed)",
@@ -366,14 +367,13 @@ std::vector<uint8_t> LODArchive::decompressZlib(const std::vector<uint8_t>& data
         }
 
         size_t decompressedSize = bufferSize - stream.avail_out;
-        decompressed.insert(decompressed.end(), buffer.begin(),
-                            buffer.begin() + decompressedSize);
+        decompressed.insert(decompressed.end(), buffer.begin(), buffer.begin() + decompressedSize);
 
     } while (result != Z_STREAM_END);
 
     inflateEnd(&stream);
-    logger.debug(std::format("Decompressed {} bytes to {} bytes", data.size(),
-                             decompressed.size()));
+    logger.debug(
+        std::format("Decompressed {} bytes to {} bytes", data.size(), decompressed.size()));
     return decompressed;
 }
 

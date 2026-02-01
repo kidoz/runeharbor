@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include "sdl_renderer.hpp"
-#include "image.hpp"
+
 #include <SDL3/SDL.h>
+
+#include "image.hpp"
 
 namespace runeharbor::graphics
 {
@@ -73,12 +75,9 @@ void* SDLRenderer::createTexture(const Image& image)
     uint32_t height = image.getHeight();
 
     // Create SDL texture (RGBA format, streaming access)
-    SDL_Texture* texture = SDL_CreateTexture(
-        renderer,
-        SDL_PIXELFORMAT_RGBA32,
-        SDL_TEXTUREACCESS_STATIC,
-        static_cast<int>(width),
-        static_cast<int>(height));
+    SDL_Texture* texture =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC,
+                          static_cast<int>(width), static_cast<int>(height));
 
     if (!texture)
     {
@@ -90,7 +89,7 @@ void* SDLRenderer::createTexture(const Image& image)
     const uint8_t* pixels = image.data();
     int pitch = static_cast<int>(width * 4); // 4 bytes per pixel (RGBA)
 
-    if (SDL_UpdateTexture(texture, nullptr, pixels, pitch) != 0)
+    if (!SDL_UpdateTexture(texture, nullptr, pixels, pitch))
     {
         logger.error("Failed to update texture: " + std::string(SDL_GetError()));
         SDL_DestroyTexture(texture);

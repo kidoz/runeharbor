@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "palette.hpp"
 #include <cstdint>
 #include <memory>
 #include <vector>
+
+#include "palette.hpp"
 
 namespace runeharbor::graphics
 {
@@ -12,7 +13,7 @@ namespace runeharbor::graphics
 /// Represents an RGBA image (32-bit color)
 class Image
 {
-public:
+  public:
     Image(uint32_t width, uint32_t height);
 
     /// Convert from 8-bit paletted data to RGBA
@@ -25,8 +26,8 @@ public:
     /// Note: If palettedData contains mipmaps, only the first width×height bytes
     ///       are used (main texture level 0).
     static std::unique_ptr<Image> fromPalettedData(const std::vector<uint8_t>& palettedData,
-                                                     uint32_t width, uint32_t height,
-                                                     const Palette& palette);
+                                                   uint32_t width, uint32_t height,
+                                                   const Palette& palette);
 
     uint32_t getWidth() const { return width; }
     uint32_t getHeight() const { return height; }
@@ -43,7 +44,7 @@ public:
     /// Get size of RGBA data in bytes
     size_t dataSize() const { return rgbaData.size(); }
 
-private:
+  private:
     uint32_t width;
     uint32_t height;
     std::vector<uint8_t> rgbaData; // 4 bytes per pixel (RGBA)

@@ -10,7 +10,7 @@ namespace runeharbor::graphics
 /// Represents a 256-color palette for converting paletted images to RGBA
 class Palette
 {
-public:
+  public:
     struct Color
     {
         uint8_t r;
@@ -39,7 +39,7 @@ public:
     /// Get pointer to color array
     const Color* data() const;
 
-private:
+  private:
     Color colors[256];
 };
 

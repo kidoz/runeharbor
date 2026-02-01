@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "../util/ilogger.hpp"
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <optional>
 #include <string>
 #include <vector>
+
+#include <fstream>
+
+#include "../util/ilogger.hpp"
 
 namespace runeharbor::formats
 {
@@ -28,41 +30,40 @@ namespace runeharbor::formats
 #pragma pack(push, 1)
 struct ImageLODHeader
 {
-    char magic[4];   // "LOD\0"
-    char gameId[4];  // "MMVI" for MM7
+    char magic[4];  // "LOD\0"
+    char gameId[4]; // "MMVI" for MM7
     uint8_t unknown[248];
 };
 
 struct ImageLODDirectoryEntry
 {
-    char shortName[4];        // Short filename (up to 4 chars, null-padded)
-    uint32_t sortKey;         // Sort key (not used for offset calculation!)
-    char extensionMarker[8];  // "LIB." in UTF-16 LE (0x4C 0x00 0x49 0x00 0x42 0x00 0x2E 0x00)
-                              // or zeros for Type 2 files
-    uint32_t size1;           // Unknown/unused
-    uint32_t size2;           // COMPRESSED size INCLUDING 48-byte header
-    uint32_t reserved[2];     // Reserved (zeros)
+    char shortName[4];       // Short filename (up to 4 chars, null-padded)
+    uint32_t sortKey;        // Sort key (not used for offset calculation!)
+    char extensionMarker[8]; // "LIB." in UTF-16 LE (0x4C 0x00 0x49 0x00 0x42 0x00 0x2E 0x00)
+                             // or zeros for Type 2 files
+    uint32_t size1;          // Unknown/unused
+    uint32_t size2;          // COMPRESSED size INCLUDING 48-byte header
+    uint32_t reserved[2];    // Reserved (zeros)
 };
 
 struct ImageFileHeader
 {
-    char name[16];            // File name (offset 0-15)
-    uint32_t unknown1;        // Unknown field (offset 16-19)
-    uint32_t unknown2;        // Unknown field (offset 20-23)
-    uint16_t width;           // Image width (offset 24-25, power of 2)
-    uint16_t height;          // Image height (offset 26-27, power of 2)
-    uint16_t widthLn2;        // log2(width) (offset 28-29)
-    uint16_t heightLn2;       // log2(height) (offset 30-31)
-    uint32_t palette1;        // Palette ID 1 (offset 32-35)
-    uint32_t palette2;        // Palette ID 2 (offset 36-39)
+    char name[16];             // File name (offset 0-15)
+    uint32_t unknown1;         // Unknown field (offset 16-19)
+    uint32_t unknown2;         // Unknown field (offset 20-23)
+    uint16_t width;            // Image width (offset 24-25, power of 2)
+    uint16_t height;           // Image height (offset 26-27, power of 2)
+    uint16_t widthLn2;         // log2(width) (offset 28-29)
+    uint16_t heightLn2;        // log2(height) (offset 30-31)
+    uint32_t palette1;         // Palette ID 1 (offset 32-35)
+    uint32_t palette2;         // Palette ID 2 (offset 36-39)
     uint32_t decompressedSize; // Decompressed size (offset 40-43, includes mipmaps!)
-    uint32_t textureSize;     // Unknown field (offset 44-47)
+    uint32_t textureSize;      // Unknown field (offset 44-47)
 };
 #pragma pack(pop)
 
 static_assert(sizeof(ImageLODHeader) == 256, "ImageLODHeader must be 256 bytes");
-static_assert(sizeof(ImageLODDirectoryEntry) == 32,
-              "ImageLODDirectoryEntry must be 32 bytes");
+static_assert(sizeof(ImageLODDirectoryEntry) == 32, "ImageLODDirectoryEntry must be 32 bytes");
 static_assert(sizeof(ImageFileHeader) == 48, "ImageFileHeader must be 48 bytes");
 
 enum class ImageEntryType
@@ -73,7 +74,7 @@ enum class ImageEntryType
 
 class ImageLODArchive
 {
-public:
+  public:
     explicit ImageLODArchive(util::ILogger& logger);
     ~ImageLODArchive();
 
@@ -117,7 +118,14 @@ public:
      */
     std::optional<std::vector<uint8_t>> extractFile(const std::string& filename);
 
-private:
+    /**
+     * Get file header information (dimensions, palette, etc.)
+     * @param filename Name of the file
+     * @return File header, or nullopt if not found or read failed
+     */
+    std::optional<ImageFileHeader> getFileInfo(const std::string& filename);
+
+  private:
     /**
      * Read and validate LOD header
      */

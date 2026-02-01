@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "../util/ilogger.hpp"
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <optional>
 #include <string>
 #include <vector>
+
+#include <fstream>
+
+#include "../util/ilogger.hpp"
 
 namespace runeharbor::formats
 {
@@ -15,24 +17,24 @@ namespace runeharbor::formats
 #pragma pack(push, 1)
 struct LODHeader
 {
-    char magic[4];      // "LOD\0"
-    char gameId[4];     // "MMVI", "MMVII", or "MMVIII"
+    char magic[4];         // "LOD\0"
+    char gameId[4];        // "MMVI", "MMVII", or "MMVIII"
     uint8_t reserved[248]; // Reserved header space
 };
 
 struct LODDirectoryEntry
 {
-    char filename[16];  // Null-terminated filename (uppercase)
-    uint32_t offset;    // Absolute offset from start of file
-    uint32_t size;      // Size of file in bytes
-    uint32_t unknown1;  // Possibly compression flags or timestamp
-    uint32_t unknown2;  // Possibly additional metadata
+    char filename[16]; // Null-terminated filename (uppercase)
+    uint32_t offset;   // Absolute offset from start of file
+    uint32_t size;     // Size of file in bytes
+    uint32_t unknown1; // Possibly compression flags or timestamp
+    uint32_t unknown2; // Possibly additional metadata
 };
 #pragma pack(pop)
 
 class LODArchive
 {
-public:
+  public:
     explicit LODArchive(util::ILogger& logger);
     ~LODArchive();
 
@@ -49,7 +51,7 @@ public:
     std::vector<std::string> listFiles() const;
     std::optional<std::vector<uint8_t>> extractFile(const std::string& filename);
 
-private:
+  private:
     bool readHeader();
     bool readDirectory();
     std::vector<uint8_t> decompressZlib(const std::vector<uint8_t>& data);

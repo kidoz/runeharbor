@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: MIT
 #include "virtual_filesystem.hpp"
-#include "../formats/lod_archive.hpp"
-#include "../formats/image_lod_archive.hpp"
-#include "../util/ilogger.hpp"
+
 #include <algorithm>
 #include <format>
+
+#include "../formats/image_lod_archive.hpp"
+#include "../formats/lod_archive.hpp"
+#include "../util/ilogger.hpp"
 
 namespace runeharbor::engine
 {
 
-VirtualFileSystem::VirtualFileSystem(util::ILogger& logger) : logger(logger)
-{
-}
+VirtualFileSystem::VirtualFileSystem(util::ILogger& logger) : logger(logger) {}
 
 VirtualFileSystem::~VirtualFileSystem()
 {
@@ -80,8 +80,8 @@ std::optional<std::vector<uint8_t>> VirtualFileSystem::readFile(const std::strin
         auto data = archives[i]->extractFile(filename);
         if (data.has_value())
         {
-            logger.debug(std::format("Read {} from text archive ({} bytes)",
-                                     filename, data->size()));
+            logger.debug(
+                std::format("Read {} from text archive ({} bytes)", filename, data->size()));
             return data;
         }
     }
@@ -92,8 +92,8 @@ std::optional<std::vector<uint8_t>> VirtualFileSystem::readFile(const std::strin
         auto data = imageArchives[i]->extractFile(filename);
         if (data.has_value())
         {
-            logger.debug(std::format("Read {} from image archive ({} bytes)",
-                                     filename, data->size()));
+            logger.debug(
+                std::format("Read {} from image archive ({} bytes)", filename, data->size()));
             return data;
         }
     }
@@ -155,6 +155,19 @@ std::vector<std::string> VirtualFileSystem::listAllFiles() const
 size_t VirtualFileSystem::getMountedArchiveCount() const
 {
     return archives.size() + imageArchives.size();
+}
+
+std::optional<formats::ImageFileHeader> VirtualFileSystem::getImageInfo(const std::string& filename)
+{
+    for (auto& archive : imageArchives)
+    {
+        auto info = archive->getFileInfo(filename);
+        if (info.has_value())
+        {
+            return info;
+        }
+    }
+    return std::nullopt;
 }
 
 } // namespace runeharbor::engine

@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: MIT
 #include "application.hpp"
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <filesystem>
 #include <format>
 #include <vector>
 
-#include <SDL3/SDL.h>
-
+#include "../graphics/sdl_renderer.hpp"
 #include "../platform/iwindow.hpp"
 #include "../util/ilogger.hpp"
-#include "../graphics/sdl_renderer.hpp"
 #include "virtual_filesystem.hpp"
 
 namespace runeharbor::engine
@@ -155,8 +155,7 @@ bool Application::loadGameData(const std::filesystem::path& dataPath)
         auto data = vfs->readFile("Global.txt");
         if (data.has_value())
         {
-            logger.info(std::format("Demo: Successfully read Global.txt ({} bytes)",
-                                    data->size()));
+            logger.info(std::format("Demo: Successfully read Global.txt ({} bytes)", data->size()));
         }
     }
 

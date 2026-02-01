@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "irenderer.hpp"
 #include "../util/ilogger.hpp"
+#include "irenderer.hpp"
 
 struct SDL_Window;
 struct SDL_Renderer;
@@ -13,7 +13,7 @@ namespace runeharbor::graphics
 /// SDL3-based 2D renderer implementation
 class SDLRenderer : public IRenderer
 {
-public:
+  public:
     /// Create renderer for an SDL window
     /// @param window SDL window to render to
     /// @param logger Logger for diagnostics
@@ -34,7 +34,7 @@ public:
     void renderTexture(void* texture, int x, int y, int width = 0, int height = 0) override;
     SDL_Renderer* getSDLRenderer() override { return renderer; }
 
-private:
+  private:
     util::ILogger& logger;
     SDL_Renderer* renderer = nullptr;
 };

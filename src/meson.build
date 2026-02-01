@@ -18,6 +18,10 @@ engine_sources = files(
 formats_sources = files(
     'formats/lod_archive.cpp',
     'formats/image_lod_archive.cpp',
+    'formats/sprite_lod_archive.cpp',
+    'formats/game_lod_archive.cpp',
+    'formats/blv_map.cpp',
+    'formats/odm_map.cpp',
 )
 
 # Graphics sources
@@ -25,6 +29,8 @@ graphics_sources = files(
     'graphics/palette.cpp',
     'graphics/image.cpp',
     'graphics/sdl_renderer.cpp',
+    'graphics/camera.cpp',
+    'graphics/line_renderer.cpp',
 )
 
 # Dependencies

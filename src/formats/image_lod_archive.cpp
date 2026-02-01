@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: MIT
 #include "image_lod_archive.hpp"
+
 #include <algorithm>
-#include <cstring>
 #include <format>
+
+#include <cstring>
 #include <zlib.h>
 
 namespace runeharbor::formats
 {
 
-ImageLODArchive::ImageLODArchive(util::ILogger& logger) : logger(logger)
-{
-}
+ImageLODArchive::ImageLODArchive(util::ILogger& logger) : logger(logger) {}
 
 ImageLODArchive::~ImageLODArchive()
 {
@@ -47,8 +47,7 @@ bool ImageLODArchive::open(const std::filesystem::path& path)
     }
 
     opened = true;
-    logger.info(std::format("Successfully loaded image LOD archive with {} files",
-                            entries.size()));
+    logger.info(std::format("Successfully loaded image LOD archive with {} files", entries.size()));
 
     return true;
 }
@@ -194,11 +193,8 @@ std::streamoff ImageLODArchive::calculateDataOffset(const ImageLODDirectoryEntry
     constexpr std::streamoff actualDataStart = 0xCAE0;
 
     // Find target entry index in directory order
-    auto it = std::find_if(
-        entries.begin(), entries.end(),
-        [&targetEntry](const auto& e) {
-            return std::strncmp(e.shortName, targetEntry.shortName, 4) == 0;
-        });
+    auto it = std::find_if(entries.begin(), entries.end(), [&targetEntry](const auto& e)
+                           { return std::strncmp(e.shortName, targetEntry.shortName, 4) == 0; });
 
     if (it == entries.end())
     {
@@ -268,22 +264,55 @@ std::optional<std::vector<uint8_t>> ImageLODArchive::extractFile(const std::stri
     }
 
     ImageEntryType entryType = detectEntryType(*targetEntry);
-    logger.debug(std::format("Extracting file: {} (type: {}, size1: {}, size2: {})",
-                             filename,
+    logger.debug(std::format("Extracting file: {} (type: {}, size1: {}, size2: {})", filename,
                              entryType == ImageEntryType::CustomFormat ? "Custom" : "External",
                              targetEntry->size1, targetEntry->size2));
 
-    // Calculate file offset
+    // Handle External format files (palettes, PCX, etc.) differently
+    if (entryType == ImageEntryType::ExternalFormat)
+    {
+        // For External format, size1 contains the file offset, size2 contains total size
+        // The data includes a 48-byte header followed by raw (uncompressed) data
+        std::streamoff dataOffset = static_cast<std::streamoff>(targetEntry->size1);
+        logger.debug(
+            std::format("External file offset: 0x{:X}", static_cast<uint64_t>(dataOffset)));
+
+        file.seekg(dataOffset, std::ios::beg);
+        if (!file.good())
+        {
+            logger.error(
+                std::format("Failed to seek to offset 0x{:X}", static_cast<uint64_t>(dataOffset)));
+            return std::nullopt;
+        }
+
+        // Skip the 48-byte header for External files
+        file.seekg(sizeof(ImageFileHeader), std::ios::cur);
+
+        // Read raw data (size2 - header size)
+        uint32_t dataSize = targetEntry->size2 - sizeof(ImageFileHeader);
+        std::vector<uint8_t> data(dataSize);
+        file.read(reinterpret_cast<char*>(data.data()), dataSize);
+
+        if (!file.good())
+        {
+            logger.error(std::format("Failed to read {} bytes", dataSize));
+            return std::nullopt;
+        }
+
+        logger.debug(std::format("Read {} raw bytes from External file", data.size()));
+        return data;
+    }
+
+    // Calculate file offset for Custom format files
     std::streamoff dataOffset = calculateDataOffset(*targetEntry);
-    logger.debug(std::format("Calculated data offset: 0x{:X}",
-                             static_cast<uint64_t>(dataOffset)));
+    logger.debug(std::format("Calculated data offset: 0x{:X}", static_cast<uint64_t>(dataOffset)));
 
     // Seek to file header
     file.seekg(dataOffset, std::ios::beg);
     if (!file.good())
     {
-        logger.error(std::format("Failed to seek to offset 0x{:X}",
-                                 static_cast<uint64_t>(dataOffset)));
+        logger.error(
+            std::format("Failed to seek to offset 0x{:X}", static_cast<uint64_t>(dataOffset)));
         return std::nullopt;
     }
 
@@ -300,9 +329,8 @@ std::optional<std::vector<uint8_t>> ImageLODArchive::extractFile(const std::stri
     // Log image info
     std::string headerName(imgHeader.name, 16);
     headerName = headerName.substr(0, headerName.find('\0'));
-    logger.debug(std::format("Image header: name='{}', size={}x{}, decompSize={}",
-                             headerName, imgHeader.width, imgHeader.height,
-                             imgHeader.decompressedSize));
+    logger.debug(std::format("Image header: name='{}', size={}x{}, decompSize={}", headerName,
+                             imgHeader.width, imgHeader.height, imgHeader.decompressedSize));
 
     // Read compressed data (size2 includes the 48-byte header)
     uint32_t compressedSize = targetEntry->size2 - sizeof(ImageFileHeader);
@@ -318,23 +346,21 @@ std::optional<std::vector<uint8_t>> ImageLODArchive::extractFile(const std::stri
     // Check for zlib magic bytes
     if (compressed.size() < 2 || compressed[0] != 0x78 || compressed[1] != 0x9C)
     {
-        logger.warning(std::format("File '{}' doesn't have zlib header - may not be compressed",
-                                   filename));
+        logger.warning(
+            std::format("File '{}' doesn't have zlib header - may not be compressed", filename));
         // Return raw data if not compressed
         return compressed;
     }
 
     // Decompress with zlib
-    logger.debug(std::format("Decompressing {} bytes -> {} bytes",
-                             compressedSize, imgHeader.decompressedSize));
+    logger.debug(std::format("Decompressing {} bytes -> {} bytes", compressedSize,
+                             imgHeader.decompressedSize));
 
     std::vector<uint8_t> decompressed(imgHeader.decompressedSize);
 
     // Use zlib uncompress function
     unsigned long destLen = imgHeader.decompressedSize;
-    int result = uncompress(
-        decompressed.data(), &destLen,
-        compressed.data(), compressed.size());
+    int result = uncompress(decompressed.data(), &destLen, compressed.data(), compressed.size());
 
     if (result != Z_OK)
     {
@@ -344,14 +370,84 @@ std::optional<std::vector<uint8_t>> ImageLODArchive::extractFile(const std::stri
 
     if (destLen != imgHeader.decompressedSize)
     {
-        logger.warning(std::format("Decompressed size mismatch: got {}, expected {}",
-                                   destLen, imgHeader.decompressedSize));
+        logger.warning(std::format("Decompressed size mismatch: got {}, expected {}", destLen,
+                                   imgHeader.decompressedSize));
         decompressed.resize(destLen);
     }
 
-    logger.debug(std::format("Successfully decompressed {} bytes (includes mipmaps)",
-                             decompressed.size()));
+    logger.debug(
+        std::format("Successfully decompressed {} bytes (includes mipmaps)", decompressed.size()));
     return decompressed;
+}
+
+std::optional<ImageFileHeader> ImageLODArchive::getFileInfo(const std::string& filename)
+{
+    if (!opened)
+    {
+        logger.error("Archive not open");
+        return std::nullopt;
+    }
+
+    // Find entry (case-insensitive search)
+    const ImageLODDirectoryEntry* targetEntry = nullptr;
+    for (const auto& entry : entries)
+    {
+        std::string entryName = buildFilename(entry);
+
+        // Case-insensitive comparison
+        if (entryName.size() != filename.size())
+            continue;
+
+        bool match = true;
+        for (size_t i = 0; i < entryName.size(); i++)
+        {
+            if (std::tolower(entryName[i]) != std::tolower(filename[i]))
+            {
+                match = false;
+                break;
+            }
+        }
+
+        if (match)
+        {
+            targetEntry = &entry;
+            break;
+        }
+    }
+
+    if (!targetEntry)
+    {
+        return std::nullopt;
+    }
+
+    // External format files don't have the same header structure
+    ImageEntryType entryType = detectEntryType(*targetEntry);
+    if (entryType == ImageEntryType::ExternalFormat)
+    {
+        // For External files, return nullopt as they don't have image dimensions
+        return std::nullopt;
+    }
+
+    // Calculate file offset for Custom format files
+    std::streamoff dataOffset = calculateDataOffset(*targetEntry);
+
+    // Seek to file header
+    file.seekg(dataOffset, std::ios::beg);
+    if (!file.good())
+    {
+        return std::nullopt;
+    }
+
+    // Read 48-byte image header
+    ImageFileHeader imgHeader;
+    file.read(reinterpret_cast<char*>(&imgHeader), sizeof(ImageFileHeader));
+
+    if (!file.good())
+    {
+        return std::nullopt;
+    }
+
+    return imgHeader;
 }
 
 } // namespace runeharbor::formats

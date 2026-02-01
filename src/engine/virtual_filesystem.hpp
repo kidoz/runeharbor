@@ -18,7 +18,8 @@ namespace runeharbor::formats
 {
 class LODArchive;
 class ImageLODArchive;
-}
+struct ImageFileHeader;
+} // namespace runeharbor::formats
 
 namespace runeharbor::engine
 {
@@ -36,7 +37,7 @@ namespace runeharbor::engine
 ///   auto data = vfs.readFile("SPELLS.TXT");
 class VirtualFileSystem
 {
-public:
+  public:
     explicit VirtualFileSystem(util::ILogger& logger);
     ~VirtualFileSystem();
 
@@ -70,7 +71,11 @@ public:
     /// Get number of mounted archives
     size_t getMountedArchiveCount() const;
 
-private:
+    /// Get image file header info (dimensions, palette, etc.)
+    /// Only works for files in image archives (BITMAPS.LOD, etc.)
+    std::optional<formats::ImageFileHeader> getImageInfo(const std::string& filename);
+
+  private:
     util::ILogger& logger;
 
     // Mounted text/data archives (Events.lod, etc.) - in mount order
