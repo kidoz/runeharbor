@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <format>
+#include <limits>
+#include <utility>
 
 #include <cstring>
 
@@ -11,8 +13,11 @@ namespace runeharbor::formats
 
 BLVMap::BLVMap(util::ILogger& logger) : logger(logger) {}
 
-bool BLVMap::parse(const std::vector<uint8_t>& data)
+bool BLVMap::parse(const std::vector<uint8_t>& data, ProgressCallback progress)
 {
+    progressCallback = std::move(progress);
+    reportProgress(0.02f);
+
     if (data.size() < sizeof(BLVHeader) + 16)
     {
         logger.error("BLV data too small for header");
@@ -29,6 +34,8 @@ bool BLVMap::parse(const std::vector<uint8_t>& data)
         return false;
     }
 
+    reportProgress(0.1f);
+
     // BLV file layout (MM7):
     // 0x00-0x4B: Header (76 bytes) - version, name, sky
     // 0x4C-0x87: Reserved + geometry info
@@ -44,30 +51,64 @@ bool BLVMap::parse(const std::vector<uint8_t>& data)
         logger.warning("Failed to parse vertices, continuing with partial data");
     }
 
+    reportProgress(0.35f);
+
     // Parse faces right after vertices (96-byte structures)
     if (!parseFaces(data, offset))
     {
         logger.warning("Failed to parse faces, continuing with partial data");
     }
 
+    reportProgress(0.6f);
+
     // Try to parse sectors (may be after face data)
-    size_t sectorOffset = offset;
-    if (!parseSectors(data, sectorOffset))
+    size_t cursor = offset;
+    if (!parseSectors(data, cursor))
     {
         logger.debug("Could not parse sectors at expected offset");
+        cursor = offset;
     }
 
-    // Try to parse lights
-    if (!parseLights(data, offset))
+    // Try to parse face extra table
+    if (!parseFaceExtras(data, cursor))
+    {
+        logger.debug("Could not parse face extras");
+    }
+
+    // Try to parse doors
+    if (!parseDoors(data, cursor))
+    {
+        logger.debug("Could not parse doors");
+    }
+
+    // Try to parse spawns
+    if (!parseSpawns(data, cursor))
+    {
+        logger.debug("Could not parse spawns");
+    }
+
+    // Try to parse items
+    if (!parseItems(data, cursor))
+    {
+        logger.debug("Could not parse items");
+    }
+
+    reportProgress(0.8f);
+
+    // Try to parse lights (prefer header count; otherwise heuristic)
+    if (!parseLights(data, cursor))
     {
         logger.debug("Could not parse lights");
     }
+
+    reportProgress(0.95f);
 
     logger.info(std::format(
         "Parsed BLV map: '{}' with {} vertices, {} faces, {} sectors, {} lights",
         mapData.levelName.empty() ? "(unnamed)" : mapData.levelName, mapData.vertices.size(),
         mapData.faces.size(), mapData.sectors.size(), mapData.lights.size()));
 
+    reportProgress(1.0f);
     return true;
 }
 
@@ -186,6 +227,9 @@ bool BLVMap::parseVertices(const std::vector<uint8_t>& data, size_t& offset)
         int16_t minX = mapData.vertices[0].x, maxX = minX;
         int16_t minY = mapData.vertices[0].y, maxY = minY;
         int16_t minZ = mapData.vertices[0].z, maxZ = minZ;
+        int64_t sumX = 0;
+        int64_t sumY = 0;
+        int64_t sumZ = 0;
 
         for (const auto& v : mapData.vertices)
         {
@@ -195,10 +239,19 @@ bool BLVMap::parseVertices(const std::vector<uint8_t>& data, size_t& offset)
             maxY = std::max(maxY, v.y);
             minZ = std::min(minZ, v.z);
             maxZ = std::max(maxZ, v.z);
+            sumX += v.x;
+            sumY += v.y;
+            sumZ += v.z;
         }
+
+        const double invCount = 1.0 / static_cast<double>(mapData.vertices.size());
+        const double avgX = static_cast<double>(sumX) * invCount;
+        const double avgY = static_cast<double>(sumY) * invCount;
+        const double avgZ = static_cast<double>(sumZ) * invCount;
 
         logger.debug(std::format("  Bounds: X[{}, {}] Y[{}, {}] Z[{}, {}]", minX, maxX, minY, maxY,
                                  minZ, maxZ));
+        logger.debug(std::format("  Average: X[{:.2f}] Y[{:.2f}] Z[{:.2f}]", avgX, avgY, avgZ));
     }
 
     return !mapData.vertices.empty();
@@ -221,50 +274,90 @@ bool BLVMap::parseFaces(const std::vector<uint8_t>& data, size_t& offset)
 
     constexpr size_t faceStructSize = 96;
 
-    // There may be some padding/header between vertices and faces
-    // Search forward for the start of face data (valid face structure)
-    size_t searchStart = offset;
-    size_t searchEnd = std::min(offset + 100, data.size() - faceStructSize);
-
-    for (size_t searchOff = searchStart; searchOff < searchEnd; searchOff += 2)
-    {
-        const uint8_t* candidate = data.data() + searchOff;
+    auto isValidFaceAt = [&](size_t off) -> bool {
+        if (off + faceStructSize > data.size())
+        {
+            return false;
+        }
+        const uint8_t* candidate = data.data() + off;
         int32_t nx = *reinterpret_cast<const int32_t*>(candidate);
         int32_t ny = *reinterpret_cast<const int32_t*>(candidate + 4);
         int32_t nz = *reinterpret_cast<const int32_t*>(candidate + 8);
         uint8_t nv = candidate[55];
 
         // Normal components should be in fixed-point range for unit vectors
-        // Check that at least one component has magnitude close to 65536
-        // (allowing for some range since normals may not be perfectly axis-aligned)
         int32_t absNx = nx < 0 ? -nx : nx;
         int32_t absNy = ny < 0 ? -ny : ny;
         int32_t absNz = nz < 0 ? -nz : nz;
         int32_t maxComponent = std::max({absNx, absNy, absNz});
 
         // Valid unit normal has max component between ~20000 and 70000
-        // (45-degree normal has components ~46340 each)
         bool validNormal = (maxComponent >= 20000 && maxComponent <= 70000 && absNx <= 70000 &&
                             absNy <= 70000 && absNz <= 70000);
         bool validVerts = (nv >= 3 && nv <= 30);
 
-        if (validNormal && validVerts)
+        return validNormal && validVerts;
+    };
+
+    // Prefer deterministic parsing based on header counts; fall back to heuristic scan.
+    if (mapData.faceCount > 0)
+    {
+        size_t expectedEnd = offset + static_cast<size_t>(mapData.faceCount) * faceStructSize;
+        if (expectedEnd > data.size() || !isValidFaceAt(offset))
         {
-            offset = searchOff;
-            logger.debug(std::format("Found face data at 0x{:X} ({} bytes after vertices)", offset,
-                                     offset - searchStart));
-            break;
+            // There may be padding between vertices and faces; scan forward a bit.
+            size_t searchStart = offset;
+            size_t searchEnd = std::min(offset + 128, data.size() - faceStructSize);
+
+            for (size_t searchOff = searchStart; searchOff < searchEnd; searchOff += 2)
+            {
+                if (isValidFaceAt(searchOff))
+                {
+                    offset = searchOff;
+                    logger.debug(std::format("Found face data at 0x{:X} ({} bytes after vertices)",
+                                             offset, offset - searchStart));
+                    break;
+                }
+            }
+        }
+    }
+    else
+    {
+        // No reliable face count; scan for first valid face
+        size_t searchStart = offset;
+        size_t searchEnd = std::min(offset + 128, data.size() - faceStructSize);
+        for (size_t searchOff = searchStart; searchOff < searchEnd; searchOff += 2)
+        {
+            if (isValidFaceAt(searchOff))
+            {
+                offset = searchOff;
+                logger.debug(std::format("Found face data at 0x{:X} ({} bytes after vertices)", offset,
+                                         offset - searchStart));
+                break;
+            }
         }
     }
 
     size_t faceStartOffset = offset;
     uint32_t parsedFaces = 0;
     constexpr uint32_t maxFaces = 50000;
+    uint32_t faceLimit = (mapData.faceCount > 0) ? mapData.faceCount : maxFaces;
 
-    mapData.faces.reserve(std::min(mapData.faceCount, maxFaces));
+    mapData.faces.reserve(std::min(faceLimit, maxFaces));
 
-    while (offset + faceStructSize <= data.size() && parsedFaces < maxFaces)
+    uint64_t totalRawIndices = 0;
+    uint64_t outOfRangeIndices = 0;
+    uint64_t facesWithOutOfRange = 0;
+    uint16_t minRawIndex = std::numeric_limits<uint16_t>::max();
+    uint16_t maxRawIndex = 0;
+    bool haveInRangeRaw = false;
+
+    while (offset + faceStructSize <= data.size() && parsedFaces < faceLimit)
     {
+        if (!isValidFaceAt(offset))
+        {
+            break;
+        }
         const uint8_t* faceData = data.data() + offset;
 
         // Read face header
@@ -273,42 +366,54 @@ bool BLVMap::parseFaces(const std::vector<uint8_t>& data, size_t& offset)
         int32_t normalZ = *reinterpret_cast<const int32_t*>(faceData + 0x08);
         uint8_t numVertices = faceData[55]; // numVertices at byte 55 (0x37)
 
-        // Validate face data
-        // Normal components should be fixed-point for unit vectors
-        // Check that at least one component has magnitude close to 65536
-        int32_t absNx = normalX < 0 ? -normalX : normalX;
-        int32_t absNy = normalY < 0 ? -normalY : normalY;
-        int32_t absNz = normalZ < 0 ? -normalZ : normalZ;
-        int32_t maxComponent = std::max({absNx, absNy, absNz});
-
-        bool validNormal = (maxComponent >= 20000 && maxComponent <= 70000 && absNx <= 70000 &&
-                            absNy <= 70000 && absNz <= 70000);
-
-        bool validVertexCount = (numVertices >= 3 && numVertices <= 30);
-
-        if (!validNormal || !validVertexCount)
-        {
-            // End of face data
-            break;
-        }
-
         ParsedFace face;
         face.normalX = normalX;
         face.normalY = normalY;
         face.normalZ = normalZ;
         face.normalDistance = *reinterpret_cast<const int32_t*>(faceData + 0x0C);
+        face.zCalc1 = *reinterpret_cast<const int32_t*>(faceData + 0x10);
+        face.zCalc2 = *reinterpret_cast<const int32_t*>(faceData + 0x14);
+        face.zCalc3 = *reinterpret_cast<const int32_t*>(faceData + 0x18);
         face.attributes = *reinterpret_cast<const uint32_t*>(faceData + 0x1C);
+        face.numVertices = numVertices;
         face.textureId = *reinterpret_cast<const int16_t*>(faceData + 56); // textureBitmapId
+        face.faceExtraId = *reinterpret_cast<const int16_t*>(faceData + 58); // faceExtraId
 
-        // Extract vertex indices from embedded data (bytes 60+)
-        // The first few uint16 values at bytes 60+ appear to contain vertex indices
+        // Store embedded raw bytes (0x3C-0x5F)
+        std::memcpy(face.embeddedData.data(), faceData + 0x3C, face.embeddedData.size());
+
+        // Extract vertex indices from embedded data (bytes 0x3C+)
         face.vertexIndices.resize(numVertices);
+        const uint16_t* embeddedIndices = reinterpret_cast<const uint16_t*>(faceData + 0x3C);
+        const size_t embeddedCount = face.embeddedData.size() / sizeof(uint16_t);
 
-        const uint16_t* embeddedIndices = reinterpret_cast<const uint16_t*>(faceData + 60);
+        // Quick sanity: inspect the first numVertices raw indices for ranges
+        bool faceOutOfRange = false;
+        const size_t rawCount = std::min<size_t>(numVertices, embeddedCount);
+        for (size_t i = 0; i < rawCount; i++)
+        {
+            uint16_t idx = embeddedIndices[i];
+            totalRawIndices++;
+            if (idx >= mapData.vertices.size())
+            {
+                outOfRangeIndices++;
+                faceOutOfRange = true;
+            }
+            else
+            {
+                haveInRangeRaw = true;
+                minRawIndex = std::min(minRawIndex, idx);
+                maxRawIndex = std::max(maxRawIndex, idx);
+            }
+        }
+        if (faceOutOfRange)
+        {
+            facesWithOutOfRange++;
+        }
 
-        // Try to find numVertices valid indices in the first 12 uint16 values
+        // Heuristic: take the first numVertices indices that are within range
         uint8_t foundIndices = 0;
-        for (int i = 0; i < 12 && foundIndices < numVertices; i++)
+        for (size_t i = 0; i < embeddedCount && foundIndices < numVertices; i++)
         {
             uint16_t idx = embeddedIndices[i];
             if (idx < mapData.vertices.size())
@@ -317,10 +422,55 @@ bool BLVMap::parseFaces(const std::vector<uint8_t>& data, size_t& offset)
             }
         }
 
-        // If we didn't find enough indices, fill remaining with sequential
+        // Fill remaining indices with 0 to avoid out-of-range access
         for (uint8_t i = foundIndices; i < numVertices; i++)
         {
-            face.vertexIndices[i] = static_cast<uint16_t>(i % mapData.vertices.size());
+            face.vertexIndices[i] = 0;
+        }
+
+        // Best-effort UV/offset parsing from embedded words
+        if (numVertices > 0 && embeddedCount >= numVertices)
+        {
+            size_t cursor = numVertices;
+            size_t remaining = (embeddedCount > cursor) ? (embeddedCount - cursor) : 0;
+
+            if (remaining >= static_cast<size_t>(numVertices) * 4)
+            {
+                face.xOffsets.resize(numVertices);
+                face.yOffsets.resize(numVertices);
+                face.uCoords.resize(numVertices);
+                face.vCoords.resize(numVertices);
+
+                for (uint8_t i = 0; i < numVertices; i++)
+                {
+                    face.xOffsets[i] = static_cast<int16_t>(embeddedIndices[cursor++]);
+                }
+                for (uint8_t i = 0; i < numVertices; i++)
+                {
+                    face.yOffsets[i] = static_cast<int16_t>(embeddedIndices[cursor++]);
+                }
+                for (uint8_t i = 0; i < numVertices; i++)
+                {
+                    face.uCoords[i] = static_cast<int16_t>(embeddedIndices[cursor++]);
+                }
+                for (uint8_t i = 0; i < numVertices; i++)
+                {
+                    face.vCoords[i] = static_cast<int16_t>(embeddedIndices[cursor++]);
+                }
+            }
+            else if (remaining >= static_cast<size_t>(numVertices) * 2)
+            {
+                face.uCoords.resize(numVertices);
+                face.vCoords.resize(numVertices);
+                for (uint8_t i = 0; i < numVertices; i++)
+                {
+                    face.uCoords[i] = static_cast<int16_t>(embeddedIndices[cursor++]);
+                }
+                for (uint8_t i = 0; i < numVertices; i++)
+                {
+                    face.vCoords[i] = static_cast<int16_t>(embeddedIndices[cursor++]);
+                }
+            }
         }
 
         mapData.faces.push_back(std::move(face));
@@ -331,6 +481,23 @@ bool BLVMap::parseFaces(const std::vector<uint8_t>& data, size_t& offset)
     mapData.faceCount = parsedFaces;
     logger.debug(std::format("Parsed {} faces (96-byte each) from 0x{:X} to 0x{:X}",
                              mapData.faces.size(), faceStartOffset, offset));
+    if (totalRawIndices > 0)
+    {
+        double outPct = (static_cast<double>(outOfRangeIndices) * 100.0) /
+                        static_cast<double>(totalRawIndices);
+        if (!haveInRangeRaw)
+        {
+            logger.debug(std::format("Face raw indices: total={}, out-of-range={} ({:.2f}%)",
+                                     totalRawIndices, outOfRangeIndices, outPct));
+        }
+        else
+        {
+            logger.debug(std::format(
+                "Face raw indices: total={}, out-of-range={} ({:.2f}%), in-range min={}, max={}, faces with OOR={}",
+                totalRawIndices, outOfRangeIndices, outPct, minRawIndex, maxRawIndex,
+                facesWithOutOfRange));
+        }
+    }
 
     return !mapData.faces.empty();
 }
@@ -485,10 +652,19 @@ bool BLVMap::parseSectors(const std::vector<uint8_t>& data, size_t& offset)
             }
         }
 
-        // Skip decor IDs (we don't need them for wireframe)
+        // Read decor IDs
         if (hdr.decorCount > 0 && hdr.decorCount < 10000)
         {
-            offset += hdr.decorCount * 2;
+            sector.decorIds.resize(hdr.decorCount);
+            for (int16_t j = 0; j < hdr.decorCount; j++)
+            {
+                if (offset + 2 <= data.size())
+                {
+                    sector.decorIds[j] =
+                        *reinterpret_cast<const uint16_t*>(data.data() + offset);
+                    offset += 2;
+                }
+            }
         }
 
         // Read light IDs
@@ -505,10 +681,19 @@ bool BLVMap::parseSectors(const std::vector<uint8_t>& data, size_t& offset)
             }
         }
 
-        // Skip BSP leaf IDs
+        // Read BSP leaf IDs
         if (hdr.bspLeafCount > 0 && hdr.bspLeafCount < 10000)
         {
-            offset += hdr.bspLeafCount * 2;
+            sector.bspLeafIds.resize(hdr.bspLeafCount);
+            for (int16_t j = 0; j < hdr.bspLeafCount; j++)
+            {
+                if (offset + 2 <= data.size())
+                {
+                    sector.bspLeafIds[j] =
+                        *reinterpret_cast<const uint16_t*>(data.data() + offset);
+                    offset += 2;
+                }
+            }
         }
 
         mapData.sectors.push_back(std::move(sector));
@@ -516,6 +701,208 @@ bool BLVMap::parseSectors(const std::vector<uint8_t>& data, size_t& offset)
 
     logger.debug(std::format("Parsed {} sectors", mapData.sectors.size()));
     return !mapData.sectors.empty();
+}
+
+bool BLVMap::parseFaceExtras(const std::vector<uint8_t>& data, size_t& offset)
+{
+    int32_t maxExtraId = -1;
+    for (const auto& face : mapData.faces)
+    {
+        if (face.faceExtraId > maxExtraId)
+        {
+            maxExtraId = face.faceExtraId;
+        }
+    }
+
+    if (maxExtraId < 0)
+    {
+        return false;
+    }
+
+    constexpr size_t extraSize = sizeof(BLVFaceExtraRaw);
+    static_assert(extraSize == 0x24, "BLVFaceExtraRaw expected size 0x24");
+
+    const uint32_t extraCount = static_cast<uint32_t>(maxExtraId) + 1;
+
+    size_t cursor = offset;
+    size_t required = cursor + static_cast<size_t>(extraCount) * extraSize;
+    if (required > data.size())
+    {
+        return false;
+    }
+
+    std::vector<BLVFaceExtraRaw> extras;
+    extras.reserve(extraCount);
+
+    for (uint32_t i = 0; i < extraCount; i++)
+    {
+        BLVFaceExtraRaw extra;
+        std::memcpy(&extra, data.data() + cursor, extraSize);
+        extras.push_back(extra);
+        cursor += extraSize;
+    }
+
+    mapData.faceExtras = std::move(extras);
+    offset = cursor;
+
+    logger.debug(std::format("Parsed {} face extras (0x24 bytes each)", mapData.faceExtras.size()));
+    return !mapData.faceExtras.empty();
+}
+
+bool BLVMap::parseDoors(const std::vector<uint8_t>& data, size_t& offset)
+{
+    size_t cursor = offset;
+    if (cursor + 4 > data.size())
+    {
+        return false;
+    }
+
+    uint32_t doorCount = *reinterpret_cast<const uint32_t*>(data.data() + cursor);
+    if (doorCount > 2000)
+    {
+        return false;
+    }
+
+    cursor += 4;
+
+    std::vector<ParsedDoor> doors;
+    doors.reserve(doorCount);
+
+    for (uint32_t i = 0; i < doorCount; i++)
+    {
+        if (cursor + sizeof(BLVDoor) > data.size())
+        {
+            return false;
+        }
+
+        BLVDoor header;
+        std::memcpy(&header, data.data() + cursor, sizeof(BLVDoor));
+        cursor += sizeof(BLVDoor);
+
+        ParsedDoor door;
+        door.header = header;
+
+        auto readIds = [&](int16_t count, std::vector<uint16_t>& out) -> bool {
+            if (count <= 0)
+            {
+                return true;
+            }
+            if (count > 10000)
+            {
+                return false;
+            }
+            if (cursor + static_cast<size_t>(count) * 2 > data.size())
+            {
+                return false;
+            }
+            out.resize(count);
+            for (int16_t j = 0; j < count; j++)
+            {
+                out[j] = *reinterpret_cast<const uint16_t*>(data.data() + cursor);
+                cursor += 2;
+            }
+            return true;
+        };
+
+        if (!readIds(header.numVertices, door.vertexIds) ||
+            !readIds(header.numFaces, door.faceIds) || !readIds(header.numSectors, door.sectorIds) ||
+            !readIds(header.numOffsets, door.offsetIds))
+        {
+            return false;
+        }
+
+        doors.push_back(std::move(door));
+    }
+
+    mapData.doors = std::move(doors);
+    offset = cursor;
+
+    logger.debug(std::format("Parsed {} doors", mapData.doors.size()));
+    return !mapData.doors.empty() || doorCount == 0;
+}
+
+bool BLVMap::parseSpawns(const std::vector<uint8_t>& data, size_t& offset)
+{
+    size_t cursor = offset;
+    if (cursor + 4 > data.size())
+    {
+        return false;
+    }
+
+    uint32_t spawnCount = *reinterpret_cast<const uint32_t*>(data.data() + cursor);
+    if (spawnCount > 5000)
+    {
+        return false;
+    }
+
+    cursor += 4;
+
+    constexpr size_t spawnSize = sizeof(BLVSpawnPoint);
+    static_assert(spawnSize == 22, "BLVSpawnPoint expected size 22");
+
+    if (cursor + spawnCount * spawnSize > data.size())
+    {
+        return false;
+    }
+
+    std::vector<BLVSpawnPoint> spawns;
+    spawns.reserve(spawnCount);
+
+    for (uint32_t i = 0; i < spawnCount; i++)
+    {
+        BLVSpawnPoint spawn;
+        std::memcpy(&spawn, data.data() + cursor, spawnSize);
+        spawns.push_back(spawn);
+        cursor += spawnSize;
+    }
+
+    mapData.spawns = std::move(spawns);
+    offset = cursor;
+
+    logger.debug(std::format("Parsed {} spawns", mapData.spawns.size()));
+    return !mapData.spawns.empty() || spawnCount == 0;
+}
+
+bool BLVMap::parseItems(const std::vector<uint8_t>& data, size_t& offset)
+{
+    size_t cursor = offset;
+    if (cursor + 4 > data.size())
+    {
+        return false;
+    }
+
+    uint32_t itemCount = *reinterpret_cast<const uint32_t*>(data.data() + cursor);
+    if (itemCount > 5000)
+    {
+        return false;
+    }
+
+    cursor += 4;
+
+    constexpr size_t itemSize = sizeof(BLVItemRaw);
+    static_assert(itemSize == 0x24, "BLVItemRaw expected size 0x24");
+
+    if (cursor + itemCount * itemSize > data.size())
+    {
+        return false;
+    }
+
+    std::vector<BLVItemRaw> items;
+    items.reserve(itemCount);
+
+    for (uint32_t i = 0; i < itemCount; i++)
+    {
+        BLVItemRaw item;
+        std::memcpy(&item, data.data() + cursor, itemSize);
+        items.push_back(item);
+        cursor += itemSize;
+    }
+
+    mapData.items = std::move(items);
+    offset = cursor;
+
+    logger.debug(std::format("Parsed {} items (raw)", mapData.items.size()));
+    return !mapData.items.empty() || itemCount == 0;
 }
 
 bool BLVMap::parseLights(const std::vector<uint8_t>& data, size_t& offset)
@@ -535,15 +922,23 @@ bool BLVMap::parseLights(const std::vector<uint8_t>& data, size_t& offset)
     constexpr size_t lightSize = sizeof(BLVLight);
     static_assert(lightSize == 16, "BLVLight should be 16 bytes");
 
-    // Try to find light count from the data
-    // Light data typically follows sector data
-    // We can estimate based on remaining file size
+    // Prefer header count when it looks valid and fits in the remaining buffer
+    if (mapData.lightCount > 0 && mapData.lightCount < 10000 &&
+        offset + mapData.lightCount * lightSize <= data.size())
+    {
+        mapData.lights.reserve(mapData.lightCount);
+        for (uint32_t i = 0; i < mapData.lightCount; i++)
+        {
+            BLVLight light;
+            std::memcpy(&light, data.data() + offset, lightSize);
+            mapData.lights.push_back(light);
+            offset += lightSize;
+        }
+        logger.debug(std::format("Parsed {} lights (header count)", mapData.lights.size()));
+        return !mapData.lights.empty();
+    }
 
-    // Look for the light count in the header area (sometimes stored there)
-    // Or calculate based on valid light structures
-
-    // For now, try to read lights based on reasonable heuristics
-    // Check if remaining data looks like valid lights
+    // Fall back to heuristic scan if header count is missing or invalid
 
     size_t maxPossibleLights = (data.size() - offset) / lightSize;
     if (maxPossibleLights == 0)
@@ -591,6 +986,17 @@ std::string BLVMap::extractString(const char* data, size_t maxLen) const
         result += data[i];
     }
     return result;
+}
+
+void BLVMap::reportProgress(float value)
+{
+    if (!progressCallback)
+    {
+        return;
+    }
+
+    value = std::clamp(value, 0.0f, 1.0f);
+    progressCallback(value);
 }
 
 } // namespace runeharbor::formats

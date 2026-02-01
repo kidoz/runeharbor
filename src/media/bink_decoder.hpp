@@ -1,0 +1,282 @@
+// SPDX-License-Identifier: MIT
+#pragma once
+
+#include <cstdint>
+#include <memory>
+#include <vector>
+
+namespace runeharbor::media
+{
+
+/**
+ * Bink Video Decoder
+ *
+ * Decodes RAD Game Tools Bink video format (.bik)
+ * Based on publicly available format documentation from MultimediaWiki
+ * and FFmpeg's reverse-engineered implementation.
+ *
+ * Bink Header (44 bytes):
+ *   0x00: 4 bytes - Magic "BIKx" where x = version (b,d,f,g,h,i)
+ *   0x04: 4 bytes - File size (excluding first 8 bytes)
+ *   0x08: 4 bytes - Frame count
+ *   0x0C: 4 bytes - Maximum frame size
+ *   0x10: 4 bytes - Frame count (repeated)
+ *   0x14: 4 bytes - Video width
+ *   0x18: 4 bytes - Video height
+ *   0x1C: 4 bytes - FPS dividend
+ *   0x20: 4 bytes - FPS divider
+ *   0x24: 4 bytes - Video flags
+ *   0x28: 4 bytes - Audio track count
+ */
+
+struct BinkHeader
+{
+    char magic[4];          // "BIKx" where x = version
+    uint32_t fileSize;      // File size - 8
+    uint32_t frameCount;
+    uint32_t maxFrameSize;
+    uint32_t frameCount2;   // Repeated
+    uint32_t width;
+    uint32_t height;
+    uint32_t fpsDividend;
+    uint32_t fpsDivider;
+    uint32_t flags;
+    uint32_t audioTrackCount;
+};
+
+struct BinkFrame
+{
+    std::vector<uint8_t> pixels;  // RGBA pixels
+    uint32_t width;
+    uint32_t height;
+    bool isKeyframe;
+};
+
+/**
+ * Bink audio track info
+ */
+struct BinkAudioInfo
+{
+    uint32_t sampleRate = 0;
+    uint16_t channels = 0;
+    bool hasAudio = false;
+    bool useDCT = false;  // true = DCT, false = RDFT
+};
+
+/**
+ * Decoded audio samples for a frame
+ */
+struct BinkAudioFrame
+{
+    std::vector<int16_t> samples;  // Interleaved stereo if applicable
+    uint32_t sampleRate = 0;
+    uint8_t channels = 1;
+};
+
+/**
+ * Bink Bundle Types - Different data streams in Bink format
+ */
+enum class BinkBundleType
+{
+    BlockTypes = 0,
+    SubBlockTypes,
+    Colors,
+    Pattern,
+    MotionX,
+    MotionY,
+    IntraDC,
+    InterDC,
+    Run,
+    Count
+};
+
+/**
+ * Bink Block Types
+ */
+enum BinkBlockType
+{
+    BINK_BLOCK_SKIP = 0,    // Copy from previous frame
+    BINK_BLOCK_SCALED = 1,  // 16x16 scaled block
+    BINK_BLOCK_MOTION = 2,  // Motion compensation
+    BINK_BLOCK_RUN = 3,     // RLE with pattern
+    BINK_BLOCK_RESIDUE = 4, // Motion + residue
+    BINK_BLOCK_INTRA = 5,   // Intra DCT
+    BINK_BLOCK_FILL = 6,    // Solid color
+    BINK_BLOCK_INTER = 7,   // Inter DCT
+    BINK_BLOCK_PATTERN = 8, // 2-color pattern
+    BINK_BLOCK_RAW = 9      // Raw 64 values
+};
+
+/**
+ * BitReader for Bink - reads LSB from 32-bit LE words
+ */
+class BinkBitReader
+{
+  public:
+    BinkBitReader(const uint8_t* data, size_t sizeBytes);
+
+    uint32_t readBits(int count);
+    bool readBit();
+    void skipBits(int count);
+    void align32();
+    bool atEnd() const;
+    size_t bitsRemaining() const;
+
+  private:
+    const uint8_t* data_;
+    size_t bitPos_ = 0;
+    size_t maxBits_;
+};
+
+/**
+ * Bink Huffman Tree
+ */
+class BinkTree
+{
+  public:
+    bool build(BinkBitReader& bits, int maxDepth);
+    int decode(BinkBitReader& bits) const;
+
+  private:
+    static constexpr int MAX_SYMBOLS = 16;
+    int symbols_[MAX_SYMBOLS];
+    int lengths_[MAX_SYMBOLS];
+    int numSymbols_ = 0;
+};
+
+/**
+ * Bundle - data stream for specific value types
+ */
+class BinkBundle
+{
+  public:
+    void reset();
+    bool decode(BinkBitReader& bits, BinkBundleType type);
+    int getValue();
+
+  private:
+    std::vector<int> data_;
+    size_t readPos_ = 0;
+    BinkTree tree_;
+};
+
+/**
+ * BinkDecoder - Full Bink video decoder
+ */
+class BinkDecoder
+{
+  public:
+    BinkDecoder();
+    ~BinkDecoder();
+
+    BinkDecoder(const BinkDecoder&) = delete;
+    BinkDecoder& operator=(const BinkDecoder&) = delete;
+
+    // Load video from memory buffer
+    bool load(const uint8_t* data, size_t size);
+    bool load(const std::vector<uint8_t>& data);
+
+    // Video info
+    uint32_t width() const { return header_.width; }
+    uint32_t height() const { return header_.height; }
+    uint32_t frameCount() const { return header_.frameCount; }
+    double frameRate() const;
+    double durationMs() const;
+    char version() const { return header_.magic[3]; }
+
+    // Audio info
+    uint32_t audioTrackCount() const { return header_.audioTrackCount; }
+    BinkAudioInfo getAudioInfo(uint32_t track) const;
+    bool hasAudio(uint32_t track = 0) const;
+
+    // Decode frames
+    bool decodeFrame(uint32_t frameIndex, BinkFrame& outFrame);
+
+    // Decode audio for a frame
+    bool decodeAudio(uint32_t frameIndex, uint32_t track, BinkAudioFrame& outAudio);
+
+    // Get current frame as RGBA (convenience)
+    std::vector<uint8_t> getFrameRGBA(uint32_t frameIndex);
+
+    // Reset decoder state
+    void reset();
+
+  private:
+    BinkHeader header_;
+    std::vector<uint8_t> data_;
+    std::vector<uint32_t> frameOffsets_;   // Frame index table
+    std::vector<bool> frameKeyFlags_;      // Keyframe flags
+
+    // Frame buffers (YUV planes)
+    std::vector<uint8_t> planeY_;      // Luma
+    std::vector<uint8_t> planeU_;      // Chroma U
+    std::vector<uint8_t> planeV_;      // Chroma V
+    std::vector<uint8_t> prevY_;       // Previous frame luma
+    std::vector<uint8_t> prevU_;       // Previous frame chroma U
+    std::vector<uint8_t> prevV_;       // Previous frame chroma V
+
+    // Plane dimensions
+    uint32_t planeWidthY_ = 0;
+    uint32_t planeHeightY_ = 0;
+    uint32_t planeWidthC_ = 0;
+    uint32_t planeHeightC_ = 0;
+
+    // Bundles for different data types
+    BinkBundle bundles_[static_cast<int>(BinkBundleType::Count)];
+
+    // Cache for seeking
+    uint32_t lastDecodedFrame_ = UINT32_MAX;
+
+    // Audio track info
+    struct AudioTrackInfo
+    {
+        uint32_t sampleRate = 0;
+        uint16_t channels = 0;
+        bool isDCT = false;
+        uint32_t trackId = 0;
+    };
+    std::vector<AudioTrackInfo> audioTracks_;
+
+    // Audio decoding state (per channel)
+    std::vector<float> audioOverlap_;
+    size_t audioFrameSize_ = 0;
+    size_t audioOverlapSize_ = 0;
+
+    bool parseHeader();
+    bool parseFrameIndex();
+    bool decodeFrameInternal(uint32_t frameIndex);
+    bool decodePlane(BinkBitReader& bits, uint8_t* plane, uint8_t* prev, uint32_t width,
+                     uint32_t height, bool isChroma);
+    bool readBundle(BinkBitReader& bits, BinkBundleType type);
+    void readDCTCoeffs(BinkBitReader& bits, int* block);
+
+    // Block decoders
+    void decodeBlockSkip(uint8_t* dst, const uint8_t* prev, int stride);
+    void decodeBlockFill(uint8_t* dst, int stride, uint8_t color);
+    void decodeBlockRun(uint8_t* dst, int stride, BinkBitReader& bits);
+    void decodeBlockPattern(uint8_t* dst, int stride, uint8_t c0, uint8_t c1, uint8_t pattern);
+    void decodeBlockRaw(uint8_t* dst, int stride, BinkBitReader& bits);
+    void decodeBlockMotion(uint8_t* dst, const uint8_t* prev, int stride, int mvX, int mvY,
+                           uint32_t planeWidth, uint32_t planeHeight);
+    void decodeBlockIntraDCT(uint8_t* dst, int stride, BinkBitReader& bits, int dc);
+    void decodeBlockInterDCT(uint8_t* dst, const uint8_t* prev, int stride, BinkBitReader& bits,
+                             int mvX, int mvY, int dc, uint32_t planeWidth, uint32_t planeHeight);
+    void decodeBlockScaled(uint8_t* dst, const uint8_t* prev, int stride, BinkBitReader& bits,
+                           uint32_t planeWidth, uint32_t planeHeight);
+    void decodeBlockResidue(uint8_t* dst, const uint8_t* prev, int stride, BinkBitReader& bits,
+                            int mvX, int mvY, uint32_t planeWidth, uint32_t planeHeight);
+
+    // IDCT
+    void idct8x8(int* block);
+    void addBlock(uint8_t* dst, int stride, const int* block);
+
+    // YUV to RGB conversion
+    void convertYUVToRGBA(std::vector<uint8_t>& rgba);
+
+    // Audio decoding
+    bool decodeAudioTrack(BinkBitReader& bits, uint32_t track, BinkAudioFrame& outAudio);
+    void rdft(float* data, size_t n, bool inverse);
+    void dct(float* data, size_t n, bool inverse);
+};
+
+} // namespace runeharbor::media

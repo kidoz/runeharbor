@@ -54,15 +54,27 @@ class LODArchive
   private:
     bool readHeader();
     bool readDirectory();
+    bool buildDataIndex();
     std::vector<uint8_t> decompressZlib(const std::vector<uint8_t>& data);
     bool isZlibCompressed(const std::vector<uint8_t>& data) const;
+
+    struct DataEntry
+    {
+        std::string name;
+        uint32_t compressedSize = 0;
+        uint32_t uncompressedSize = 0;
+        std::streamoff dataOffset = 0;
+        uint32_t flags = 0;
+    };
 
     util::ILogger& logger;
     std::ifstream file;
     std::filesystem::path archivePath;
     std::vector<LODDirectoryEntry> entries;
+    std::vector<DataEntry> dataEntries;
     std::streamoff dataSectionStart = 0;
     bool opened = false;
+    bool dataIndexBuilt = false;
 };
 
 } // namespace runeharbor::formats

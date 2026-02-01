@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <format>
-#include <map>
 
 #include <cstring>
 #include <zlib.h>
@@ -62,6 +61,8 @@ void LODArchive::close()
         logger.debug(std::format("Closed LOD archive: {}", archivePath.string()));
     }
     entries.clear();
+    dataEntries.clear();
+    dataIndexBuilt = false;
     opened = false;
 }
 
@@ -142,12 +143,17 @@ bool LODArchive::readDirectory()
 
 std::vector<std::string> LODArchive::listFiles() const
 {
-    std::vector<std::string> filenames;
-    filenames.reserve(entries.size());
-
-    for (const auto& entry : entries)
+    if (!dataIndexBuilt)
     {
-        filenames.emplace_back(entry.filename);
+        const_cast<LODArchive*>(this)->buildDataIndex();
+    }
+
+    std::vector<std::string> filenames;
+    filenames.reserve(dataEntries.size());
+
+    for (const auto& entry : dataEntries)
+    {
+        filenames.push_back(entry.name);
     }
 
     return filenames;
@@ -161,72 +167,24 @@ std::optional<std::vector<uint8_t>> LODArchive::extractFile(const std::string& f
         return std::nullopt;
     }
 
-    // Create list sorted by directory offset field (remove duplicates, keep last occurrence)
-    // The offset field is used as a sort key, not an actual file position
-    std::map<std::string, LODDirectoryEntry> uniqueFiles;
-    for (const auto& entry : entries)
+    if (!dataIndexBuilt && !buildDataIndex())
     {
-        // Extract clean filename (up to null terminator)
-        std::string cleanName;
-        for (int i = 0; i < 16 && entry.filename[i] != '\0'; i++)
-        {
-            cleanName += entry.filename[i];
-        }
-        uniqueFiles[cleanName] = entry; // Overwrites duplicates
+        logger.error("Failed to build LOD data index");
+        return std::nullopt;
     }
 
-    // Sort by directory offset field
-    std::vector<std::pair<std::string, LODDirectoryEntry>> sortedFiles;
-    for (const auto& pair : uniqueFiles)
+    const DataEntry* target = nullptr;
+    for (const auto& entry : dataEntries)
     {
-        sortedFiles.push_back(pair);
-    }
-    std::sort(sortedFiles.begin(), sortedFiles.end(),
-              [](const auto& a, const auto& b) { return a.second.offset < b.second.offset; });
-
-    // Filter out files with unreasonably large sizes (likely garbage/corrupt entries)
-    // Note: Map files can be several MB, so we use a high threshold
-    constexpr uint32_t MAX_REASONABLE_SIZE = 50000000; // 50MB threshold
-    std::vector<std::pair<std::string, LODDirectoryEntry>> validFiles;
-    for (const auto& pair : sortedFiles)
-    {
-        if (pair.second.size < MAX_REASONABLE_SIZE)
+        if (entry.name.size() != filename.size())
         {
-            validFiles.push_back(pair);
-        }
-        else
-        {
-            logger.debug(std::format("Skipping corrupt entry: {} ({} bytes - unreasonably large)",
-                                     pair.first, pair.second.size));
-        }
-    }
-    sortedFiles = std::move(validFiles);
-
-    // Debug: log first few files after filtering
-    // (Commented out to reduce log verbosity - uncomment if needed for debugging)
-    // logger.debug(std::format("Filtered file list (first 10):"));
-    // for (size_t i = 0; i < sortedFiles.size() && i < 10; i++)
-    // {
-    //     logger.debug(std::format("  [{}] {} (offset={}, size={})",
-    //                              i, sortedFiles[i].first,
-    //                              sortedFiles[i].second.offset,
-    //                              sortedFiles[i].second.size));
-    // }
-
-    // Find target file (case-insensitive) in filtered list
-    size_t fileIndex = 0;
-    bool found = false;
-
-    for (size_t i = 0; i < sortedFiles.size(); i++)
-    {
-        const auto& name = sortedFiles[i].first;
-        if (name.size() != filename.size())
             continue;
+        }
 
         bool match = true;
-        for (size_t j = 0; j < name.size(); j++)
+        for (size_t j = 0; j < entry.name.size(); j++)
         {
-            if (std::tolower(name[j]) != std::tolower(filename[j]))
+            if (std::tolower(entry.name[j]) != std::tolower(filename[j]))
             {
                 match = false;
                 break;
@@ -235,96 +193,180 @@ std::optional<std::vector<uint8_t>> LODArchive::extractFile(const std::string& f
 
         if (match)
         {
-            fileIndex = i;
-            found = true;
+            target = &entry;
             break;
         }
     }
 
-    if (!found)
+    if (!target)
     {
         logger.error(std::format("File not found in archive: {}", filename));
         return std::nullopt;
     }
 
-    const auto& targetEntry = sortedFiles[fileIndex].second;
-    logger.debug(std::format("Extracting file #{}: {} (compressed size: {})", fileIndex,
-                             sortedFiles[fileIndex].first, targetEntry.size));
-
-    // Calculate position in data section
-    // Size field semantics:
-    // - File #0: size = compressed data only
-    // - File #1+: size = 8-byte header + compressed data + next file's 40-byte prefix
-    //
-    // Layout:
-    // - File #0: [8-byte header][compressed data]
-    // - File #1+: [32-byte filename][8-byte padding][data from size field]
-
-    std::streamoff currentPos = dataSectionStart;
-
-    if (fileIndex == 0)
+    if (target->dataOffset <= 0 || target->compressedSize == 0)
     {
-        // File #0: header starts at dataSectionStart
-        // No additional seeking needed
+        logger.error(std::format("Invalid entry for file: {}", filename));
+        return std::nullopt;
     }
-    else
-    {
-        // Skip file #0: 8-byte header + compressed data + next file's 40-byte prefix
-        currentPos += 8 + sortedFiles[0].second.size + 40;
 
-        // Skip files #1 to fileIndex-1: just add their size (already includes everything)
-        for (size_t i = 1; i < fileIndex; i++)
+    file.seekg(target->dataOffset, std::ios::beg);
+    if (!file.good())
+    {
+        logger.error(std::format("Failed to seek to data offset 0x{:X}",
+                                 static_cast<uint64_t>(target->dataOffset)));
+        return std::nullopt;
+    }
+
+    std::vector<uint8_t> compressed(target->compressedSize);
+    file.read(reinterpret_cast<char*>(compressed.data()), target->compressedSize);
+    if (!file.good())
+    {
+        logger.error("Failed to read compressed data");
+        return std::nullopt;
+    }
+
+    if (isZlibCompressed(compressed))
+    {
+        auto decompressed = decompressZlib(compressed);
+        if (decompressed.empty())
         {
-            currentPos += sortedFiles[i].second.size;
+            logger.error("Failed to decompress file");
+            return std::nullopt;
+        }
+
+        if (target->uncompressedSize != 0 && decompressed.size() != target->uncompressedSize)
+        {
+            logger.warning(std::format("Size mismatch for {}: expected {}, got {}", target->name,
+                                       target->uncompressedSize, decompressed.size()));
+        }
+
+        logger.info(std::format("Successfully extracted: {} ({} bytes decompressed)", target->name,
+                                decompressed.size()));
+        return decompressed;
+    }
+
+    logger.info(std::format("Successfully extracted: {} ({} bytes raw)", target->name,
+                            compressed.size()));
+    return compressed;
+}
+
+bool LODArchive::buildDataIndex()
+{
+    if (dataIndexBuilt)
+    {
+        return true;
+    }
+
+    if (!opened)
+    {
+        logger.error("Cannot build LOD data index: archive not opened");
+        return false;
+    }
+
+    dataEntries.clear();
+
+    file.seekg(0, std::ios::end);
+    std::streamoff fileSize = file.tellg();
+    if (fileSize <= 0 || dataSectionStart <= 0 || dataSectionStart >= fileSize)
+    {
+        logger.error("Invalid data section start for LOD archive");
+        return false;
+    }
+
+    // Find first file name by smallest directory offset (used as order key)
+    std::string firstName;
+    uint32_t firstCompressedSize = 0;
+    if (!entries.empty())
+    {
+        const LODDirectoryEntry* first = &entries.front();
+        for (const auto& entry : entries)
+        {
+            if (entry.offset < first->offset)
+            {
+                first = &entry;
+            }
+        }
+
+        for (int i = 0; i < 16 && first->filename[i] != '\0'; i++)
+        {
+            firstName += first->filename[i];
+        }
+        firstCompressedSize = first->size;
+    }
+
+    std::streamoff cursor = dataSectionStart;
+
+    // Parse first file (no filename header)
+    if (!firstName.empty() && firstCompressedSize > 0 && cursor + 8 < fileSize &&
+        cursor + 8 + firstCompressedSize <= fileSize)
+    {
+        uint32_t uncompressedSize = 0;
+        uint32_t flags = 0;
+        file.seekg(cursor, std::ios::beg);
+        file.read(reinterpret_cast<char*>(&uncompressedSize), 4);
+        file.read(reinterpret_cast<char*>(&flags), 4);
+
+        std::streamoff dataOffset = cursor + 8;
+        if (dataOffset + firstCompressedSize <= fileSize && firstCompressedSize > 0)
+        {
+            dataEntries.push_back({firstName, firstCompressedSize, uncompressedSize, dataOffset,
+                                   flags});
+            cursor = dataOffset + firstCompressedSize;
         }
     }
 
-    logger.debug(std::format("Seeking to header at: 0x{:X}", currentPos));
-    file.seekg(currentPos, std::ios::beg);
-
-    if (!file.good())
+    // Parse subsequent files with 48-byte headers
+    while (cursor + 48 < fileSize)
     {
-        logger.error(std::format("Failed to seek to offset 0x{:X}", currentPos));
-        return std::nullopt;
+        char nameBuf[16] = {};
+        file.seekg(cursor, std::ios::beg);
+        file.read(nameBuf, 16);
+
+        if (!file.good())
+        {
+            break;
+        }
+
+        if (nameBuf[0] == '\0')
+        {
+            break;
+        }
+
+        std::string name;
+        for (int i = 0; i < 16 && nameBuf[i] != '\0'; i++)
+        {
+            name += nameBuf[i];
+        }
+
+        uint32_t meta[8] = {};
+        file.read(reinterpret_cast<char*>(meta), sizeof(meta));
+        if (!file.good())
+        {
+            break;
+        }
+
+        uint32_t compressedSize = meta[1];
+        uint32_t uncompressedSize = meta[6];
+        uint32_t flags = meta[7];
+
+        std::streamoff dataOffset = cursor + 48;
+        if (compressedSize == 0 || dataOffset + compressedSize > fileSize)
+        {
+            break;
+        }
+
+        dataEntries.push_back({name, compressedSize, uncompressedSize, dataOffset, flags});
+        cursor = dataOffset + compressedSize;
     }
 
-    // Read 8-byte header
-    uint32_t uncompressedSize = 0;
-    uint32_t unknown = 0;
-    file.read(reinterpret_cast<char*>(&uncompressedSize), 4);
-    file.read(reinterpret_cast<char*>(&unknown), 4);
-
-    logger.debug(
-        std::format("File header: uncompressed={}, unknown={}", uncompressedSize, unknown));
-
-    // Read compressed data
-    std::vector<uint8_t> compressed(targetEntry.size);
-    file.read(reinterpret_cast<char*>(compressed.data()), targetEntry.size);
-
-    if (!file.good())
+    dataIndexBuilt = !dataEntries.empty();
+    if (!dataIndexBuilt)
     {
-        logger.error(std::format("Failed to read compressed data"));
-        return std::nullopt;
+        logger.error("Failed to parse any LOD data entries");
     }
 
-    // Decompress
-    std::vector<uint8_t> decompressed = decompressZlib(compressed);
-
-    if (decompressed.empty())
-    {
-        logger.error(std::format("Failed to decompress file"));
-        return std::nullopt;
-    }
-
-    if (decompressed.size() != uncompressedSize)
-    {
-        logger.error(std::format("Size mismatch: expected {}, got {}", uncompressedSize,
-                                 decompressed.size()));
-    }
-
-    logger.info(std::format("Successfully extracted: {} ({} bytes decompressed)",
-                            sortedFiles[fileIndex].first, decompressed.size()));
-    return decompressed;
+    return dataIndexBuilt;
 }
 
 bool LODArchive::isZlibCompressed(const std::vector<uint8_t>& data) const

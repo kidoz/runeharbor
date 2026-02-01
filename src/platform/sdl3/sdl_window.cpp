@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 #include "sdl_window.hpp"
 
+#include <SDL3/SDL_main.h>
+
+#include <string>
+
 #include "../../util/ilogger.hpp"
 
 namespace runeharbor::platform
@@ -17,14 +21,34 @@ bool SdlWindow::initialize(const WindowConfig& config)
 {
     logger.debug("Initializing SDL3 window subsystem");
 
+    int driverCount = SDL_GetNumVideoDrivers();
+    std::string driverList;
+    for (int i = 0; i < driverCount; ++i)
+    {
+        const char* driver = SDL_GetVideoDriver(i);
+        if (!driver || !*driver)
+        {
+            continue;
+        }
+        if (!driverList.empty())
+        {
+            driverList += ", ";
+        }
+        driverList += driver;
+    }
+    if (driverList.empty())
+    {
+        driverList = "(none)";
+    }
+    logger.debug(std::string("Available SDL video drivers: ") + driverList);
+
+    SDL_SetMainReady();
     if (!SDL_Init(SDL_INIT_VIDEO))
     {
         logger.error("SDL_Init failed");
         const char* sdlError = SDL_GetError();
-        if (sdlError && *sdlError)
-        {
-            logger.error(sdlError);
-        }
+        std::string errorMessage = (sdlError && *sdlError) ? sdlError : "(empty SDL_GetError)";
+        logger.error(std::string("SDL error: ") + errorMessage);
         return false;
     }
 
@@ -75,6 +99,10 @@ void SdlWindow::processEvents()
     while (SDL_PollEvent(&event))
     {
         if (event.type == SDL_EVENT_QUIT)
+        {
+            closeRequested = true;
+        }
+        else if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE)
         {
             closeRequested = true;
         }

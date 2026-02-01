@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -170,6 +172,18 @@ struct BLVSpawnPoint
     int16_t group;
 };
 
+// Face extra data (raw, heuristic size)
+struct BLVFaceExtraRaw
+{
+    std::array<uint8_t, 0x24> data;
+};
+
+// Item data (raw, heuristic size)
+struct BLVItemRaw
+{
+    std::array<uint8_t, 0x24> data;
+};
+
 #pragma pack(pop)
 
 // Face attribute flags
@@ -205,10 +219,15 @@ struct ParsedFace
     int32_t normalY = 0;                 // Face normal Y (fixed-point, /65536)
     int32_t normalZ = 0;                 // Face normal Z (fixed-point, /65536)
     int32_t normalDistance = 0;          // Distance from origin along normal
+    int32_t zCalc1 = 0;                  // Z calculation coefficient 1
+    int32_t zCalc2 = 0;                  // Z calculation coefficient 2
+    int32_t zCalc3 = 0;                  // Z calculation coefficient 3
     uint32_t attributes = 0;             // Face attribute flags
     uint16_t sectorId = 0;               // Parent sector
     uint16_t otherSectorId = 0;          // Adjacent sector (for portals)
+    uint8_t numVertices = 0;             // Number of vertices in this face
     int16_t textureId = -1;              // Texture index
+    int16_t faceExtraId = -1;            // Face extra index (if present)
 
     // Texture UV coordinates per vertex
     std::vector<int16_t> uCoords;
@@ -218,6 +237,13 @@ struct ParsedFace
     int16_t minX = 0, maxX = 0;
     int16_t minY = 0, maxY = 0;
     int16_t minZ = 0, maxZ = 0;
+
+    // Raw embedded bytes from the 96-byte face structure (bytes 0x3C-0x5F)
+    std::array<uint8_t, 36> embeddedData = {};
+
+    // Texture offsets per vertex (best-effort parsing from embedded data)
+    std::vector<int16_t> xOffsets;
+    std::vector<int16_t> yOffsets;
 
     // Helper methods
     bool isFloor() const { return (attributes & static_cast<uint32_t>(FaceAttribute::Floor)) != 0; }
@@ -238,6 +264,16 @@ struct ParsedFace
     }
 };
 
+// Parsed door with variable-length arrays resolved
+struct ParsedDoor
+{
+    BLVDoor header{};
+    std::vector<uint16_t> vertexIds;
+    std::vector<uint16_t> faceIds;
+    std::vector<uint16_t> sectorIds;
+    std::vector<uint16_t> offsetIds;
+};
+
 // Parsed sector (room) with resolved face lists
 struct ParsedSector
 {
@@ -246,7 +282,9 @@ struct ParsedSector
     std::vector<uint16_t> ceilingFaceIds;
     std::vector<uint16_t> liquidFaceIds;
     std::vector<uint16_t> portalFaceIds;
+    std::vector<uint16_t> decorIds;
     std::vector<uint16_t> lightIds;
+    std::vector<uint16_t> bspLeafIds;
 };
 
 // Parsed map data (variable-length data resolved)
@@ -268,7 +306,10 @@ struct BLVMapData
     std::vector<ParsedFace> faces;
     std::vector<ParsedSector> sectors;
     std::vector<BLVLight> lights;
+    std::vector<BLVFaceExtraRaw> faceExtras;
+    std::vector<ParsedDoor> doors;
     std::vector<BLVSpawnPoint> spawns;
+    std::vector<BLVItemRaw> items;
 
     // Basic face data (without variable arrays for now)
     std::vector<BLVFaceBasic> faceBasics;
@@ -277,10 +318,12 @@ struct BLVMapData
 class BLVMap
 {
   public:
+    using ProgressCallback = std::function<void(float)>;
+
     explicit BLVMap(util::ILogger& logger);
 
     // Parse from raw decompressed BLV data
-    bool parse(const std::vector<uint8_t>& data);
+    bool parse(const std::vector<uint8_t>& data, ProgressCallback progress = {});
 
     // Access parsed data
     const BLVMapData& getData() const { return mapData; }
@@ -304,12 +347,19 @@ class BLVMap
     bool parseFaces(const std::vector<uint8_t>& data, size_t& offset);
     bool parseFaceVertexData(const std::vector<uint8_t>& data, size_t& offset);
     bool parseSectors(const std::vector<uint8_t>& data, size_t& offset);
+    bool parseFaceExtras(const std::vector<uint8_t>& data, size_t& offset);
+    bool parseDoors(const std::vector<uint8_t>& data, size_t& offset);
+    bool parseSpawns(const std::vector<uint8_t>& data, size_t& offset);
+    bool parseItems(const std::vector<uint8_t>& data, size_t& offset);
     bool parseLights(const std::vector<uint8_t>& data, size_t& offset);
 
     std::string extractString(const char* data, size_t maxLen) const;
 
     util::ILogger& logger;
     BLVMapData mapData;
+    ProgressCallback progressCallback;
+
+    void reportProgress(float value);
 };
 
 } // namespace runeharbor::formats

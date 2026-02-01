@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <format>
+#include <cctype>
 
 #include <cstring>
 #include <zlib.h>
@@ -159,6 +160,19 @@ std::string GameLODArchive::buildFilename(const GameLODDirectoryEntry& entry) co
     {
         name += entry.name[i];
     }
+
+    // GAMES.LOD uses 8.3-style names; some entries truncate the final extension
+    // (e.g., out01.od -> out01.odm, out01.dd -> out01.ddm).
+    std::string lower = name;
+    for (char& c : lower)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (lower.size() == 7 && lower.rfind("out", 0) == 0 &&
+        (lower.size() >= 3 &&
+         (lower.substr(lower.size() - 3) == ".od" || lower.substr(lower.size() - 3) == ".dd")))
+    {
+        name += "m";
+    }
+
     return name;
 }
 

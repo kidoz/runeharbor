@@ -148,7 +148,7 @@ class ImageLODArchive
      * @param entry Directory entry
      * @return Filename string (includes extension if present)
      */
-    std::string buildFilename(const ImageLODDirectoryEntry& entry) const;
+    std::string buildFilename(size_t index) const;
 
     /**
      * Calculate file offset in data section
@@ -163,8 +163,14 @@ class ImageLODArchive
     std::ifstream file;
     std::filesystem::path archivePath;
     std::vector<ImageLODDirectoryEntry> entries;
+    std::vector<std::string> resolvedNames;
     std::streamoff dataSectionStart = 0;
     bool opened = false;
+
+    std::string buildShortFilename(const ImageLODDirectoryEntry& entry,
+                                   ImageEntryType entryType) const;
+    bool resolveEntryNames();
+    std::optional<std::string> readExternalName(const ImageLODDirectoryEntry& entry);
 };
 
 } // namespace runeharbor::formats

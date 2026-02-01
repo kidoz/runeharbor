@@ -2,6 +2,7 @@
 #include "image_lod_archive.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <format>
 
 #include <cstring>
@@ -44,6 +45,11 @@ bool ImageLODArchive::open(const std::filesystem::path& path)
     {
         close();
         return false;
+    }
+
+    if (!resolveEntryNames())
+    {
+        logger.warning("Failed to resolve external filenames; continuing with short names");
     }
 
     opened = true;
@@ -153,7 +159,24 @@ ImageEntryType ImageLODArchive::detectEntryType(const ImageLODDirectoryEntry& en
     return ImageEntryType::ExternalFormat;
 }
 
-std::string ImageLODArchive::buildFilename(const ImageLODDirectoryEntry& entry) const
+std::string ImageLODArchive::buildFilename(size_t index) const
+{
+    if (index < resolvedNames.size() && !resolvedNames[index].empty())
+    {
+        return resolvedNames[index];
+    }
+
+    if (index >= entries.size())
+    {
+        return "";
+    }
+
+    const auto& entry = entries[index];
+    return buildShortFilename(entry, detectEntryType(entry));
+}
+
+std::string ImageLODArchive::buildShortFilename(const ImageLODDirectoryEntry& entry,
+                                                ImageEntryType entryType) const
 {
     // Extract short name (up to 4 bytes, null-terminated)
     std::string filename;
@@ -163,7 +186,7 @@ std::string ImageLODArchive::buildFilename(const ImageLODDirectoryEntry& entry) 
     }
 
     // Check if this is a custom format file (has LIB. marker)
-    if (detectEntryType(entry) == ImageEntryType::CustomFormat)
+    if (entryType == ImageEntryType::CustomFormat)
     {
         filename += ".LIB";
     }
@@ -176,9 +199,9 @@ std::vector<std::string> ImageLODArchive::listFiles() const
     std::vector<std::string> filenames;
     filenames.reserve(entries.size());
 
-    for (const auto& entry : entries)
+    for (size_t i = 0; i < entries.size(); i++)
     {
-        filenames.push_back(buildFilename(entry));
+        filenames.push_back(buildFilename(i));
     }
 
     return filenames;
@@ -232,9 +255,10 @@ std::optional<std::vector<uint8_t>> ImageLODArchive::extractFile(const std::stri
 
     // Find entry (case-insensitive search)
     const ImageLODDirectoryEntry* targetEntry = nullptr;
-    for (const auto& entry : entries)
+    for (size_t i = 0; i < entries.size(); i++)
     {
-        std::string entryName = buildFilename(entry);
+        const auto& entry = entries[i];
+        std::string entryName = buildFilename(i);
 
         // Case-insensitive comparison
         if (entryName.size() != filename.size())
@@ -390,9 +414,10 @@ std::optional<ImageFileHeader> ImageLODArchive::getFileInfo(const std::string& f
 
     // Find entry (case-insensitive search)
     const ImageLODDirectoryEntry* targetEntry = nullptr;
-    for (const auto& entry : entries)
+    for (size_t i = 0; i < entries.size(); i++)
     {
-        std::string entryName = buildFilename(entry);
+        const auto& entry = entries[i];
+        std::string entryName = buildFilename(i);
 
         // Case-insensitive comparison
         if (entryName.size() != filename.size())
@@ -448,6 +473,79 @@ std::optional<ImageFileHeader> ImageLODArchive::getFileInfo(const std::string& f
     }
 
     return imgHeader;
+}
+
+bool ImageLODArchive::resolveEntryNames()
+{
+    file.clear();
+    resolvedNames.clear();
+    resolvedNames.reserve(entries.size());
+
+    for (const auto& entry : entries)
+    {
+        ImageEntryType entryType = detectEntryType(entry);
+        resolvedNames.push_back(buildShortFilename(entry, entryType));
+    }
+
+    size_t resolvedCount = 0;
+    for (size_t i = 0; i < entries.size(); i++)
+    {
+        const auto& entry = entries[i];
+        if (detectEntryType(entry) != ImageEntryType::ExternalFormat)
+        {
+            continue;
+        }
+
+        auto name = readExternalName(entry);
+        if (name.has_value() && !name->empty())
+        {
+            resolvedNames[i] = *name;
+            resolvedCount++;
+        }
+    }
+
+    logger.debug(std::format("Resolved {} external filenames from headers", resolvedCount));
+    return true;
+}
+
+std::optional<std::string> ImageLODArchive::readExternalName(const ImageLODDirectoryEntry& entry)
+{
+    if (entry.size1 == 0 || entry.size2 < sizeof(ImageFileHeader))
+    {
+        return std::nullopt;
+    }
+
+    file.seekg(static_cast<std::streamoff>(entry.size1), std::ios::beg);
+    if (!file.good())
+    {
+        return std::nullopt;
+    }
+
+    ImageFileHeader header;
+    file.read(reinterpret_cast<char*>(&header), sizeof(ImageFileHeader));
+    if (!file.good())
+    {
+        return std::nullopt;
+    }
+
+    std::string name(header.name, sizeof(header.name));
+    size_t end = name.find('\0');
+    if (end != std::string::npos)
+    {
+        name.resize(end);
+    }
+
+    while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back())) != 0)
+    {
+        name.pop_back();
+    }
+
+    if (name.empty())
+    {
+        return std::nullopt;
+    }
+
+    return name;
 }
 
 } // namespace runeharbor::formats

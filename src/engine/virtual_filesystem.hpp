@@ -18,6 +18,7 @@ namespace runeharbor::formats
 {
 class LODArchive;
 class ImageLODArchive;
+class GameLODArchive;
 struct ImageFileHeader;
 } // namespace runeharbor::formats
 
@@ -55,6 +56,10 @@ class VirtualFileSystem
     /// Returns true on success, false on failure
     bool mountImageArchive(const std::filesystem::path& archivePath);
 
+    /// Mount a game LOD archive (GAMES.LOD)
+    /// Returns true on success, false on failure
+    bool mountGameArchive(const std::filesystem::path& archivePath);
+
     /// Unmount all archives (both text and image)
     void unmountAll();
 
@@ -83,6 +88,9 @@ class VirtualFileSystem
 
     // Mounted image archives (BITMAPS.LOD, etc.) - in mount order
     std::vector<std::unique_ptr<formats::ImageLODArchive>> imageArchives;
+
+    // Mounted game archives (GAMES.LOD) - in mount order
+    std::vector<std::unique_ptr<formats::GameLODArchive>> gameArchives;
 
     // Archive paths for debugging/logging
     std::vector<std::filesystem::path> archivePaths;

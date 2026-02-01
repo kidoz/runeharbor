@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <format>
+#include <utility>
 
 #include <cstring>
 
@@ -11,8 +12,11 @@ namespace runeharbor::formats
 
 ODMMap::ODMMap(util::ILogger& logger) : logger(logger) {}
 
-bool ODMMap::parse(const std::vector<uint8_t>& data)
+bool ODMMap::parse(const std::vector<uint8_t>& data, ProgressCallback progress)
 {
+    progressCallback = std::move(progress);
+    reportProgress(0.02f);
+
     if (data.size() < sizeof(ODMHeader) + 128 * 128 * 2)
     {
         logger.error("ODM data too small");
@@ -23,6 +27,8 @@ bool ODMMap::parse(const std::vector<uint8_t>& data)
     {
         return false;
     }
+
+    reportProgress(0.1f);
 
     // ODM file layout (MM7):
     // 0x00-0xB7: Header (184 bytes)
@@ -39,26 +45,35 @@ bool ODMMap::parse(const std::vector<uint8_t>& data)
         logger.warning("Failed to parse tile textures, continuing...");
     }
 
+    reportProgress(0.2f);
+
     if (!parseHeightmap(data, offset))
     {
         logger.warning("Failed to parse heightmap, continuing...");
     }
+
+    reportProgress(0.6f);
 
     if (!parseBuildings(data, offset))
     {
         logger.warning("Failed to parse buildings, continuing...");
     }
 
+    reportProgress(0.85f);
+
     if (!parseSpawns(data, offset))
     {
         logger.warning("Failed to parse spawns, continuing...");
     }
+
+    reportProgress(0.95f);
 
     logger.info(std::format("Parsed ODM map: '{}' with {} buildings, {}x{} terrain",
                             mapData.levelName.empty() ? "(unnamed)" : mapData.levelName,
                             mapData.buildings.size(), ODMMapData::TERRAIN_SIZE,
                             ODMMapData::TERRAIN_SIZE));
 
+    reportProgress(1.0f);
     return true;
 }
 
@@ -408,6 +423,17 @@ std::string ODMMap::extractString(const char* data, size_t maxLen) const
         result += data[i];
     }
     return result;
+}
+
+void ODMMap::reportProgress(float value)
+{
+    if (!progressCallback)
+    {
+        return;
+    }
+
+    value = std::clamp(value, 0.0f, 1.0f);
+    progressCallback(value);
 }
 
 } // namespace runeharbor::formats

@@ -2,8 +2,10 @@
 #include "virtual_filesystem.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <format>
 
+#include "../formats/game_lod_archive.hpp"
 #include "../formats/image_lod_archive.hpp"
 #include "../formats/lod_archive.hpp"
 #include "../util/ilogger.hpp"
@@ -54,16 +56,35 @@ bool VirtualFileSystem::mountImageArchive(const std::filesystem::path& archivePa
     return true;
 }
 
+bool VirtualFileSystem::mountGameArchive(const std::filesystem::path& archivePath)
+{
+    auto archive = std::make_unique<formats::GameLODArchive>(logger);
+
+    if (!archive->open(archivePath))
+    {
+        logger.error(std::format("Failed to mount game archive: {}", archivePath.string()));
+        return false;
+    }
+
+    archivePaths.push_back(archivePath);
+    gameArchives.push_back(std::move(archive));
+
+    logger.info(std::format("Mounted game archive: {} ({} total game archives)",
+                            archivePath.filename().string(), gameArchives.size()));
+    return true;
+}
+
 void VirtualFileSystem::unmountAll()
 {
-    archives.clear();
-    imageArchives.clear();
-    archivePaths.clear();
-
-    if (!archives.empty() || !imageArchives.empty())
+    if (!archives.empty() || !imageArchives.empty() || !gameArchives.empty())
     {
         logger.info("Unmounted all archives");
     }
+
+    archives.clear();
+    imageArchives.clear();
+    gameArchives.clear();
+    archivePaths.clear();
 }
 
 std::optional<std::vector<uint8_t>> VirtualFileSystem::readFile(const std::string& filename)
@@ -98,19 +119,51 @@ std::optional<std::vector<uint8_t>> VirtualFileSystem::readFile(const std::strin
         }
     }
 
+    // Finally search game archives
+    for (size_t i = 0; i < gameArchives.size(); i++)
+    {
+        auto data = gameArchives[i]->extractFile(filename);
+        if (data.has_value())
+        {
+            logger.debug(
+                std::format("Read {} from game archive ({} bytes)", filename, data->size()));
+            return data;
+        }
+    }
+
     logger.warning(std::format("File not found in any archive: {}", filename));
     return std::nullopt;
 }
 
 bool VirtualFileSystem::fileExists(const std::string& filename)
 {
+    auto equalsIgnoreCase = [](const std::string& a, const std::string& b)
+    {
+        if (a.size() != b.size())
+        {
+            return false;
+        }
+        for (size_t i = 0; i < a.size(); i++)
+        {
+            if (std::tolower(static_cast<unsigned char>(a[i])) !=
+                std::tolower(static_cast<unsigned char>(b[i])))
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
     // Check text archives
     for (const auto& archive : archives)
     {
         auto files = archive->listFiles();
-        if (std::find(files.begin(), files.end(), filename) != files.end())
+        for (const auto& name : files)
         {
-            return true;
+            if (equalsIgnoreCase(name, filename))
+            {
+                return true;
+            }
         }
     }
 
@@ -118,9 +171,25 @@ bool VirtualFileSystem::fileExists(const std::string& filename)
     for (const auto& archive : imageArchives)
     {
         auto files = archive->listFiles();
-        if (std::find(files.begin(), files.end(), filename) != files.end())
+        for (const auto& name : files)
         {
-            return true;
+            if (equalsIgnoreCase(name, filename))
+            {
+                return true;
+            }
+        }
+    }
+
+    // Check game archives
+    for (const auto& archive : gameArchives)
+    {
+        auto files = archive->listFiles();
+        for (const auto& name : files)
+        {
+            if (equalsIgnoreCase(name, filename))
+            {
+                return true;
+            }
         }
     }
 
@@ -145,6 +214,13 @@ std::vector<std::string> VirtualFileSystem::listAllFiles() const
         allFiles.insert(allFiles.end(), files.begin(), files.end());
     }
 
+    // Collect files from game archives
+    for (const auto& archive : gameArchives)
+    {
+        auto files = archive->listFiles();
+        allFiles.insert(allFiles.end(), files.begin(), files.end());
+    }
+
     // Remove duplicates and sort
     std::sort(allFiles.begin(), allFiles.end());
     allFiles.erase(std::unique(allFiles.begin(), allFiles.end()), allFiles.end());
@@ -154,7 +230,7 @@ std::vector<std::string> VirtualFileSystem::listAllFiles() const
 
 size_t VirtualFileSystem::getMountedArchiveCount() const
 {
-    return archives.size() + imageArchives.size();
+    return archives.size() + imageArchives.size() + gameArchives.size();
 }
 
 std::optional<formats::ImageFileHeader> VirtualFileSystem::getImageInfo(const std::string& filename)

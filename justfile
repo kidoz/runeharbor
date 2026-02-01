@@ -1,32 +1,35 @@
 # RuneHarbor Engine - Build automation
 
+# Build directory (change this to customize build location)
+build_dir := "build"
+
 # Default recipe - show available commands
 default:
     @just --list
 
 # Setup debug build
 setup:
-    meson setup builddir --buildtype=debug
+    meson setup {{build_dir}} --buildtype=debug
 
 # Setup release build
 setup-release:
-    meson setup builddir --buildtype=release
+    meson setup {{build_dir}} --buildtype=release
 
 # Setup with address sanitizer
 setup-asan:
-    meson setup builddir -Db_sanitize=address,undefined --buildtype=debug
+    meson setup {{build_dir}} -Db_sanitize=address,undefined --buildtype=debug
 
 # Build the project
 build:
-    ninja -C builddir
+    ninja -C {{build_dir}}
 
 # Run the engine
 run: build
-    ./builddir/src/runeharbor
+    ./{{build_dir}}/src/runeharbor
 
 # Run with game data path
 run-with-data DATA_PATH: build
-    ./builddir/src/runeharbor --data {{DATA_PATH}}
+    ./{{build_dir}}/src/runeharbor --data {{DATA_PATH}}
 
 # ============================================================================
 # LOD Archive Tools
@@ -34,15 +37,15 @@ run-with-data DATA_PATH: build
 
 # List files in a LOD archive
 lod-list ARCHIVE: build
-    ./builddir/tools/lod-extract list {{ARCHIVE}}
+    ./{{build_dir}}/tools/lod-extract list {{ARCHIVE}}
 
 # Extract a single file from LOD archive
 lod-extract ARCHIVE FILENAME OUTPUT="": build
-    ./builddir/tools/lod-extract extract {{ARCHIVE}} {{FILENAME}} {{OUTPUT}}
+    ./{{build_dir}}/tools/lod-extract extract {{ARCHIVE}} {{FILENAME}} {{OUTPUT}}
 
 # Extract all files from LOD archive
 lod-extract-all ARCHIVE OUTPUT_DIR: build
-    ./builddir/tools/lod-extract extract-all {{ARCHIVE}} {{OUTPUT_DIR}}
+    ./{{build_dir}}/tools/lod-extract extract-all {{ARCHIVE}} {{OUTPUT_DIR}}
 
 # ============================================================================
 # Testing
@@ -50,20 +53,20 @@ lod-extract-all ARCHIVE OUTPUT_DIR: build
 
 # Run all unit tests
 test: build
-    meson test -C builddir --print-errorlogs
+    meson test -C {{build_dir}} --print-errorlogs
 
 # Run tests with verbose output
 test-verbose: build
-    meson test -C builddir --verbose
+    meson test -C {{build_dir}} --verbose
 
 # Run specific test by name
 test-filter PATTERN: build
-    meson test -C builddir --verbose {{PATTERN}}
+    meson test -C {{build_dir}} --verbose {{PATTERN}}
 
 # Run tests and show coverage (requires gcov setup)
 test-coverage: build
-    meson test -C builddir
-    ninja -C builddir coverage
+    meson test -C {{build_dir}}
+    ninja -C {{build_dir}} coverage
 
 # ============================================================================
 # Static Analysis
@@ -72,16 +75,16 @@ test-coverage: build
 # Run clang static analyzer (scan-build)
 analyze:
     @echo "Running Clang Static Analyzer..."
-    @rm -rf builddir-analyze
-    scan-build -o builddir-analyze/report meson setup builddir-analyze --buildtype=debug
-    scan-build -o builddir-analyze/report ninja -C builddir-analyze
+    @rm -rf {{build_dir}}-analyze
+    scan-build -o {{build_dir}}-analyze/report meson setup {{build_dir}}-analyze --buildtype=debug
+    scan-build -o {{build_dir}}-analyze/report ninja -C {{build_dir}}-analyze
     @echo ""
-    @echo "Analysis complete. Check builddir-analyze/report/ for results"
+    @echo "Analysis complete. Check {{build_dir}}-analyze/report/ for results"
 
 # Run clang-tidy on all source files
 tidy:
     @echo "Running clang-tidy..."
-    find src -name "*.cpp" | xargs clang-tidy -p builddir --
+    find src -name "*.cpp" | xargs clang-tidy -p {{build_dir}} --
 
 # Run all static analysis tools
 analyze-all: analyze tidy
@@ -100,25 +103,25 @@ valgrind: build
         --track-origins=yes \
         --verbose \
         --log-file=valgrind-report.txt \
-        ./builddir/src/runeharbor
+        ./{{build_dir}}/src/runeharbor
     @echo ""
     @echo "Valgrind report saved to: valgrind-report.txt"
     @cat valgrind-report.txt
 
 # Quick valgrind check (less verbose)
 valgrind-quick: build
-    valgrind --leak-check=yes ./builddir/src/runeharbor
+    valgrind --leak-check=yes ./{{build_dir}}/src/runeharbor
 
 # Run with address sanitizer (already built with setup-asan)
 sanitizer:
     @echo "Running with Address Sanitizer..."
     @echo "Make sure you built with: just setup-asan"
-    ./builddir/src/runeharbor
+    ./{{build_dir}}/src/runeharbor
 
 # Memory check with macOS leaks tool (macOS only)
 leaks: build
     @echo "Running macOS leaks tool..."
-    leaks --atExit -- ./builddir/src/runeharbor
+    leaks --atExit -- ./{{build_dir}}/src/runeharbor
 
 # ============================================================================
 # Code Quality
@@ -142,14 +145,14 @@ quality: format-check analyze test
 
 # Clean build directories
 clean:
-    rm -rf builddir builddir-* build-* valgrind-report.txt
+    rm -rf {{build_dir}} {{build_dir}}-* valgrind-report.txt
 
 # Rebuild from scratch
 rebuild: clean setup build
 
 # Reconfigure build (when meson.build changes)
 reconfigure:
-    meson setup --reconfigure builddir
+    meson setup --reconfigure {{build_dir}}
 
 # ============================================================================
 # Development Helpers
@@ -161,11 +164,11 @@ watch:
 
 # Run with debugging (lldb on macOS, gdb on Linux)
 debug: build
-    lldb ./builddir/src/runeharbor
+    lldb ./{{build_dir}}/src/runeharbor
 
 # Generate compilation database for IDEs
 compdb:
-    ninja -C builddir -t compdb > compile_commands.json
+    ninja -C {{build_dir}} -t compdb > compile_commands.json
 
 # Show build stats
 stats:

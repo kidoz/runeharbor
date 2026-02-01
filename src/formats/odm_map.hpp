@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -136,10 +137,12 @@ struct ODMMapData
 class ODMMap
 {
   public:
+    using ProgressCallback = std::function<void(float)>;
+
     explicit ODMMap(util::ILogger& logger);
 
     // Parse from raw decompressed ODM data
-    bool parse(const std::vector<uint8_t>& data);
+    bool parse(const std::vector<uint8_t>& data, ProgressCallback progress = {});
 
     // Access parsed data
     const ODMMapData& getData() const { return mapData; }
@@ -167,6 +170,9 @@ class ODMMap
 
     util::ILogger& logger;
     ODMMapData mapData;
+    ProgressCallback progressCallback;
+
+    void reportProgress(float value);
 };
 
 } // namespace runeharbor::formats

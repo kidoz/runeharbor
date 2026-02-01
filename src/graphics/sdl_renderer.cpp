@@ -89,7 +89,7 @@ void* SDLRenderer::createTexture(const Image& image)
     const uint8_t* pixels = image.data();
     int pitch = static_cast<int>(width * 4); // 4 bytes per pixel (RGBA)
 
-    if (!SDL_UpdateTexture(texture, nullptr, pixels, pitch))
+    if (SDL_UpdateTexture(texture, nullptr, pixels, pitch) != 0)
     {
         logger.error("Failed to update texture: " + std::string(SDL_GetError()));
         SDL_DestroyTexture(texture);
