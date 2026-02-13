@@ -1,10 +1,12 @@
+#include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
 #include "pcx_image.hpp"
 
 #include <algorithm>
-#include <cstring>
 #include <exception>
 #include <format>
+
+#include <cstring>
 
 namespace runeharbor::formats
 {
@@ -58,9 +60,16 @@ std::optional<PcxImage> decodePCX(const std::vector<uint8_t>& data, util::ILogge
         return std::nullopt;
     }
 
-    if (header.bitsPerPixel != 8 || header.colorPlanes != 1)
+    if (header.bitsPerPixel != 8)
     {
-        logger.error("PCX decode failed: only 8-bit, single-plane PCX is supported");
+        logger.error("PCX decode failed: only 8-bit PCX is supported");
+        return std::nullopt;
+    }
+
+    if (header.colorPlanes != 1 && header.colorPlanes != 3)
+    {
+        logger.error(
+            std::format("PCX decode failed: unsupported plane count {}", header.colorPlanes));
         return std::nullopt;
     }
 
@@ -78,6 +87,7 @@ std::optional<PcxImage> decodePCX(const std::vector<uint8_t>& data, util::ILogge
     const uint16_t width = static_cast<uint16_t>(xMax - xMin + 1);
     const uint16_t height = static_cast<uint16_t>(yMax - yMin + 1);
     const uint16_t bytesPerLine = read16(header.bytesPerLine);
+    const uint8_t nPlanes = header.colorPlanes;
 
     if (width == 0 || height == 0 || bytesPerLine == 0)
     {
@@ -85,7 +95,9 @@ std::optional<PcxImage> decodePCX(const std::vector<uint8_t>& data, util::ILogge
         return std::nullopt;
     }
 
-    size_t decodedTarget = static_cast<size_t>(bytesPerLine) * height;
+    // Total RLE-decoded bytes: bytesPerLine * nPlanes * height
+    size_t scanlineBytes = static_cast<size_t>(bytesPerLine) * nPlanes;
+    size_t decodedTarget = scanlineBytes * height;
     std::vector<uint8_t> decoded;
     decoded.reserve(decodedTarget);
 
@@ -115,39 +127,60 @@ std::optional<PcxImage> decodePCX(const std::vector<uint8_t>& data, util::ILogge
         return std::nullopt;
     }
 
-    std::vector<uint8_t> indices;
-    indices.resize(static_cast<size_t>(width) * height);
+    PcxImage result;
+    result.width = width;
+    result.height = height;
 
-    for (uint16_t y = 0; y < height; y++)
+    if (nPlanes == 1)
     {
-        const size_t srcOffset = static_cast<size_t>(y) * bytesPerLine;
-        const size_t dstOffset = static_cast<size_t>(y) * width;
-        std::copy_n(decoded.begin() + srcOffset, width, indices.begin() + dstOffset);
-    }
+        // 8-bit paletted mode
+        result.indices.resize(static_cast<size_t>(width) * height);
 
-    graphics::Palette palette = graphics::Palette::createDefaultPalette();
-    if (data.size() >= 769 && data[data.size() - 769] == 0x0C)
-    {
-        std::vector<uint8_t> paletteData(data.end() - 768, data.end());
-        try
+        for (uint16_t y = 0; y < height; y++)
         {
-            palette = graphics::Palette::fromRGBData(paletteData);
+            const size_t srcOffset = static_cast<size_t>(y) * bytesPerLine;
+            const size_t dstOffset = static_cast<size_t>(y) * width;
+            std::copy_n(decoded.begin() + srcOffset, width, result.indices.begin() + dstOffset);
         }
-        catch (const std::exception& ex)
+
+        result.palette = graphics::Palette::createDefaultPalette();
+        if (data.size() >= 769 && data[data.size() - 769] == 0x0C)
         {
-            logger.warning(std::format("PCX palette load failed: {}", ex.what()));
+            std::vector<uint8_t> paletteData(data.end() - 768, data.end());
+            try
+            {
+                result.palette = graphics::Palette::fromRGBData(paletteData);
+            }
+            catch (const std::exception& ex)
+            {
+                logger.warning(std::format("PCX palette load failed: {}", ex.what()));
+            }
+        }
+        else
+        {
+            logger.warning("PCX palette marker not found; using default palette");
         }
     }
     else
     {
-        logger.warning("PCX palette marker not found; using default palette");
+        // 24-bit RGB mode (3 planes)
+        size_t pixelCount = static_cast<size_t>(width) * height;
+        result.rgbaPixels.resize(pixelCount * 4);
+
+        for (uint16_t y = 0; y < height; y++)
+        {
+            size_t scanStart = static_cast<size_t>(y) * scanlineBytes;
+            for (uint16_t x = 0; x < width; x++)
+            {
+                size_t dstIdx = (static_cast<size_t>(y) * width + x) * 4;
+                result.rgbaPixels[dstIdx + 0] = decoded[scanStart + x];                    // R
+                result.rgbaPixels[dstIdx + 1] = decoded[scanStart + bytesPerLine + x];     // G
+                result.rgbaPixels[dstIdx + 2] = decoded[scanStart + 2 * bytesPerLine + x]; // B
+                result.rgbaPixels[dstIdx + 3] = 255;                                       // A
+            }
+        }
     }
 
-    PcxImage result;
-    result.width = width;
-    result.height = height;
-    result.indices = std::move(indices);
-    result.palette = palette;
     return result;
 }
 

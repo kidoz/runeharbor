@@ -4,18 +4,26 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
-#include <cctype>
 #include <exception>
 #include <filesystem>
 #include <format>
 #include <vector>
 
+#include <cctype>
+
+#include "../formats/image_lod_archive.hpp"
 #include "../formats/pcx_image.hpp"
+#include "../formats/sprite_parser.hpp"
 #include "../graphics/image.hpp"
 #include "../graphics/line_renderer.hpp"
+#include "../graphics/palette.hpp"
 #include "../graphics/sdl_renderer.hpp"
+#include "../graphics/world_renderer.hpp"
 #include "../platform/iwindow.hpp"
 #include "../util/ilogger.hpp"
+#include "../media/vid_archive.hpp"
+#include "../media/vid_manifest.hpp"
+#include "../media/video_player.hpp"
 #include "virtual_filesystem.hpp"
 
 namespace runeharbor::engine
@@ -59,9 +67,10 @@ const char* onOff(bool value)
 }
 
 const std::vector<std::string> kTitleMenuItems = {
-    "NEW GAME",
-    "LOAD GAME",
-    "QUIT",
+    "NEW",
+    "LOAD",
+    "CREDITS",
+    "EXIT",
 };
 
 const std::vector<std::string> kCharacterMenuItems = {
@@ -107,6 +116,8 @@ bool Application::initialize(const platform::WindowConfig& windowConfig)
     }
     logger.info("Renderer created successfully");
 
+    worldRenderer = std::make_unique<graphics::WorldRenderer>(
+        *dynamic_cast<graphics::SDLRenderer*>(renderer.get()), logger);
     lineRenderer = std::make_unique<graphics::LineRenderer>(renderer->getSDLRenderer(), logger);
     debugText = std::make_unique<graphics::DebugText>();
     mapScene = std::make_unique<MapScene>(logger);
@@ -115,7 +126,8 @@ bool Application::initialize(const platform::WindowConfig& windowConfig)
 
     logger.info("Press ESC or close window to exit");
 
-    setGameState(GameState::IntroVideo);
+    // TODO: Restore IntroVideo once video decoders are fixed
+    setGameState(GameState::TitleScreen);
     initialized = true;
     return true;
 }
@@ -270,6 +282,13 @@ void Application::configureBootFlow(const std::string& mapName, bool preferOutdo
     startupMapName = mapName;
     startupPreferOutdoor = preferOutdoor;
     autoLoadMap = autoLoad;
+
+    // If map name is specified via CLI, skip menu and go directly to loading
+    if (!mapName.empty() && autoLoad && gameState == GameState::TitleScreen)
+    {
+        quickStartReady = true;
+        setGameState(GameState::Loading);
+    }
 }
 
 bool Application::loadMap(const std::string& mapName)
@@ -547,6 +566,9 @@ void Application::run()
         updateViewport();
         renderFrame();
 
+        // Reset per-frame input state
+        window.resetFrameState();
+
         SDL_Delay(16); // ~60 FPS
     }
 
@@ -577,29 +599,9 @@ void Application::renderFrame()
         renderLoadingScreen();
         break;
     case GameState::InGame:
-        if (mapLoaded && mapScene && lineRenderer)
+        if (mapLoaded && mapScene && worldRenderer)
         {
-            lineRenderer->clear();
-            lineRenderer->setViewProjection(camera.getViewProjectionMatrix());
-
-            mapScene->renderWireframe(*lineRenderer, mapRenderOptions);
-
-            const auto& bounds = mapScene->getBounds();
-            float baseSize = bounds.valid ? std::max(bounds.radius(), 5000.0f) : 5000.0f;
-
-            if (showGrid)
-            {
-                float gridSpacing = baseSize / 10.0f;
-                lineRenderer->drawGrid(baseSize, gridSpacing, 60, 60, 60);
-            }
-
-            if (showAxes)
-            {
-                float axisSize = std::max(baseSize * 0.1f, 200.0f);
-                lineRenderer->drawAxes(graphics::Vec3(0, 0, 0), axisSize);
-            }
-
-            lineRenderer->render();
+            worldRenderer->render(*mapScene, camera);
         }
         break;
     }
@@ -631,6 +633,12 @@ void Application::updateViewport()
         viewportHeight = h;
         lineRenderer->setViewport(w, h);
         camera.setAspectRatio(static_cast<float>(w) / static_cast<float>(h));
+
+        // Re-layout menu buttons on viewport change
+        if (!titleMenuUI.buttons.empty())
+        {
+            layoutTitleMenuButtons();
+        }
     }
 }
 
@@ -722,6 +730,7 @@ void Application::setGameState(GameState state)
     {
         titleMenuIndex = 0;
         stateMessage.clear();
+        titleMenuUI.buttons.clear(); // Re-layout on next frame
     }
     else if (state == GameState::CharacterCreation)
     {
@@ -769,33 +778,74 @@ void Application::updateStateMachine()
         }
         break;
     case GameState::TitleScreen:
+        // Ensure buttons are laid out
+        if (titleMenuUI.buttons.empty())
+        {
+            layoutTitleMenuButtons();
+        }
+
+        // Update hover state from mouse position
+        updateTitleMenuHover();
+
+        // Keyboard navigation
         if (isKeyPressed(SDL_SCANCODE_UP))
         {
             titleMenuIndex = (titleMenuIndex + static_cast<int>(kTitleMenuItems.size()) - 1) %
                              static_cast<int>(kTitleMenuItems.size());
+            titleMenuUI.selectedIndex = titleMenuIndex;
         }
         if (isKeyPressed(SDL_SCANCODE_DOWN))
         {
             titleMenuIndex = (titleMenuIndex + 1) % static_cast<int>(kTitleMenuItems.size());
+            titleMenuUI.selectedIndex = titleMenuIndex;
         }
 
-        if (isKeyPressed(SDL_SCANCODE_RETURN))
+        // Handle selection (keyboard Enter or mouse click)
         {
-            if (titleMenuIndex == 0)
+            bool activated = isKeyPressed(SDL_SCANCODE_RETURN);
+
+            // Check for mouse click on any button
+            if (!activated && window.wasMousePressed(platform::MouseButton::Left))
             {
-                quickStartReady = false;
-                setGameState(GameState::CharacterCreation);
+                for (size_t i = 0; i < titleMenuUI.buttons.size(); i++)
+                {
+                    if (titleMenuUI.buttons[i].isHovered)
+                    {
+                        titleMenuIndex = static_cast<int>(i);
+                        titleMenuUI.selectedIndex = titleMenuIndex;
+                        activated = true;
+                        break;
+                    }
+                }
             }
-            else if (titleMenuIndex == 1)
+
+            if (activated)
             {
-                stateMessage = "Load game not implemented yet";
-            }
-            else if (titleMenuIndex == 2)
-            {
-                stateMessage = "Use ESC or window close to exit";
+                if (titleMenuIndex == 0)
+                {
+                    // NEW GAME
+                    quickStartReady = false;
+                    setGameState(GameState::CharacterCreation);
+                }
+                else if (titleMenuIndex == 1)
+                {
+                    // LOAD GAME
+                    stateMessage = "Load game not implemented yet";
+                }
+                else if (titleMenuIndex == 2)
+                {
+                    // CREDITS
+                    stateMessage = "Credits not implemented yet";
+                }
+                else if (titleMenuIndex == 3)
+                {
+                    // EXIT GAME
+                    stateMessage = "Use ESC or close window to exit";
+                }
             }
         }
 
+        // Keyboard shortcuts
         if (isKeyPressed(SDL_SCANCODE_N))
         {
             quickStartReady = false;
@@ -805,9 +855,13 @@ void Application::updateStateMachine()
         {
             stateMessage = "Load game not implemented yet";
         }
-        else if (isKeyPressed(SDL_SCANCODE_Q))
+        else if (isKeyPressed(SDL_SCANCODE_C))
         {
-            stateMessage = "Use ESC or window close to exit";
+            stateMessage = "Credits not implemented yet";
+        }
+        else if (isKeyPressed(SDL_SCANCODE_Q) || isKeyPressed(SDL_SCANCODE_E))
+        {
+            stateMessage = "Use ESC or close window to exit";
         }
         break;
     case GameState::CharacterCreation:
@@ -936,6 +990,8 @@ void Application::renderIntroVideo()
     videoPlayer->render(sdlRenderer, debugText.get(), viewportWidth, viewportHeight);
 }
 
+
+
 void Application::renderTitleScreen()
 {
     if (!renderer)
@@ -953,18 +1009,23 @@ void Application::renderTitleScreen()
         return;
     }
 
-    SDL_Renderer* sdlRenderer = renderer->getSDLRenderer();
-    SDL_SetRenderDrawBlendMode(sdlRenderer, SDL_BLENDMODE_BLEND);
+    // Render hover textures for buttons
+    for (const auto& button : titleMenuUI.buttons)
+    {
+        if (button.isHovered && button.hoverTexture)
+        {
+            renderer->renderTexture(button.hoverTexture, button.bounds.x, button.bounds.y,
+                                    button.bounds.width, button.bounds.height);
+        }
+    }
 
-    int scale = 3;
-    int menuX = 60;
-    int menuY = viewportHeight > 0 ? viewportHeight / 2 - 20 : 260;
-
-    renderMenu(kTitleMenuItems, titleMenuIndex, menuX, menuY, scale);
-
+    // Render any state message
     if (!stateMessage.empty())
     {
-        debugText->drawText(sdlRenderer, menuX, menuY + 120, 2, 255, 200, 120, stateMessage);
+        int scale = 2;
+        int x = 40;
+        int y = viewportHeight > 0 ? viewportHeight - 60 : 520;
+        debugText->drawText(renderer->getSDLRenderer(), x, y, scale, 255, 220, 80, stateMessage);
     }
 }
 
@@ -994,11 +1055,31 @@ void Application::renderCharacterCreation()
 
     int scale = 2;
     int menuX = 60;
-    int menuY = viewportHeight > 0 ? viewportHeight / 2 - 20 : 260;
+    int menuY = 100;
 
-    debugText->drawText(sdlRenderer, menuX, menuY - 60, 2, 255, 230, 180,
-                        "CHARACTER CREATION");
-    renderMenu(kCharacterMenuItems, characterMenuIndex, menuX, menuY, scale);
+    debugText->drawText(sdlRenderer, menuX, menuY, scale, 255, 230, 180, "CHARACTER CREATION");
+
+    // Display stats
+    int statY = menuY + 40;
+    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, "Name: " + current_character.name);
+    statY += 20;
+    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, std::format("Might: {}", current_character.stats.might));
+    statY += 20;
+    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, std::format("Intellect: {}", current_character.stats.intellect));
+    statY += 20;
+    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, std::format("Personality: {}", current_character.stats.personality));
+    statY += 20;
+    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, std::format("Endurance: {}", current_character.stats.endurance));
+    statY += 20;
+    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, std::format("Speed: {}", current_character.stats.speed));
+    statY += 20;
+    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, std::format("Accuracy: {}", current_character.stats.accuracy));
+    statY += 20;
+    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, std::format("Luck: {}", current_character.stats.luck));
+
+    // Render menu
+    int menuY_bottom = viewportHeight > 0 ? viewportHeight - 100 : 480;
+    renderMenu(kCharacterMenuItems, characterMenuIndex, menuX, menuY_bottom, scale);
 }
 
 void Application::renderLoadingScreen()
@@ -1014,14 +1095,14 @@ void Application::renderLoadingScreen()
         if (loadProgressActive.load() && loadingFrames.size() > 1)
         {
             float progress = std::clamp(loadProgress.load(), 0.0f, 1.0f);
-            frameIndex = static_cast<size_t>(progress * static_cast<float>(loadingFrames.size() - 1));
+            frameIndex =
+                static_cast<size_t>(progress * static_cast<float>(loadingFrames.size() - 1));
         }
         else if (loadingFrameDurationMs > 0)
         {
             uint64_t now = SDL_GetTicks();
-            frameIndex =
-                static_cast<size_t>((now - stateStartTicks) / loadingFrameDurationMs) %
-                loadingFrames.size();
+            frameIndex = static_cast<size_t>((now - stateStartTicks) / loadingFrameDurationMs) %
+                         loadingFrames.size();
         }
         renderFullscreenTexture(loadingFrames[frameIndex], loadingFrameWidths[frameIndex],
                                 loadingFrameHeights[frameIndex]);
@@ -1059,15 +1140,14 @@ void Application::renderLoadingScreen()
     int barWidth = 240;
     int barHeight = 10;
     int barY = y + debugText->lineHeight(scale) + 6;
-    SDL_FRect bg = {static_cast<float>(x), static_cast<float>(barY),
-                    static_cast<float>(barWidth), static_cast<float>(barHeight)};
+    SDL_FRect bg = {static_cast<float>(x), static_cast<float>(barY), static_cast<float>(barWidth),
+                    static_cast<float>(barHeight)};
     SDL_SetRenderDrawColor(sdlRenderer, 20, 20, 20, 200);
     SDL_RenderFillRect(sdlRenderer, &bg);
 
     float fill = std::clamp(loadProgress.load(), 0.0f, 1.0f);
     SDL_FRect fg = {static_cast<float>(x) + 1.0f, static_cast<float>(barY) + 1.0f,
-                    static_cast<float>((barWidth - 2) * fill),
-                    static_cast<float>(barHeight - 2)};
+                    static_cast<float>((barWidth - 2) * fill), static_cast<float>(barHeight - 2)};
     SDL_SetRenderDrawColor(sdlRenderer, 230, 200, 120, 220);
     SDL_RenderFillRect(sdlRenderer, &fg);
 }
@@ -1105,14 +1185,11 @@ void Application::renderOverlay()
             {
                 const auto& data = mapScene->getODMData();
                 lines.push_back("MAP: " + toUpper(mapScene->getName()));
-                lines.push_back(std::format("TERRAIN: {}x{}  BUILDINGS: {}",
-                                            data.heightmap.size() > 0
-                                                ? formats::ODMMapData::TERRAIN_SIZE
-                                                : 0,
-                                            data.heightmap.size() > 0
-                                                ? formats::ODMMapData::TERRAIN_SIZE
-                                                : 0,
-                                            data.buildings.size()));
+                lines.push_back(
+                    std::format("TERRAIN: {}x{}  BUILDINGS: {}",
+                                data.heightmap.size() > 0 ? formats::ODMMapData::TERRAIN_SIZE : 0,
+                                data.heightmap.size() > 0 ? formats::ODMMapData::TERRAIN_SIZE : 0,
+                                data.buildings.size()));
             }
         }
         else
@@ -1121,11 +1198,10 @@ void Application::renderOverlay()
         }
 
         lines.push_back("ARROWS ORBIT  Q/E ZOOM  WASD PAN  R RESET");
-        lines.push_back(std::format("F FLOORS:{}  V WALLS:{}  C CEIL:{}  P PORTAL:{}",
-                                    onOff(mapRenderOptions.showFloors),
-                                    onOff(mapRenderOptions.showWalls),
-                                    onOff(mapRenderOptions.showCeilings),
-                                    onOff(mapRenderOptions.showPortals)));
+        lines.push_back(
+            std::format("F FLOORS:{}  V WALLS:{}  C CEIL:{}  P PORTAL:{}",
+                        onOff(mapRenderOptions.showFloors), onOff(mapRenderOptions.showWalls),
+                        onOff(mapRenderOptions.showCeilings), onOff(mapRenderOptions.showPortals)));
         lines.push_back(std::format("L LIGHTS:{}  G GRID:{}  X AXES:{}  H HELP:{}",
                                     onOff(mapRenderOptions.showLights), onOff(showGrid),
                                     onOff(showAxes), onOff(showHelpOverlay)));
@@ -1150,8 +1226,7 @@ void Application::renderOverlay()
     int boxWidth = debugText->charWidth(scale) * maxLen + padding * 2;
     int boxHeight = debugText->lineHeight(scale) * static_cast<int>(lines.size()) + padding * 2;
 
-    SDL_FRect panel = {10.0f, 10.0f, static_cast<float>(boxWidth),
-                       static_cast<float>(boxHeight)};
+    SDL_FRect panel = {10.0f, 10.0f, static_cast<float>(boxWidth), static_cast<float>(boxHeight)};
     SDL_SetRenderDrawColor(sdlRenderer, 0, 0, 0, 180);
     SDL_RenderFillRect(sdlRenderer, &panel);
 
@@ -1178,13 +1253,16 @@ void Application::buildIntroPlaylist()
     const std::filesystem::path mightVid = animsPath / "Might7.vid";
 
     media::VidManifest manifest;
+    std::filesystem::path vidPath;
     bool loaded = false;
     if (std::filesystem::exists(magicVid) && manifest.load(magicVid))
     {
+        vidPath = magicVid;
         loaded = true;
     }
     else if (std::filesystem::exists(mightVid) && manifest.load(mightVid))
     {
+        vidPath = mightVid;
         loaded = true;
     }
 
@@ -1194,13 +1272,15 @@ void Application::buildIntroPlaylist()
         return;
     }
 
+    // Load the VID archive into the video player
+    if (videoPlayer && !vidPath.empty())
+    {
+        videoPlayer->loadArchive(vidPath);
+    }
+
     // Build a filtered intro list (logos + intro)
     const std::vector<std::string> preferred = {
-        "3DOLOGO.SMK",
-        "JVC.BIK",
-        "NEW WORLD LOGO.BIK",
-        "INTRO.BIK",
-        "INTRO POST.BIK",
+        "3DOLOGO.SMK", "JVC.BIK", "NEW WORLD LOGO.BIK", "INTRO.BIK", "INTRO POST.BIK",
     };
 
     auto clipMatches = [](const std::string& name, const std::string& target)
@@ -1262,6 +1342,21 @@ bool Application::loadUiAssets()
     loadPcxTexture({"loading.pcx", "Loading.pcx", "LOADING.PCX"}, "Loading", loadingBackground,
                    loadingBackgroundWidth, loadingBackgroundHeight);
 
+    // Load per-button hover textures from ICONS.LOD
+    // These are the highlighted versions shown when hovering/selecting a menu item
+    const std::vector<std::string> hoverNames[] = {
+        {"New1"},  // NEW GAME
+        {"Load1"}, // LOAD GAME
+        {"Cred1"}, // CREDITS (may not exist)
+        {"Quit1"}, // EXIT GAME
+    };
+    for (int i = 0; i < kTitleButtonCount; i++)
+    {
+        loadPcxTexture(hoverNames[i], std::string("Button ") + hoverNames[i][0],
+                       titleButtonHoverTextures[i], titleButtonHoverWidths[i],
+                       titleButtonHoverHeights[i]);
+    }
+
     uiAssetsLoaded = true;
     return true;
 }
@@ -1273,6 +1368,10 @@ void Application::unloadUiAssets()
         renderer->destroyTexture(titleBackground);
         renderer->destroyTexture(createBackground);
         renderer->destroyTexture(loadingBackground);
+        for (int i = 0; i < kTitleButtonCount; i++)
+        {
+            renderer->destroyTexture(titleButtonHoverTextures[i]);
+        }
         for (auto* tex : loadingFrames)
         {
             renderer->destroyTexture(tex);
@@ -1288,6 +1387,12 @@ void Application::unloadUiAssets()
     createBackgroundHeight = 0;
     loadingBackgroundWidth = 0;
     loadingBackgroundHeight = 0;
+    for (int i = 0; i < kTitleButtonCount; i++)
+    {
+        titleButtonHoverTextures[i] = nullptr;
+        titleButtonHoverWidths[i] = 0;
+        titleButtonHoverHeights[i] = 0;
+    }
     loadingFrames.clear();
     loadingFrameWidths.clear();
     loadingFrameHeights.clear();
@@ -1303,85 +1408,91 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
         return false;
     }
 
-    const auto allFiles = vfs->listAllFiles();
-
     for (const auto& name : candidates)
     {
-        std::optional<std::string> resolvedName;
-        std::string targetLower = toLower(name);
-        std::string targetStem = targetLower;
-        size_t dot = targetStem.find_last_of('.');
-        if (dot != std::string::npos)
-        {
-            targetStem = targetStem.substr(0, dot);
-        }
-
-        for (const auto& file : allFiles)
-        {
-            std::string fileLower = toLower(file);
-            if (fileLower == targetLower || fileLower == targetStem)
-            {
-                resolvedName = file;
-                break;
-            }
-            size_t fileDot = fileLower.find_last_of('.');
-            if (fileDot != std::string::npos &&
-                fileLower.substr(0, fileDot) == targetStem)
-            {
-                resolvedName = file;
-                break;
-            }
-        }
-
-        if (!resolvedName.has_value())
-        {
-            continue;
-        }
-
-        auto data = vfs->readFile(*resolvedName);
+        auto data = vfs->readFile(name);
         if (!data.has_value())
         {
             continue;
         }
 
         auto pcx = formats::decodePCX(*data, logger);
-        if (!pcx.has_value())
+        if (pcx.has_value())
         {
+            // Successfully decoded as PCX
+            try
+            {
+                std::unique_ptr<graphics::Image> image;
+                if (pcx->is24Bit())
+                {
+                    image = graphics::Image::fromRGBAData(pcx->rgbaPixels, pcx->width, pcx->height);
+                }
+                else
+                {
+                    image = graphics::Image::fromPalettedData(pcx->indices, pcx->width, pcx->height,
+                                                              pcx->palette);
+                }
+                if (image)
+                {
+                    void* tex = renderer->createTexture(*image);
+                    if (tex)
+                    {
+                        renderer->destroyTexture(textureHandle);
+                        textureHandle = tex;
+                        width = static_cast<int>(pcx->width);
+                        height = static_cast<int>(pcx->height);
+                        logger.info(std::format("Loaded UI texture '{}': {} ({}x{})", label,
+                                                name, width, height));
+                        return true;
+                    }
+                }
+            }
+            catch (const std::exception& ex)
+            {
+                logger.warning(
+                    std::format("Failed to convert PCX '{}': {}", name, ex.what()));
+            }
             continue;
         }
 
+        // Try loading as sprite
+        logger.debug(std::format("PCX decode failed for '{}', trying sprite", name));
+        formats::SpriteParser spriteParser(logger);
+        formats::Sprite sprite = spriteParser.parse(*data);
+
+        if (sprite.frames.empty())
+        {
+            logger.debug(std::format("Sprite parsing failed for '{}'", name));
+            continue;
+        }
+
+        auto& frame = sprite.frames[0];
         try
         {
-            auto image =
-                graphics::Image::fromPalettedData(pcx->indices, pcx->width, pcx->height,
-                                                  pcx->palette);
-            if (!image)
+            auto image = graphics::Image::fromPalettedData(frame.data, frame.width, frame.height, sprite.palette);
+            if (image)
             {
-                continue;
+                void* tex = renderer->createTexture(*image);
+                if (tex)
+                {
+                    renderer->destroyTexture(textureHandle);
+                    textureHandle = tex;
+                    width = static_cast<int>(frame.width);
+                    height = static_cast<int>(frame.height);
+                    logger.info(std::format("Loaded UI texture '{}' as sprite: {} ({}x{})", label,
+                                            name, width, height));
+                    return true;
+                }
             }
-
-            void* tex = renderer->createTexture(*image);
-            if (!tex)
-            {
-                continue;
-            }
-
-            renderer->destroyTexture(textureHandle);
-            textureHandle = tex;
-            width = static_cast<int>(pcx->width);
-            height = static_cast<int>(pcx->height);
-
-            logger.info(std::format("Loaded UI texture '{}': {} ({}x{})", label, *resolvedName,
-                                    width, height));
-            return true;
         }
-        catch (const std::exception& ex)
+        catch (const std::exception& e)
         {
             logger.warning(
-                std::format("Failed to convert PCX '{}': {}", *resolvedName, ex.what()));
+                std::format("Failed to convert sprite frame to image'{}': {}", name, e.what()));
         }
     }
 
+    logger.error(std::format("Failed to load texture '{}' from any candidate file", label));
     return false;
 }
 
@@ -1480,9 +1591,16 @@ bool Application::loadPcxSequence(const std::string& prefix, std::vector<void*>&
 
         try
         {
-            auto image =
-                graphics::Image::fromPalettedData(pcx->indices, pcx->width, pcx->height,
-                                                  pcx->palette);
+            std::unique_ptr<graphics::Image> image;
+            if (pcx->is24Bit())
+            {
+                image = graphics::Image::fromRGBAData(pcx->rgbaPixels, pcx->width, pcx->height);
+            }
+            else
+            {
+                image = graphics::Image::fromPalettedData(pcx->indices, pcx->width, pcx->height,
+                                                          pcx->palette);
+            }
             if (!image)
             {
                 continue;
@@ -1500,8 +1618,7 @@ bool Application::loadPcxSequence(const std::string& prefix, std::vector<void*>&
         }
         catch (const std::exception& ex)
         {
-            logger.warning(
-                std::format("Failed to convert PCX '{}': {}", entry.name, ex.what()));
+            logger.warning(std::format("Failed to convert PCX '{}': {}", entry.name, ex.what()));
         }
     }
 
@@ -1554,8 +1671,7 @@ void Application::renderMenu(const std::vector<std::string>& items, int selected
     }
     panelHeight = debugText->lineHeight(scale) * static_cast<int>(items.size());
 
-    SDL_FRect panel = {static_cast<float>(x - panelPadding),
-                       static_cast<float>(y - panelPadding),
+    SDL_FRect panel = {static_cast<float>(x - panelPadding), static_cast<float>(y - panelPadding),
                        static_cast<float>(panelWidth + panelPadding * 2),
                        static_cast<float>(panelHeight + panelPadding * 2)};
     SDL_SetRenderDrawColor(sdlRenderer, 10, 10, 10, 180);
@@ -1661,9 +1777,8 @@ void Application::runLoadingTask(LoadRequest request)
 
     updateLoadProgress(0.05f);
 
-    auto tryLoad = [&](const std::string& mapName, bool outdoor) -> bool {
-        return loadMapIntoScene(mapName, outdoor, scene, error);
-    };
+    auto tryLoad = [&](const std::string& mapName, bool outdoor) -> bool
+    { return loadMapIntoScene(mapName, outdoor, scene, error); };
 
     if (!request.mapName.empty())
     {
@@ -1880,42 +1995,86 @@ bool Application::isKeyPressed(SDL_Scancode code) const
         return false;
     }
     bool now = keyState[code];
-    bool before = previousKeyState.empty() ? false : previousKeyState[static_cast<size_t>(code)] != 0;
+    bool before =
+        previousKeyState.empty() ? false : previousKeyState[static_cast<size_t>(code)] != 0;
     return now && !before;
+}
+
+bool Application::isMouseOver(const graphics::Rect& rect) const
+{
+    auto mouseState = window.getMouseState();
+    return rect.contains(mouseState.x, mouseState.y);
+}
+
+bool Application::wasMouseClickedIn(const graphics::Rect& rect) const
+{
+    if (!window.wasMousePressed(platform::MouseButton::Left))
+    {
+        return false;
+    }
+
+    return isMouseOver(rect);
+}
+
+void Application::layoutTitleMenuButtons()
+{
+    if (viewportWidth == 0 || viewportHeight == 0)
+    {
+        return;
+    }
+    titleMenuUI.buttons.clear();
+
+    const int buttonWidth = 332;
+    const int buttonHeight = 70;
+    int currentY = static_cast<int>(static_cast<float>(viewportHeight) * 0.45f);
+
+    for (int i = 0; i < kTitleButtonCount; ++i)
+    {
+        MenuButton button;
+        button.id = kTitleMenuItems[static_cast<size_t>(i)];
+        button.bounds = {
+            (viewportWidth - buttonWidth) / 2,
+            currentY,
+            buttonWidth,
+            buttonHeight,
+        };
+        button.hoverTexture = titleButtonHoverTextures[i];
+        button.textureWidth = titleButtonHoverWidths[i];
+        button.textureHeight = titleButtonHoverHeights[i];
+        titleMenuUI.buttons.push_back(button);
+        currentY += buttonHeight;
+    }
+}
+
+void Application::updateTitleMenuHover()
+{
+    for (size_t i = 0; i < titleMenuUI.buttons.size(); ++i)
+    {
+        auto& button = titleMenuUI.buttons[i];
+        const bool mouseOver = isMouseOver(button.bounds);
+        if (mouseOver)
+        {
+            titleMenuIndex = static_cast<int>(i);
+            titleMenuUI.selectedIndex = titleMenuIndex;
+        }
+        button.isHovered = (mouseOver || (static_cast<int>(i) == titleMenuIndex));
+    }
 }
 
 void Application::shutdown()
 {
-    if (!initialized)
-    {
-        return;
-    }
-
     logger.info("Shutting down...");
 
-    if (loadingTaskActive.load())
+    if (loadingThread.joinable())
     {
-        if (loadingThread.joinable())
-        {
-            loadingThread.join();
-        }
-        loadingTaskActive.store(false);
-        loadingTaskDone.store(false);
+        loadingThread.join();
     }
 
     unloadUiAssets();
-
-    // Unmount all game data
-    if (gameDataLoaded && vfs)
-    {
-        vfs->unmountAll();
-        gameDataLoaded = false;
-    }
-
+    vfs->unmountAll();
+    renderer.reset();
     window.shutdown();
-    logger.info("Shutdown complete");
-
     initialized = false;
+    logger.info("Shutdown complete");
 }
-
 } // namespace runeharbor::engine

@@ -2,7 +2,7 @@
 #include "sdl_renderer.hpp"
 
 #include <SDL3/SDL.h>
-
+#include <vector>
 #include "image.hpp"
 
 namespace runeharbor::graphics
@@ -48,6 +48,8 @@ void SDLRenderer::clear(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
         return;
     }
 
+    updateViewport();
+
     SDL_SetRenderDrawColor(renderer, r, g, b, a);
     SDL_RenderClear(renderer);
 }
@@ -89,12 +91,15 @@ void* SDLRenderer::createTexture(const Image& image)
     const uint8_t* pixels = image.data();
     int pitch = static_cast<int>(width * 4); // 4 bytes per pixel (RGBA)
 
-    if (SDL_UpdateTexture(texture, nullptr, pixels, pitch) != 0)
+    if (!SDL_UpdateTexture(texture, nullptr, pixels, pitch))
     {
         logger.error("Failed to update texture: " + std::string(SDL_GetError()));
         SDL_DestroyTexture(texture);
         return nullptr;
     }
+
+    // Enable alpha blending for textures with transparency
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
 
     logger.debug("Created texture: " + std::to_string(width) + "x" + std::to_string(height));
     return texture;
@@ -142,6 +147,51 @@ void SDLRenderer::renderTexture(void* texture, int x, int y, int width, int heig
 
     // Render texture
     SDL_RenderTexture(renderer, sdlTexture, nullptr, &dstRect);
+}
+
+void SDLRenderer::renderTexturedPolygon(const std::vector<SDL_Vertex>& vertices, SDL_Texture* texture)
+{
+    if (!renderer)
+    {
+        logger.error("Cannot render polygon: renderer not initialized");
+        return;
+    }
+
+    if (vertices.size() < 3)
+    {
+        return; // Not a valid polygon
+    }
+
+    if (texture)
+    {
+        SDL_RenderGeometry(renderer, texture, vertices.data(), vertices.size(), nullptr, 0);
+    }
+    else
+    {
+        // Render a solid white polygon if no texture is provided
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+        SDL_RenderGeometry(renderer, nullptr, vertices.data(), vertices.size(), nullptr, 0);
+    }
+}
+
+int SDLRenderer::getViewportWidth() const
+{
+    return viewportWidth;
+}
+
+int SDLRenderer::getViewportHeight() const
+{
+    return viewportHeight;
+}
+
+void SDLRenderer::updateViewport()
+{
+    if (!renderer)
+    {
+        return;
+    }
+
+    SDL_GetRenderOutputSize(renderer, &viewportWidth, &viewportHeight);
 }
 
 } // namespace runeharbor::graphics

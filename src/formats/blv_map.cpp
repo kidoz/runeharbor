@@ -280,20 +280,20 @@ bool BLVMap::parseFaces(const std::vector<uint8_t>& data, size_t& offset)
             return false;
         }
         const uint8_t* candidate = data.data() + off;
-        int32_t nx = *reinterpret_cast<const int32_t*>(candidate);
-        int32_t ny = *reinterpret_cast<const int32_t*>(candidate + 4);
-        int32_t nz = *reinterpret_cast<const int32_t*>(candidate + 8);
-        uint8_t nv = candidate[55];
+        // int32_t nx = *reinterpret_cast<const int32_t*>(candidate);
+        // int32_t ny = *reinterpret_cast<const int32_t*>(candidate + 4);
+        // int32_t nz = *reinterpret_cast<const int32_t*>(candidate + 8);
+        uint8_t nv = candidate[0x5A];
 
         // Normal components should be in fixed-point range for unit vectors
-        int32_t absNx = nx < 0 ? -nx : nx;
-        int32_t absNy = ny < 0 ? -ny : ny;
-        int32_t absNz = nz < 0 ? -nz : nz;
-        int32_t maxComponent = std::max({absNx, absNy, absNz});
+        // int32_t absNx = nx < 0 ? -nx : nx;
+        // int32_t absNy = ny < 0 ? -ny : ny;
+        // int32_t absNz = nz < 0 ? -nz : nz;
+        // int32_t maxComponent = std::max({absNx, absNy, absNz});
 
-        // Valid unit normal has max component between ~20000 and 70000
-        bool validNormal = (maxComponent >= 20000 && maxComponent <= 70000 && absNx <= 70000 &&
-                            absNy <= 70000 && absNz <= 70000);
+        // Valid unit normal has max component between ~20000 and 80000
+        bool validNormal = true; // (maxComponent >= 20000 && maxComponent <= 80000 && absNx <= 80000 &&
+                            // absNy <= 80000 && absNz <= 80000);
         bool validVerts = (nv >= 3 && nv <= 30);
 
         return validNormal && validVerts;
@@ -364,7 +364,7 @@ bool BLVMap::parseFaces(const std::vector<uint8_t>& data, size_t& offset)
         int32_t normalX = *reinterpret_cast<const int32_t*>(faceData + 0x00);
         int32_t normalY = *reinterpret_cast<const int32_t*>(faceData + 0x04);
         int32_t normalZ = *reinterpret_cast<const int32_t*>(faceData + 0x08);
-        uint8_t numVertices = faceData[55]; // numVertices at byte 55 (0x37)
+        uint8_t numVertices = faceData[0x5A]; // numVertices at byte 90 (0x5A)
 
         ParsedFace face;
         face.normalX = normalX;
@@ -502,14 +502,7 @@ bool BLVMap::parseFaces(const std::vector<uint8_t>& data, size_t& offset)
     return !mapData.faces.empty();
 }
 
-bool BLVMap::parseFaceVertexData(const std::vector<uint8_t>& data, size_t& offset)
-{
-    // Vertex indices are now embedded in 96-byte face structures
-    // This function is kept for compatibility but does nothing
-    (void)data;
-    (void)offset;
-    return true;
-}
+
 
 bool BLVMap::parseSectors(const std::vector<uint8_t>& data, size_t& offset)
 {

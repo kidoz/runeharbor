@@ -2,6 +2,7 @@
 #include "vid_manifest.hpp"
 
 #include <algorithm>
+
 #include <cctype>
 #include <fstream>
 
@@ -81,11 +82,8 @@ bool VidManifest::load(const std::filesystem::path& path)
     unique.reserve(clipRefs.size());
     for (const auto& clip : clipRefs)
     {
-        auto it = std::find_if(unique.begin(), unique.end(),
-                               [&](const VideoClipRef& existing)
-                               {
-                                   return existing.name == clip.name;
-                               });
+        auto it = std::find_if(unique.begin(), unique.end(), [&](const VideoClipRef& existing)
+                               { return existing.name == clip.name; });
         if (it == unique.end())
         {
             unique.push_back(clip);

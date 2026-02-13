@@ -345,7 +345,6 @@ class BLVMap
     bool parseGeometryCounts(const std::vector<uint8_t>& data);
     bool parseVertices(const std::vector<uint8_t>& data, size_t& offset);
     bool parseFaces(const std::vector<uint8_t>& data, size_t& offset);
-    bool parseFaceVertexData(const std::vector<uint8_t>& data, size_t& offset);
     bool parseSectors(const std::vector<uint8_t>& data, size_t& offset);
     bool parseFaceExtras(const std::vector<uint8_t>& data, size_t& offset);
     bool parseDoors(const std::vector<uint8_t>& data, size_t& offset);

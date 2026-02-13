@@ -1,3 +1,4 @@
+#include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
 #include "lod_archive.hpp"
 
@@ -246,8 +247,8 @@ std::optional<std::vector<uint8_t>> LODArchive::extractFile(const std::string& f
         return decompressed;
     }
 
-    logger.info(std::format("Successfully extracted: {} ({} bytes raw)", target->name,
-                            compressed.size()));
+    logger.info(
+        std::format("Successfully extracted: {} ({} bytes raw)", target->name, compressed.size()));
     return compressed;
 }
 
@@ -310,8 +311,8 @@ bool LODArchive::buildDataIndex()
         std::streamoff dataOffset = cursor + 8;
         if (dataOffset + firstCompressedSize <= fileSize && firstCompressedSize > 0)
         {
-            dataEntries.push_back({firstName, firstCompressedSize, uncompressedSize, dataOffset,
-                                   flags});
+            dataEntries.push_back(
+                {firstName, firstCompressedSize, uncompressedSize, dataOffset, flags});
             cursor = dataOffset + firstCompressedSize;
         }
     }

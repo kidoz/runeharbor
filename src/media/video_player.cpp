@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: MIT
 #include "video_player.hpp"
 
+#include <SDL3/SDL.h>
+
+#include "../graphics/debug_text.hpp"
 #include "bink_decoder.hpp"
 #include "smacker_decoder.hpp"
 #include "vid_archive.hpp"
-
-#include "../graphics/debug_text.hpp"
-
-#include <SDL3/SDL.h>
 
 // Include audio frame types
 using runeharbor::media::BinkAudioFrame;
@@ -20,6 +19,7 @@ VideoPlayer::VideoPlayer() = default;
 
 VideoPlayer::~VideoPlayer()
 {
+    closeAudioStream();
     destroyTexture();
 }
 
@@ -87,6 +87,8 @@ void VideoPlayer::stop()
     finished_ = true;
     currentFrame_ = 0;
     smackerDecoder_.reset();
+    binkDecoder_.reset();
+    closeAudioStream();
     destroyTexture();
 }
 
@@ -96,6 +98,10 @@ void VideoPlayer::pause()
     {
         paused_ = true;
         pauseStartTicks_ = SDL_GetTicks();
+        if (audioStream_)
+        {
+            SDL_PauseAudioStreamDevice(audioStream_);
+        }
     }
 }
 
@@ -105,6 +111,10 @@ void VideoPlayer::resume()
     {
         totalPausedTime_ += SDL_GetTicks() - pauseStartTicks_;
         paused_ = false;
+        if (audioStream_)
+        {
+            SDL_ResumeAudioStreamDevice(audioStream_);
+        }
     }
 }
 
@@ -126,6 +136,10 @@ void VideoPlayer::update(uint64_t nowTicks)
     }
 
     updateFrame(nowTicks);
+    if (active_ && !paused_)
+    {
+        queueAudioForCurrentFrame();
+    }
 }
 
 void VideoPlayer::updateFrame(uint64_t nowTicks)
@@ -195,6 +209,7 @@ void VideoPlayer::advanceToNextClip(uint64_t nowTicks)
         finished_ = true;
         smackerDecoder_.reset();
         binkDecoder_.reset();
+        closeAudioStream();
         return;
     }
 
@@ -209,6 +224,7 @@ bool VideoPlayer::loadCurrentClip()
 {
     smackerDecoder_.reset();
     binkDecoder_.reset();
+    closeAudioStream();
 
     if (currentIndex_ >= playlist_.size())
     {
@@ -253,6 +269,7 @@ bool VideoPlayer::loadCurrentClip()
             return false;
         }
 
+        setupAudioStream();
         return true;
     }
     else if (entry->format == VideoFormat::Bink)
@@ -271,6 +288,7 @@ bool VideoPlayer::loadCurrentClip()
             return false;
         }
 
+        setupAudioStream();
         return true;
     }
 
@@ -446,7 +464,7 @@ bool VideoPlayer::hasAudio() const
 {
     if (smackerDecoder_)
     {
-        return smackerDecoder_->hasAudio(0);
+        return smackerDecoder_->hasAudio(1); // Changed from 0 to 1 for Smacker
     }
     if (binkDecoder_)
     {
@@ -459,7 +477,7 @@ uint32_t VideoPlayer::audioSampleRate() const
 {
     if (smackerDecoder_)
     {
-        auto info = smackerDecoder_->getAudioInfo(0);
+        auto info = smackerDecoder_->getAudioInfo(1); // Changed from 0 to 1 for Smacker
         return info.sampleRate;
     }
     if (binkDecoder_)
@@ -474,7 +492,7 @@ uint8_t VideoPlayer::audioChannels() const
 {
     if (smackerDecoder_)
     {
-        auto info = smackerDecoder_->getAudioInfo(0);
+        auto info = smackerDecoder_->getAudioInfo(1); // Changed from 0 to 1 for Smacker
         return info.isStereo ? 2 : 1;
     }
     if (binkDecoder_)
@@ -487,23 +505,124 @@ uint8_t VideoPlayer::audioChannels() const
 
 std::vector<int16_t> VideoPlayer::getAudioSamples()
 {
+    std::vector<int16_t> samples;
+    if (decodeAudioFrame(currentFrame_, samples))
+    {
+        return samples;
+    }
+    return {};
+}
+
+void VideoPlayer::setupAudioStream()
+{
+    if (!hasAudio())
+    {
+        closeAudioStream();
+        return;
+    }
+
+    uint32_t sampleRate = audioSampleRate();
+    uint8_t channels = audioChannels();
+    if (sampleRate == 0 || channels == 0)
+    {
+        closeAudioStream();
+        return;
+    }
+
+    if (audioStream_ && sampleRate == audioStreamRate_ && channels == audioStreamChannels_)
+    {
+        SDL_ClearAudioStream(audioStream_);
+        lastAudioFrameQueued_ = UINT32_MAX;
+        SDL_ResumeAudioStreamDevice(audioStream_);
+        return;
+    }
+
+    closeAudioStream();
+
+    SDL_AudioSpec spec{};
+    spec.format = SDL_AUDIO_S16;
+    spec.channels = static_cast<int>(channels);
+    spec.freq = static_cast<int>(sampleRate);
+
+    audioStream_ =
+        SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+    if (!audioStream_)
+    {
+        return;
+    }
+
+    audioStreamRate_ = sampleRate;
+    audioStreamChannels_ = channels;
+    lastAudioFrameQueued_ = UINT32_MAX;
+    SDL_ResumeAudioStreamDevice(audioStream_);
+}
+
+void VideoPlayer::closeAudioStream()
+{
+    if (audioStream_)
+    {
+        SDL_DestroyAudioStream(audioStream_);
+        audioStream_ = nullptr;
+    }
+    audioStreamRate_ = 0;
+    audioStreamChannels_ = 0;
+    lastAudioFrameQueued_ = UINT32_MAX;
+}
+
+void VideoPlayer::queueAudioForCurrentFrame()
+{
+    if (!audioStream_ || !active_ || paused_ || !hasAudio())
+    {
+        return;
+    }
+
+    if (lastAudioFrameQueued_ != UINT32_MAX && currentFrame_ < lastAudioFrameQueued_)
+    {
+        SDL_ClearAudioStream(audioStream_);
+        lastAudioFrameQueued_ = UINT32_MAX;
+    }
+
+    uint32_t startFrame =
+        (lastAudioFrameQueued_ == UINT32_MAX) ? currentFrame_ : lastAudioFrameQueued_ + 1;
+    if (startFrame > currentFrame_)
+    {
+        return;
+    }
+
+    for (uint32_t frame = startFrame; frame <= currentFrame_; frame++)
+    {
+        std::vector<int16_t> samples;
+        if (decodeAudioFrame(frame, samples) && !samples.empty())
+        {
+            SDL_PutAudioStreamData(audioStream_, samples.data(),
+                                   static_cast<int>(samples.size() * sizeof(int16_t)));
+        }
+    }
+
+    lastAudioFrameQueued_ = currentFrame_;
+}
+
+bool VideoPlayer::decodeAudioFrame(uint32_t frameIndex, std::vector<int16_t>& outSamples)
+{
     if (smackerDecoder_)
     {
         SmackerAudioFrame audioFrame;
-        if (smackerDecoder_->decodeAudio(currentFrame_, 0, audioFrame))
+        if (smackerDecoder_->decodeAudio(frameIndex, 1, audioFrame)) // Changed from 0 to 1 for Smacker
         {
-            return audioFrame.samples;
+            outSamples = audioFrame.samples;
+            return true;
         }
     }
     if (binkDecoder_)
     {
         BinkAudioFrame audioFrame;
-        if (binkDecoder_->decodeAudio(currentFrame_, 0, audioFrame))
+        if (binkDecoder_->decodeAudio(frameIndex, 0, audioFrame))
         {
-            return audioFrame.samples;
+            outSamples = audioFrame.samples;
+            return true;
         }
     }
-    return {};
+    return false;
 }
 
 } // namespace runeharbor::media

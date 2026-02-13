@@ -35,6 +35,22 @@ test_sources = files(
     'util/console_logger_test.cpp',
     'platform/window_test.cpp',
     'formats/lod_archive_test.cpp',
+    'formats/event_file_parser_test.cpp',
+    'formats/global_text_parser_test.cpp',
+    'formats/spells_parser_test.cpp',
+    'formats/items_parser_test.cpp',
+    'formats/monsters_parser_test.cpp',
+    'formats/mapstats_parser_test.cpp',
+    'formats/quests_parser_test.cpp',
+    'formats/classes_parser_test.cpp',
+    'formats/awards_parser_test.cpp',
+    'formats/hostile_parser_test.cpp',
+    'formats/npctext_parser_test.cpp',
+    'formats/npcnamess_parser_test.cpp',
+    'formats/autonote_parser_test.cpp',
+    'formats/credits_parser_test.cpp',
+    'media/smacker_decoder_test.cpp',
+    'media/bink_decoder_test.cpp',
     # Note: application_test.cpp temporarily disabled due to SIGBUS issue
     # TODO: Debug and re-enable
     # 'engine/application_test.cpp',
@@ -43,16 +59,60 @@ test_sources = files(
 # Reuse source files from main build (without main.cpp)
 test_util_sources = files(
     '../src/util/console_logger.cpp',
+    '../src/util/string_utils.cpp',
+    '../src/util/fft.cpp',
 )
 
 test_formats_sources = files(
     '../src/formats/lod_archive.cpp',
+    '../src/formats/image_lod_archive.cpp',
+    '../src/formats/game_lod_archive.cpp',
+    '../src/formats/snd_archive.cpp',
+    '../src/formats/sound_list.cpp',
+    '../src/formats/pcx_image.cpp',
+    '../src/formats/sprite_parser.cpp',
+    '../src/formats/blv_map.cpp',
+    '../src/formats/odm_map.cpp',
+    '../src/formats/event_file_parser.cpp',
+    '../src/formats/global_text_parser.cpp',
+    '../src/formats/spells_parser.cpp',
+    '../src/formats/items_parser.cpp',
+    '../src/formats/monsters_parser.cpp',
+    '../src/formats/mapstats_parser.cpp',
+    '../src/formats/quests_parser.cpp',
+    '../src/formats/classes_parser.cpp',
+    '../src/formats/awards_parser.cpp',
+    '../src/formats/hostile_parser.cpp',
+    '../src/formats/npctext_parser.cpp',
+    '../src/formats/npcnamess_parser.cpp',
+    '../src/formats/autonote_parser.cpp',
+    '../src/formats/credits_parser.cpp',
 )
 
-# Note: engine sources temporarily excluded
-# test_engine_sources = files(
-#     '../src/engine/application.cpp',
-# )
+test_graphics_sources = files(
+    '../src/graphics/camera.cpp',
+    '../src/graphics/debug_text.cpp',
+    '../src/graphics/image.cpp',
+    '../src/graphics/line_renderer.cpp',
+    '../src/graphics/palette.cpp',
+    '../src/graphics/sdl_renderer.cpp',
+    '../src/graphics/world_renderer.cpp',
+    '../src/graphics/indoor_renderer.cpp',
+)
+
+test_media_sources = files(
+    '../src/media/vid_manifest.cpp',
+    '../src/media/video_player.cpp',
+    '../src/media/vid_archive.cpp',
+    '../src/media/bink_decoder.cpp',
+    '../src/media/smacker_decoder.cpp',
+)
+
+test_engine_sources = files(
+    '../src/engine/application.cpp',
+    '../src/engine/virtual_filesystem.cpp',
+    '../src/engine/map_scene.cpp',
+)
 
 # Note: We don't include sdl_window.cpp in tests because it requires SDL
 # We use mocks instead for testing
@@ -75,7 +135,9 @@ test_exe = executable(
         test_sources,
         test_util_sources,
         test_formats_sources,
-        # test_engine_sources,  # Temporarily excluded
+        test_graphics_sources,
+        test_media_sources,
+        test_engine_sources,
     ],
     include_directories: inc_dirs,
     dependencies: [catch2_dep, sdl3_dep, zlib_dep],

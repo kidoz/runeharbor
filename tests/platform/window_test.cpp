@@ -37,6 +37,12 @@ class MockWindow : public IWindow
 
     SDL_Window* getSDLWindow() override { return nullptr; }
 
+    MouseState getMouseState() const override { return {}; }
+    bool wasMouseClicked(MouseButton) const override { return false; }
+    bool wasMousePressed(MouseButton) const override { return false; }
+    void resetFrameState() override {}
+
+
     // Test control
     bool shouldSucceed = true;
     bool closeRequested = false;

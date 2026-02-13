@@ -19,6 +19,24 @@ struct WindowConfig
     bool resizable = true;
 };
 
+/// Mouse button indices
+enum class MouseButton
+{
+    Left = 0,
+    Middle = 1,
+    Right = 2
+};
+
+/// Current state of the mouse
+struct MouseState
+{
+    int x = 0;
+    int y = 0;
+    bool leftButton = false;
+    bool middleButton = false;
+    bool rightButton = false;
+};
+
 class IWindow
 {
   public:
@@ -32,6 +50,18 @@ class IWindow
 
     /// Get the underlying SDL window (for advanced use)
     virtual SDL_Window* getSDLWindow() = 0;
+
+    /// Get the current mouse state (position and button states)
+    virtual MouseState getMouseState() const = 0;
+
+    /// Check if a mouse button was clicked this frame (pressed and released)
+    virtual bool wasMouseClicked(MouseButton button = MouseButton::Left) const = 0;
+
+    /// Check if a mouse button was just pressed this frame (transition from up to down)
+    virtual bool wasMousePressed(MouseButton button = MouseButton::Left) const = 0;
+
+    /// Reset per-frame input state (call at end of frame)
+    virtual void resetFrameState() = 0;
 };
 
 } // namespace runeharbor::platform

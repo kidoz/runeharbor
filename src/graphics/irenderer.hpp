@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <SDL3/SDL.h>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 // Forward declarations
 struct SDL_Renderer;
@@ -46,8 +48,19 @@ class IRenderer
     /// @param height Height to render (0 = use texture height)
     virtual void renderTexture(void* texture, int x, int y, int width = 0, int height = 0) = 0;
 
+    /// Render a textured polygon from a list of vertices
+    /// @param vertices The vertices of the polygon
+    /// @param texture The texture to apply
+    virtual void renderTexturedPolygon(const std::vector<SDL_Vertex>& vertices, SDL_Texture* texture) = 0;
+
     /// Get the underlying SDL renderer (for advanced use)
     virtual SDL_Renderer* getSDLRenderer() = 0;
+
+    /// Get the viewport width
+    virtual int getViewportWidth() const = 0;
+
+    /// Get the viewport height
+    virtual int getViewportHeight() const = 0;
 };
 
 } // namespace runeharbor::graphics

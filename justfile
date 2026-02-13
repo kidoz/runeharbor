@@ -29,7 +29,11 @@ run: build
 
 # Run with game data path
 run-with-data DATA_PATH: build
-    ./{{build_dir}}/src/runeharbor --data {{DATA_PATH}}
+    ./{{build_dir}}/src/runeharbor --data "{{DATA_PATH}}"
+
+# Run with game data path and map
+run-map DATA_PATH MAP_NAME: build
+    ./{{build_dir}}/src/runeharbor --data "{{DATA_PATH}}" --map "{{MAP_NAME}}"
 
 # ============================================================================
 # LOD Archive Tools

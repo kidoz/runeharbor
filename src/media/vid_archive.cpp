@@ -2,6 +2,7 @@
 #include "vid_archive.hpp"
 
 #include <algorithm>
+
 #include <cctype>
 #include <cstring>
 
@@ -14,10 +15,8 @@ VIDArchive::~VIDArchive()
 }
 
 VIDArchive::VIDArchive(VIDArchive&& other) noexcept
-    : path_(std::move(other.path_))
-    , file_(std::move(other.file_))
-    , entries_(std::move(other.entries_))
-    , fileSize_(other.fileSize_)
+    : path_(std::move(other.path_)), file_(std::move(other.file_)),
+      entries_(std::move(other.entries_)), fileSize_(other.fileSize_)
 {
     other.fileSize_ = 0;
 }
@@ -143,8 +142,8 @@ VideoFormat VIDArchive::detectFormat(uint32_t offset)
         return VideoFormat::Unknown;
     }
 
-    // Check for Smacker format (SMK2)
-    if (std::memcmp(magic, "SMK2", 4) == 0)
+    // Check for Smacker format (SMK2 or SMK4)
+    if (std::memcmp(magic, "SMK2", 4) == 0 || std::memcmp(magic, "SMK4", 4) == 0)
     {
         return VideoFormat::Smacker;
     }

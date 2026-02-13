@@ -1,3 +1,4 @@
+#include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
 #include "sprite_lod_archive.hpp"
 

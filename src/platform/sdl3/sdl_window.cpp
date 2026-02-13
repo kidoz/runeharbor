@@ -106,6 +106,93 @@ void SdlWindow::processEvents()
         {
             closeRequested = true;
         }
+        else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+        {
+            int buttonIndex = -1;
+            if (event.button.button == SDL_BUTTON_LEFT)
+            {
+                buttonIndex = static_cast<int>(MouseButton::Left);
+                mouseState_.leftButton = true;
+            }
+            else if (event.button.button == SDL_BUTTON_MIDDLE)
+            {
+                buttonIndex = static_cast<int>(MouseButton::Middle);
+                mouseState_.middleButton = true;
+            }
+            else if (event.button.button == SDL_BUTTON_RIGHT)
+            {
+                buttonIndex = static_cast<int>(MouseButton::Right);
+                mouseState_.rightButton = true;
+            }
+
+            if (buttonIndex >= 0 && buttonIndex < kMouseButtonCount)
+            {
+                mouseButtonPressed_[buttonIndex] = true;
+            }
+        }
+        else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP)
+        {
+            int buttonIndex = -1;
+            if (event.button.button == SDL_BUTTON_LEFT)
+            {
+                buttonIndex = static_cast<int>(MouseButton::Left);
+                mouseState_.leftButton = false;
+            }
+            else if (event.button.button == SDL_BUTTON_MIDDLE)
+            {
+                buttonIndex = static_cast<int>(MouseButton::Middle);
+                mouseState_.middleButton = false;
+            }
+            else if (event.button.button == SDL_BUTTON_RIGHT)
+            {
+                buttonIndex = static_cast<int>(MouseButton::Right);
+                mouseState_.rightButton = false;
+            }
+
+            if (buttonIndex >= 0 && buttonIndex < kMouseButtonCount)
+            {
+                mouseButtonClicked_[buttonIndex] = true;
+            }
+        }
+        else if (event.type == SDL_EVENT_MOUSE_MOTION)
+        {
+            mouseState_.x = static_cast<int>(event.motion.x);
+            mouseState_.y = static_cast<int>(event.motion.y);
+        }
+    }
+}
+
+MouseState SdlWindow::getMouseState() const
+{
+    return mouseState_;
+}
+
+bool SdlWindow::wasMouseClicked(MouseButton button) const
+{
+    int index = static_cast<int>(button);
+    if (index >= 0 && index < kMouseButtonCount)
+    {
+        return mouseButtonClicked_[index];
+    }
+    return false;
+}
+
+bool SdlWindow::wasMousePressed(MouseButton button) const
+{
+    int index = static_cast<int>(button);
+    if (index >= 0 && index < kMouseButtonCount)
+    {
+        return mouseButtonPressed_[index];
+    }
+    return false;
+}
+
+void SdlWindow::resetFrameState()
+{
+    for (int i = 0; i < kMouseButtonCount; i++)
+    {
+        mouseButtonPressed_[i] = false;
+        mouseButtonClicked_[i] = false;
     }
 }
 

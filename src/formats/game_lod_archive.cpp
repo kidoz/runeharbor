@@ -1,10 +1,11 @@
+#include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
 #include "game_lod_archive.hpp"
 
 #include <algorithm>
 #include <format>
-#include <cctype>
 
+#include <cctype>
 #include <cstring>
 #include <zlib.h>
 

@@ -2,8 +2,9 @@
 #include "virtual_filesystem.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <format>
+
+#include <cctype>
 
 #include "../formats/game_lod_archive.hpp"
 #include "../formats/image_lod_archive.hpp"
@@ -12,6 +13,7 @@
 
 namespace runeharbor::engine
 {
+using namespace std;
 
 VirtualFileSystem::VirtualFileSystem(util::ILogger& logger) : logger(logger) {}
 

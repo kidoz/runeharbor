@@ -29,6 +29,10 @@ class Image
                                                    uint32_t width, uint32_t height,
                                                    const Palette& palette);
 
+    /// Create from pre-existing RGBA data (4 bytes per pixel)
+    static std::unique_ptr<Image> fromRGBAData(const std::vector<uint8_t>& rgbaData, uint32_t width,
+                                               uint32_t height);
+
     uint32_t getWidth() const { return width; }
     uint32_t getHeight() const { return height; }
 

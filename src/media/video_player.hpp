@@ -9,6 +9,7 @@
 
 struct SDL_Renderer;
 struct SDL_Texture;
+struct SDL_AudioStream;
 
 namespace runeharbor::graphics
 {
@@ -108,6 +109,12 @@ class VideoPlayer
     uint32_t textureWidth_ = 0;
     uint32_t textureHeight_ = 0;
 
+    // Audio playback
+    SDL_AudioStream* audioStream_ = nullptr;
+    uint32_t audioStreamRate_ = 0;
+    uint8_t audioStreamChannels_ = 0;
+    uint32_t lastAudioFrameQueued_ = UINT32_MAX;
+
     // Internal methods
     bool loadCurrentClip();
     void advanceToNextClip(uint64_t nowTicks);
@@ -117,6 +124,10 @@ class VideoPlayer
                            int height);
     void destroyTexture();
     VIDArchive* findArchiveWithClip(const std::string& name);
+    void setupAudioStream();
+    void closeAudioStream();
+    void queueAudioForCurrentFrame();
+    bool decodeAudioFrame(uint32_t frameIndex, std::vector<int16_t>& outSamples);
 };
 
 } // namespace runeharbor::media

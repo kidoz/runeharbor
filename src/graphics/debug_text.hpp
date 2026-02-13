@@ -13,8 +13,8 @@ namespace runeharbor::graphics
 class DebugText
 {
   public:
-    void drawText(SDL_Renderer* renderer, int x, int y, int scale, uint8_t r, uint8_t g,
-                  uint8_t b, std::string_view text) const;
+    void drawText(SDL_Renderer* renderer, int x, int y, int scale, uint8_t r, uint8_t g, uint8_t b,
+                  std::string_view text) const;
 
     int measureTextWidth(std::string_view text, int scale) const;
     int lineHeight(int scale) const { return (fontHeight + 1) * scale; }

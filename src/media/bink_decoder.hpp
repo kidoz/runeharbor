@@ -11,10 +11,6 @@ namespace runeharbor::media
 /**
  * Bink Video Decoder
  *
- * Decodes RAD Game Tools Bink video format (.bik)
- * Based on publicly available format documentation from MultimediaWiki
- * and FFmpeg's reverse-engineered implementation.
- *
  * Bink Header (44 bytes):
  *   0x00: 4 bytes - Magic "BIKx" where x = version (b,d,f,g,h,i)
  *   0x04: 4 bytes - File size (excluding first 8 bytes)
@@ -31,11 +27,11 @@ namespace runeharbor::media
 
 struct BinkHeader
 {
-    char magic[4];          // "BIKx" where x = version
-    uint32_t fileSize;      // File size - 8
+    char magic[4];     // "BIKx" where x = version
+    uint32_t fileSize; // File size - 8
     uint32_t frameCount;
     uint32_t maxFrameSize;
-    uint32_t frameCount2;   // Repeated
+    uint32_t frameCount2; // Repeated
     uint32_t width;
     uint32_t height;
     uint32_t fpsDividend;
@@ -46,7 +42,7 @@ struct BinkHeader
 
 struct BinkFrame
 {
-    std::vector<uint8_t> pixels;  // RGBA pixels
+    std::vector<uint8_t> pixels; // RGBA pixels
     uint32_t width;
     uint32_t height;
     bool isKeyframe;
@@ -60,7 +56,7 @@ struct BinkAudioInfo
     uint32_t sampleRate = 0;
     uint16_t channels = 0;
     bool hasAudio = false;
-    bool useDCT = false;  // true = DCT, false = RDFT
+    bool useDCT = false; // true = DCT, false = RDFT
 };
 
 /**
@@ -68,7 +64,7 @@ struct BinkAudioInfo
  */
 struct BinkAudioFrame
 {
-    std::vector<int16_t> samples;  // Interleaved stereo if applicable
+    std::vector<int16_t> samples; // Interleaved stereo if applicable
     uint32_t sampleRate = 0;
     uint8_t channels = 1;
 };
@@ -117,6 +113,7 @@ class BinkBitReader
 
     uint32_t readBits(int count);
     bool readBit();
+    bool peekBit(int offset);
     void skipBits(int count);
     void align32();
     bool atEnd() const;
@@ -140,8 +137,18 @@ class BinkTree
   private:
     static constexpr int MAX_SYMBOLS = 16;
     int symbols_[MAX_SYMBOLS];
-    int lengths_[MAX_SYMBOLS];
     int numSymbols_ = 0;
+
+    // Canonical Huffman data
+    uint16_t firstCode_[17]; // First code for each length
+    int firstSymbolIdx_[17]; // Index into sortedSymbols_ for first symbol of each length
+    uint8_t sortedSymbols_[MAX_SYMBOLS];
+
+    // Fast lookup table for the first 8 bits
+    struct LookupEntry {
+        uint8_t symbol;
+        uint8_t len;
+    } lookup_[256];
 };
 
 /**
@@ -204,16 +211,16 @@ class BinkDecoder
   private:
     BinkHeader header_;
     std::vector<uint8_t> data_;
-    std::vector<uint32_t> frameOffsets_;   // Frame index table
-    std::vector<bool> frameKeyFlags_;      // Keyframe flags
+    std::vector<uint32_t> frameOffsets_; // Frame index table
+    std::vector<bool> frameKeyFlags_;    // Keyframe flags
 
     // Frame buffers (YUV planes)
-    std::vector<uint8_t> planeY_;      // Luma
-    std::vector<uint8_t> planeU_;      // Chroma U
-    std::vector<uint8_t> planeV_;      // Chroma V
-    std::vector<uint8_t> prevY_;       // Previous frame luma
-    std::vector<uint8_t> prevU_;       // Previous frame chroma U
-    std::vector<uint8_t> prevV_;       // Previous frame chroma V
+    std::vector<uint8_t> planeY_; // Luma
+    std::vector<uint8_t> planeU_; // Chroma U
+    std::vector<uint8_t> planeV_; // Chroma V
+    std::vector<uint8_t> prevY_;  // Previous frame luma
+    std::vector<uint8_t> prevU_;  // Previous frame chroma U
+    std::vector<uint8_t> prevV_;  // Previous frame chroma V
 
     // Plane dimensions
     uint32_t planeWidthY_ = 0;

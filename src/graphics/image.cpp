@@ -61,4 +61,23 @@ std::unique_ptr<Image> Image::fromPalettedData(const std::vector<uint8_t>& palet
     return image;
 }
 
+std::unique_ptr<Image> Image::fromRGBAData(const std::vector<uint8_t>& rgbaData, uint32_t width,
+                                           uint32_t height)
+{
+    if (width == 0 || height == 0)
+    {
+        throw std::invalid_argument("Image dimensions must be greater than zero");
+    }
+
+    size_t requiredSize = static_cast<size_t>(width) * height * 4;
+    if (rgbaData.size() < requiredSize)
+    {
+        throw std::invalid_argument("RGBA data too small for specified dimensions");
+    }
+
+    auto image = std::make_unique<Image>(width, height);
+    std::copy_n(rgbaData.begin(), requiredSize, image->rgbaData.begin());
+    return image;
+}
+
 } // namespace runeharbor::graphics

@@ -32,11 +32,18 @@ class SDLRenderer : public IRenderer
     void* createTexture(const Image& image) override;
     void destroyTexture(void* texture) override;
     void renderTexture(void* texture, int x, int y, int width = 0, int height = 0) override;
+    void renderTexturedPolygon(const std::vector<SDL_Vertex>& vertices, SDL_Texture* texture) override;
     SDL_Renderer* getSDLRenderer() override { return renderer; }
+    int getViewportWidth() const override;
+    int getViewportHeight() const override;
 
   private:
+    void updateViewport();
+
     util::ILogger& logger;
     SDL_Renderer* renderer = nullptr;
+    int viewportWidth = 0;
+    int viewportHeight = 0;
 };
 
 } // namespace runeharbor::graphics

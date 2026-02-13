@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -33,11 +34,11 @@ namespace runeharbor::media
 
 struct SmackerHeader
 {
-    char magic[4];        // "SMK2" or "SMK4"
+    char magic[4]; // "SMK2" or "SMK4"
     uint32_t width;
     uint32_t height;
     uint32_t frameCount;
-    int32_t frameRate;    // Signed, special encoding
+    int32_t frameRate; // Signed, special encoding
     uint32_t flags;
     uint32_t audioSize[7];
     uint32_t treesSize;
@@ -51,7 +52,7 @@ struct SmackerHeader
 
 struct SmackerFrame
 {
-    std::vector<uint8_t> pixels;  // Indexed color (palette)
+    std::vector<uint8_t> pixels; // Indexed color (palette)
     uint32_t width;
     uint32_t height;
     bool isKeyframe;
@@ -67,6 +68,7 @@ struct SmackerAudioInfo
     bool isStereo = false;
     bool hasAudio = false;
     bool isCompressed = false;
+    bool isBinkAudio = false;
 };
 
 /**
@@ -74,7 +76,7 @@ struct SmackerAudioInfo
  */
 struct SmackerAudioFrame
 {
-    std::vector<int16_t> samples;  // Interleaved stereo if applicable
+    std::vector<int16_t> samples; // Interleaved stereo if applicable
     uint32_t sampleRate = 0;
     uint8_t channels = 1;
     bool is16Bit = true;
@@ -145,32 +147,36 @@ class SmackerDecoder
     void reset();
 
   private:
-    // Block types
+    // Block types (per libsmacker/FFmpeg)
     enum BlockType
     {
-        BLOCK_MONO = 0,  // 2-color with bitmap
-        BLOCK_FULL = 1,  // Full color
-        BLOCK_SKIP = 2,  // Copy from previous
-        BLOCK_FILL = 3   // Solid color
+        BLOCK_MONO = 0,
+        BLOCK_FULL = 1,
+        BLOCK_SKIP = 2,
+        BLOCK_FILL = 3
     };
 
     SmackerHeader header_;
     std::vector<uint8_t> data_;
     std::vector<uint32_t> frameSizes_;
     std::vector<uint8_t> frameTypes_;
-    std::vector<uint8_t> palette_;      // 256 * 3 = 768 bytes
-    std::vector<uint8_t> frameBuffer_;  // Current decoded frame (indexed)
+    std::vector<uint32_t> frameOffsets_;
+    std::vector<bool> frameKeyFlags_;
+    std::vector<uint32_t> keyframeIndices_;
+    std::vector<uint8_t> palette_;     // 256 * 3 = 768 bytes
+    std::vector<uint8_t> frameBuffer_; // Current decoded frame (indexed)
 
     size_t dataOffset_ = 0;  // Start of frame data in buffer
     size_t treesOffset_ = 0; // Start of Huffman trees
     bool isV4_ = false;      // SMK4 format
+    bool doubleHigh_ = false; // Video uses double-height rows
 
     // Huffman trees for decoding (16-bit values)
     struct BigHuffmanTree;
-    std::unique_ptr<BigHuffmanTree> mmapTree_;  // Block type/color
-    std::unique_ptr<BigHuffmanTree> mclrTree_;  // Mono colors
-    std::unique_ptr<BigHuffmanTree> fullTree_;  // Full block colors
-    std::unique_ptr<BigHuffmanTree> typeTree_;  // Block descriptors
+    std::unique_ptr<BigHuffmanTree> mmapTree_; // Block type/color
+    std::unique_ptr<BigHuffmanTree> mclrTree_; // Mono colors
+    std::unique_ptr<BigHuffmanTree> fullTree_; // Full block colors
+    std::unique_ptr<BigHuffmanTree> typeTree_; // Block descriptors
 
     // Cache for decoded frames to support seeking
     uint32_t lastDecodedFrame_ = UINT32_MAX;
@@ -183,6 +189,18 @@ class SmackerDecoder
 
     // Audio decoding
     bool decodeAudioTrack(const uint8_t* data, size_t size, int track, SmackerAudioFrame& outAudio);
+    bool decodeBinkAudioTrack(const uint8_t* data, size_t size, uint32_t frameIndex, int track,
+                              SmackerAudioFrame& outAudio);
+
+    struct BinkAudioState
+    {
+        size_t frameLen = 0;
+        uint8_t channels = 0;
+        uint32_t lastFrame = UINT32_MAX;
+        std::vector<float> overlap;
+    };
+
+    std::array<BinkAudioState, 7> binkAudioStates_;
 
     // Block decoders
     void decodeBlockSkip(uint32_t x, uint32_t y);

@@ -1,6 +1,8 @@
 # Utility sources
 util_sources = files(
     'util/console_logger.cpp',
+    'util/string_utils.cpp',
+    'util/fft.cpp',
 )
 
 # Platform sources
@@ -21,9 +23,27 @@ formats_sources = files(
     'formats/image_lod_archive.cpp',
     'formats/sprite_lod_archive.cpp',
     'formats/game_lod_archive.cpp',
+    'formats/snd_archive.cpp',
+    'formats/sound_list.cpp',
     'formats/pcx_image.cpp',
+    'formats/sprite_parser.cpp',
     'formats/blv_map.cpp',
     'formats/odm_map.cpp',
+    'formats/face_geometry.cpp',
+    'formats/event_file_parser.cpp',
+    'formats/global_text_parser.cpp',
+    'formats/spells_parser.cpp',
+    'formats/items_parser.cpp',
+    'formats/monsters_parser.cpp',
+    'formats/mapstats_parser.cpp',
+    'formats/quests_parser.cpp',
+    'formats/classes_parser.cpp',
+    'formats/awards_parser.cpp',
+    'formats/hostile_parser.cpp',
+    'formats/npctext_parser.cpp',
+    'formats/npcnamess_parser.cpp',
+    'formats/autonote_parser.cpp',
+    'formats/credits_parser.cpp',
 )
 
 # Graphics sources
@@ -34,6 +54,8 @@ graphics_sources = files(
     'graphics/sdl_renderer.cpp',
     'graphics/camera.cpp',
     'graphics/line_renderer.cpp',
+    'graphics/world_renderer.cpp',
+    'graphics/indoor_renderer.cpp',
 )
 
 media_sources = files(
@@ -42,6 +64,11 @@ media_sources = files(
     'media/smacker_decoder.cpp',
     'media/bink_decoder.cpp',
     'media/video_player.cpp',
+)
+
+# Game sources
+game_sources = files(
+    'game/character.cpp',
 )
 
 # Dependencies
@@ -64,6 +91,7 @@ executable(
         platform_sources,
         engine_sources,
         formats_sources,
+        game_sources,
         graphics_sources,
         media_sources,
     ],

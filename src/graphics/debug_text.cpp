@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+
 #include <cctype>
 
 namespace runeharbor::graphics

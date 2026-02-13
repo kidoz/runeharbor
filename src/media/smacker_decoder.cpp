@@ -3,7 +3,10 @@
 #include "smacker_decoder.hpp"
 
 #include <algorithm>
+
+#include <cmath>
 #include <cstring>
+#include "../util/fft.hpp"
 
 namespace runeharbor::media
 {
@@ -81,13 +84,15 @@ static constexpr uint32_t HUFF16_LEAF_MASK = 0x3FFFFFFF;
 struct Huff8Tree
 {
     std::vector<uint16_t> tree;
+    std::vector<uint8_t> leafValues; // Leaf values in encounter order (for big tree building)
     size_t size = 0;
+    size_t leafCursor = 0; // Current position for sequential leaf access
 
     bool buildRecursive(BitReader& bits)
     {
         if (size >= 511)
         {
-            return false;  // Max size exceeded
+            return false; // Max size exceeded
         }
 
         if (bits.atEnd())
@@ -119,7 +124,9 @@ struct Huff8Tree
         else
         {
             // Leaf node - read 8-bit value
-            tree.push_back(static_cast<uint16_t>(bits.readBits(8)));
+            uint8_t value = static_cast<uint8_t>(bits.readBits(8));
+            tree.push_back(static_cast<uint16_t>(value));
+            leafValues.push_back(value); // Store in encounter order
             size++;
         }
 
@@ -129,13 +136,16 @@ struct Huff8Tree
     bool build(BitReader& bits)
     {
         tree.clear();
+        leafValues.clear();
         size = 0;
+        leafCursor = 0;
 
         // Check presence bit
         if (!bits.readBit())
         {
             // Empty tree - single leaf with value 0
             tree.push_back(0);
+            leafValues.push_back(0);
             size = 1;
             return true;
         }
@@ -153,6 +163,18 @@ struct Huff8Tree
 
         return true;
     }
+
+    // Get next leaf value in encounter order (for big tree building)
+    uint8_t nextLeaf()
+    {
+        if (leafCursor >= leafValues.size())
+        {
+            return 0;
+        }
+        return leafValues[leafCursor++];
+    }
+
+    void resetLeafCursor() { leafCursor = 0; }
 
     int lookup(BitReader& bits) const
     {
@@ -194,16 +216,16 @@ struct SmackerDecoder::BigHuffmanTree
     std::vector<uint32_t> tree;
     size_t size = 0;
     uint16_t cache[3] = {0, 0, 0};
+    uint16_t originalCache[3] = {0, 0, 0}; // Store original values for reset
     bool isEmpty = true;
 
-    bool buildRecursive(BitReader& bits, const Huff8Tree& low8, const Huff8Tree& hi8,
-                        size_t limit)
+    bool buildRecursive(BitReader& bits, const Huff8Tree& low8, const Huff8Tree& hi8, size_t limit)
     {
         // Allow building past limit - we'll handle this later
         // Some files have tree structures larger than allocated space
         if (bits.atEnd())
         {
-            return true;  // Ran out of bits - tree is complete
+            return true; // Ran out of bits - tree is complete
         }
 
         if (bits.readBit())
@@ -233,6 +255,7 @@ struct SmackerDecoder::BigHuffmanTree
         else
         {
             // Leaf node - decode using low and high 8-bit trees
+            // Per FFmpeg: use VLC (tree traversal) to decode values from bitstream
             int lowVal = low8.lookup(bits);
             int hiVal = hi8.lookup(bits);
 
@@ -299,6 +322,7 @@ struct SmackerDecoder::BigHuffmanTree
             uint8_t lo = static_cast<uint8_t>(bits.readBits(8));
             uint8_t hi = static_cast<uint8_t>(bits.readBits(8));
             cache[i] = static_cast<uint16_t>((hi << 8) | lo);
+            originalCache[i] = cache[i]; // Store for reset
         }
 
         // Calculate limit from allocation size
@@ -309,7 +333,7 @@ struct SmackerDecoder::BigHuffmanTree
         }
         else
         {
-            limit = 65536;  // Large default if allocSize is unusual
+            limit = 65536; // Large default if allocSize is unusual
         }
 
         tree.clear();
@@ -328,7 +352,7 @@ struct SmackerDecoder::BigHuffmanTree
         // Check final terminator bit
         // Note: When sub-trees are empty and tree has only 1 node,
         // the terminator may not be 0 (observed in some files)
-        bits.readBit();  // Consume terminator without strict check
+        bits.readBit(); // Consume terminator without strict check
 
         return true;
     }
@@ -387,8 +411,11 @@ struct SmackerDecoder::BigHuffmanTree
 
     void resetCache()
     {
-        // Keep original cache values but reset order
-        // (not strictly necessary but matches libsmacker behavior)
+        // Reset cache to original values read during tree building
+        // This is required at the start of each frame
+        cache[0] = originalCache[0];
+        cache[1] = originalCache[1];
+        cache[2] = originalCache[2];
     }
 };
 
@@ -406,6 +433,7 @@ SmackerDecoder::~SmackerDecoder() = default;
 
 bool SmackerDecoder::load(const uint8_t* data, size_t size)
 {
+    reset();
     if (!data || size < sizeof(SmackerHeader))
     {
         return false;
@@ -445,10 +473,15 @@ bool SmackerDecoder::parseHeader()
     }
 
     // Validate dimensions
-    if (header_.width == 0 || header_.height == 0 || header_.width > 4096 ||
-        header_.height > 4096)
+    if (header_.width == 0 || header_.height == 0 || header_.width > 4096 || header_.height > 4096)
     {
         return false;
+    }
+
+    doubleHigh_ = (header_.flags & 1) != 0;
+    if (doubleHigh_)
+    {
+        header_.height *= 2;
     }
 
     if (header_.frameCount == 0 || header_.frameCount > 100000)
@@ -478,6 +511,31 @@ bool SmackerDecoder::parseHeader()
 
     std::memcpy(frameTypes_.data(), data_.data() + offset, header_.frameCount);
     offset += header_.frameCount;
+
+    // Precompute frame offsets and keyframe flags
+    frameOffsets_.clear();
+    frameOffsets_.resize(header_.frameCount + 1, 0);
+    frameKeyFlags_.clear();
+    frameKeyFlags_.resize(header_.frameCount, false);
+    keyframeIndices_.clear();
+
+    frameOffsets_[0] = static_cast<uint32_t>(offset + header_.treesSize);
+    for (uint32_t i = 0; i < header_.frameCount; i++)
+    {
+        const uint32_t sizeFlagged = frameSizes_[i];
+        // Smacker stores keyframe flag in bit 0; bit 1 is reserved.
+        frameKeyFlags_[i] = (sizeFlagged & 0x1u) != 0;
+        const uint32_t size = sizeFlagged & 0xFFFFFFFCu;
+        frameOffsets_[i + 1] = frameOffsets_[i] + size;
+        if (frameKeyFlags_[i])
+        {
+            keyframeIndices_.push_back(i);
+        }
+    }
+    if (frameOffsets_.back() > data_.size())
+    {
+        return false;
+    }
 
     treesOffset_ = offset;
 
@@ -553,22 +611,13 @@ double SmackerDecoder::frameRate() const
 
     // Smacker frame rate encoding:
     // Positive: microseconds per frame
-    // Negative (> -10000): microseconds per frame (absolute value)
-    // Negative (<= -10000): 100000 / (|rate| - 10000) fps
+    // Negative: fps = 100000 / abs(rate)
 
     if (header_.frameRate > 0)
     {
         return 1000000.0 / header_.frameRate;
     }
-    else if (header_.frameRate > -10000)
-    {
-        // Absolute value is microseconds per frame
-        return 1000000.0 / (-header_.frameRate);
-    }
-    else
-    {
-        return 100000.0 / (-header_.frameRate - 10000);
-    }
+    return 100000.0 / (-header_.frameRate);
 }
 
 double SmackerDecoder::durationMs() const
@@ -588,27 +637,38 @@ bool SmackerDecoder::decodeFrame(uint32_t frameIndex, SmackerFrame& outFrame)
         return false;
     }
 
-    // For delta frames, decode from last keyframe or beginning
-    if (frameIndex < lastDecodedFrame_ || lastDecodedFrame_ == UINT32_MAX)
-    {
-        std::fill(frameBuffer_.begin(), frameBuffer_.end(), 0);
+    uint32_t startFrame = 0;
+    bool resetBuffer = false;
 
-        for (uint32_t i = 0; i <= frameIndex; i++)
-        {
-            if (!decodeFrameInternal(i))
-            {
-                return false;
-            }
-        }
+    if (lastDecodedFrame_ != UINT32_MAX && lastDecodedFrame_ < frameIndex)
+    {
+        startFrame = lastDecodedFrame_ + 1;
     }
     else
     {
-        for (uint32_t i = lastDecodedFrame_ + 1; i <= frameIndex; i++)
+        // Seek to nearest keyframe if available.
+        if (!keyframeIndices_.empty())
         {
-            if (!decodeFrameInternal(i))
+            auto it =
+                std::upper_bound(keyframeIndices_.begin(), keyframeIndices_.end(), frameIndex);
+            if (it != keyframeIndices_.begin())
             {
-                return false;
+                startFrame = *(it - 1);
             }
+        }
+        resetBuffer = true;
+    }
+
+    if (resetBuffer)
+    {
+        std::fill(frameBuffer_.begin(), frameBuffer_.end(), 0);
+    }
+
+    for (uint32_t i = startFrame; i <= frameIndex; i++)
+    {
+        if (!decodeFrameInternal(i))
+        {
+            return false;
         }
     }
 
@@ -617,21 +677,21 @@ bool SmackerDecoder::decodeFrame(uint32_t frameIndex, SmackerFrame& outFrame)
     outFrame.pixels = frameBuffer_;
     outFrame.width = header_.width;
     outFrame.height = header_.height;
-    outFrame.isKeyframe = (frameTypes_[frameIndex] & 1) != 0;
+    outFrame.isKeyframe = (!frameKeyFlags_.empty()) ? frameKeyFlags_[frameIndex]
+                                                    : ((frameTypes_[frameIndex] & 1) != 0);
 
     return true;
 }
 
 bool SmackerDecoder::decodeFrameInternal(uint32_t frameIndex)
 {
-    // Calculate offset to frame data
-    size_t offset = dataOffset_;
-    for (uint32_t i = 0; i < frameIndex; i++)
+    if (frameIndex >= frameOffsets_.size() - 1)
     {
-        offset += frameSizes_[i] & 0x3FFFFFFF;
+        return false;
     }
 
-    uint32_t frameSize = frameSizes_[frameIndex] & 0x3FFFFFFF;
+    size_t offset = frameOffsets_[frameIndex];
+    uint32_t frameSize = frameSizes_[frameIndex] & 0xFFFFFFFCu;
     if (offset + frameSize > data_.size())
     {
         return false;
@@ -651,7 +711,8 @@ bool SmackerDecoder::decodeFrameInternal(uint32_t frameIndex)
         }
 
         uint8_t palRecordSize = frameData[frameOffset++];
-        size_t palBytes = (static_cast<size_t>(palRecordSize) + 1) * 3;
+        // Palette size byte represents (actual_bytes / 4) - 1
+        size_t palBytes = (static_cast<size_t>(palRecordSize) + 1) * 4;
 
         if (frameOffset + palBytes > frameSize)
         {
@@ -679,6 +740,7 @@ bool SmackerDecoder::decodeFrameInternal(uint32_t frameIndex)
             std::memcpy(&audioSize, frameData + frameOffset, 4);
             frameOffset += 4;
 
+            audioSize &= 0x00FFFFFFu;
             if (audioSize > 4)
             {
                 frameOffset += audioSize - 4;
@@ -716,22 +778,28 @@ bool SmackerDecoder::decodeVideoData(BitReader& bits, bool /*hasKeyframe*/)
     }
 
     uint32_t blocksWide = (header_.width + 3) / 4;
-    uint32_t blocksHigh = (header_.height + 3) / 4;
+    uint32_t originalHeight = doubleHigh_ ? header_.height / 2 : header_.height;
+    uint32_t blocksHigh = (originalHeight + 3) / 4;
     uint32_t totalBlocks = blocksWide * blocksHigh;
     uint32_t blockIdx = 0;
 
-    while (blockIdx < totalBlocks && !bits.atEnd())
+    while (blockIdx < totalBlocks)
     {
         uint16_t typeDesc = typeTree_->decode(bits);
+        // Type descriptor format per libsmacker:
+        // - bits 0-1: block type (0-3)
+        // - bits 2-7: run length - 1 (6 bits)
+        // - bits 8-15: type data (8 bits, used as fill color for SOLID blocks)
         BlockType blockType = static_cast<BlockType>(typeDesc & 3);
-        uint32_t runLength = (typeDesc >> 2) + 1;
+        uint32_t runLength = ((typeDesc >> 2) & 0x3F) + 1;
+        uint8_t typeData = static_cast<uint8_t>((typeDesc >> 8) & 0xFF);
 
         for (uint32_t r = 0; r < runLength && blockIdx < totalBlocks; r++, blockIdx++)
         {
             uint32_t bx = blockIdx % blocksWide;
             uint32_t by = blockIdx / blocksWide;
             uint32_t x = bx * 4;
-            uint32_t y = by * 4;
+            uint32_t y = by * (doubleHigh_ ? 8 : 4);
 
             switch (blockType)
             {
@@ -741,17 +809,18 @@ bool SmackerDecoder::decodeVideoData(BitReader& bits, bool /*hasKeyframe*/)
 
             case BLOCK_FILL:
             {
-                uint16_t color = mmapTree_ ? mmapTree_->decode(bits) : 0;
-                decodeBlockFill(x, y, static_cast<uint8_t>(color & 0xFF));
+                // SOLID/FILL blocks: color comes from typeData (bits 8-15 of typeDesc)
+                decodeBlockFill(x, y, typeData);
                 break;
             }
 
             case BLOCK_MONO:
             {
+                // MONO blocks: colors from MCLR, bitmap from MMAP
                 uint16_t colors = mclrTree_ ? mclrTree_->decode(bits) : 0;
                 uint8_t c0 = static_cast<uint8_t>(colors & 0xFF);
                 uint8_t c1 = static_cast<uint8_t>((colors >> 8) & 0xFF);
-                uint16_t bitmap = fullTree_ ? fullTree_->decode(bits) : 0;
+                uint16_t bitmap = mmapTree_ ? mmapTree_->decode(bits) : 0;
                 decodeBlockMono(x, y, c0, c1, bitmap);
                 break;
             }
@@ -805,14 +874,15 @@ void SmackerDecoder::decodePalette(const uint8_t* data, size_t size)
         else
         {
             // New RGB entry (6-bit values)
+            // The code byte itself is the R value (no control bits set)
             if (srcPos + 2 > size)
             {
                 break;
             }
 
-            uint8_t r = data[srcPos++] & 0x3F;
+            uint8_t r = code & 0x3F;
             uint8_t g = data[srcPos++] & 0x3F;
-            uint8_t b = (srcPos < size) ? (data[srcPos++] & 0x3F) : 0;
+            uint8_t b = data[srcPos++] & 0x3F;
 
             // Expand 6-bit to 8-bit
             palette_[palIdx * 3 + 0] = static_cast<uint8_t>((r << 2) | (r >> 4));
@@ -830,7 +900,8 @@ void SmackerDecoder::decodeBlockSkip(uint32_t /*x*/, uint32_t /*y*/)
 
 void SmackerDecoder::decodeBlockFill(uint32_t x, uint32_t y, uint8_t color)
 {
-    for (uint32_t py = 0; py < 4 && (y + py) < header_.height; py++)
+    uint32_t blockHeight = doubleHigh_ ? 8 : 4;
+    for (uint32_t py = 0; py < blockHeight && (y + py) < header_.height; py++)
     {
         for (uint32_t px = 0; px < 4 && (x + px) < header_.width; px++)
         {
@@ -843,13 +914,22 @@ void SmackerDecoder::decodeBlockFill(uint32_t x, uint32_t y, uint8_t color)
 void SmackerDecoder::decodeBlockMono(uint32_t x, uint32_t y, uint8_t c0, uint8_t c1,
                                      uint16_t bitmap)
 {
-    for (uint32_t py = 0; py < 4 && (y + py) < header_.height; py++)
+    for (uint32_t py = 0; py < 4; py++)
     {
         for (uint32_t px = 0; px < 4 && (x + px) < header_.width; px++)
         {
-            size_t idx = (y + py) * header_.width + (x + px);
             uint32_t bitIdx = py * 4 + px;
-            frameBuffer_[idx] = (bitmap & (1 << bitIdx)) ? c1 : c0;
+            uint8_t color = (bitmap & (1 << bitIdx)) ? c1 : c0;
+
+            uint32_t targetY = y + py * (doubleHigh_ ? 2 : 1);
+            if (targetY < header_.height)
+            {
+                frameBuffer_[targetY * header_.width + (x + px)] = color;
+                if (doubleHigh_ && (targetY + 1) < header_.height)
+                {
+                    frameBuffer_[(targetY + 1) * header_.width + (x + px)] = color;
+                }
+            }
         }
     }
 }
@@ -861,48 +941,41 @@ void SmackerDecoder::decodeBlockFull(BitReader& bits, uint32_t x, uint32_t y)
         return;
     }
 
-    if (isV4_)
+    // Per libsmacker/FFmpeg: "The 4x4 block is divided into 4 2x2 blocks.
+    // Each 2x2 block is decoded using two 16-bit lookups from the 'Full' tree.
+    // Each lookup provides a vertical pair of pixels."
+    for (int i = 0; i < 4; i++)
     {
-        // SMK4: first value determines mode
-        uint16_t first = fullTree_->decode(bits);
+        uint32_t subX = x + (i & 1) * 2;
+        uint32_t subY = y + (i >> 1) * 2 * (doubleHigh_ ? 2 : 1);
 
-        if (first == fullTree_->cache[0] && (fullTree_->tree[0] & HUFF16_CACHE) == 0)
+        for (int j = 0; j < 2; j++)
         {
-            // Might be escape code - check original cache values
-        }
+            uint16_t val = fullTree_->decode(bits);
+            uint8_t p0 = static_cast<uint8_t>(val & 0xFF);
+            uint8_t p1 = static_cast<uint8_t>((val >> 8) & 0xFF);
 
-        // Check for v4 escape codes stored in original cache
-        // Note: escape codes are the ORIGINAL cache values, not current
-
-        // For now, treat as regular 16-pixel block
-        frameBuffer_[y * header_.width + x] = static_cast<uint8_t>(first & 0xFF);
-
-        for (uint32_t p = 1; p < 16; p++)
-        {
-            uint16_t color = fullTree_->decode(bits);
-            uint32_t py = p / 4;
-            uint32_t px = p % 4;
-
-            if ((y + py) < header_.height && (x + px) < header_.width)
+            uint32_t px = subX + j;
+            if (px < header_.width)
             {
-                size_t idx = (y + py) * header_.width + (x + px);
-                frameBuffer_[idx] = static_cast<uint8_t>(color & 0xFF);
-            }
-        }
-    }
-    else
-    {
-        // SMK2: Always 16 individual colors
-        for (uint32_t p = 0; p < 16; p++)
-        {
-            uint16_t color = fullTree_->decode(bits);
-            uint32_t py = p / 4;
-            uint32_t px = p % 4;
-
-            if ((y + py) < header_.height && (x + px) < header_.width)
-            {
-                size_t idx = (y + py) * header_.width + (x + px);
-                frameBuffer_[idx] = static_cast<uint8_t>(color & 0xFF);
+                if (subY < header_.height)
+                {
+                    frameBuffer_[subY * header_.width + px] = p0;
+                    if (doubleHigh_ && (subY + 1) < header_.height)
+                    {
+                        frameBuffer_[(subY + 1) * header_.width + px] = p0;
+                    }
+                }
+                
+                uint32_t targetY1 = subY + (doubleHigh_ ? 2 : 1);
+                if (targetY1 < header_.height)
+                {
+                    frameBuffer_[targetY1 * header_.width + px] = p1;
+                    if (doubleHigh_ && (targetY1 + 1) < header_.height)
+                    {
+                        frameBuffer_[(targetY1 + 1) * header_.width + px] = p1;
+                    }
+                }
             }
         }
     }
@@ -934,7 +1007,38 @@ void SmackerDecoder::reset()
 {
     std::fill(frameBuffer_.begin(), frameBuffer_.end(), 0);
     lastDecodedFrame_ = UINT32_MAX;
+    frameOffsets_.clear();
+    frameKeyFlags_.clear();
+    keyframeIndices_.clear();
+
+    for (auto& state : binkAudioStates_)
+    {
+        state.frameLen = 0;
+        state.channels = 0;
+        state.lastFrame = UINT32_MAX;
+        state.overlap.clear();
+    }
 }
+
+namespace
+{
+// Smacker embedded Bink audio frequency bands (25 entries, no 24000 terminal band).
+static const uint16_t kSmackerBinkAudioBands[] = {
+    0,    100,  200,  300,  400,  510,  630,  770,  920,  1080, 1270,  1480, 1720,
+    2000, 2320, 2700, 3150, 3700, 4400, 5300, 6400, 7700, 9500, 12000, 15500};
+
+static float getWindow(size_t i, size_t n)
+{
+    constexpr float kPi = 3.14159265358979323846f;
+    return std::sin(kPi * (static_cast<float>(i) + 0.5f) / static_cast<float>(n));
+}
+
+static void rdft(float* data, size_t n, bool inverse)
+{
+    util::FFT::rdft(std::span<float>(data, n), inverse);
+}
+
+} // namespace
 
 SmackerAudioInfo SmackerDecoder::getAudioInfo(int track) const
 {
@@ -950,11 +1054,12 @@ SmackerAudioInfo SmackerDecoder::getAudioInfo(int track) const
         return info;
     }
 
-    info.hasAudio = (rate & 0x40000000) != 0;      // Bit 30: has data
-    info.isCompressed = (rate & 0x80000000) != 0;  // Bit 31: compressed
-    info.is16Bit = (rate & 0x20000000) != 0;       // Bit 29: 16-bit
-    info.isStereo = (rate & 0x10000000) != 0;      // Bit 28: stereo
-    info.sampleRate = rate & 0x00FFFFFF;           // Bits 0-23: sample rate
+    info.hasAudio = (rate & 0x40000000) != 0;                           // Bit 30: has data
+    info.isCompressed = (rate & 0x80000000) != 0;                       // Bit 31: compressed
+    info.is16Bit = (rate & 0x20000000) != 0;                            // Bit 29: 16-bit
+    info.isStereo = (rate & 0x10000000) != 0;                           // Bit 28: stereo
+    info.isBinkAudio = info.isCompressed && ((rate & 0x08000000) != 0); // Bit 27: Bink audio
+    info.sampleRate = rate & 0x00FFFFFF;                                // Bits 0-23: sample rate
 
     return info;
 }
@@ -982,14 +1087,13 @@ bool SmackerDecoder::decodeAudio(uint32_t frameIndex, int track, SmackerAudioFra
         return false;
     }
 
-    // Calculate offset to frame data
-    size_t offset = dataOffset_;
-    for (uint32_t i = 0; i < frameIndex; i++)
+    if (frameIndex >= frameOffsets_.size() - 1)
     {
-        offset += frameSizes_[i] & 0x3FFFFFFF;
+        return false;
     }
 
-    uint32_t frameSize = frameSizes_[frameIndex] & 0x3FFFFFFF;
+    size_t offset = frameOffsets_[frameIndex];
+    uint32_t frameSize = frameSizes_[frameIndex] & 0xFFFFFFFCu;
     if (offset + frameSize > data_.size())
     {
         return false;
@@ -1008,7 +1112,8 @@ bool SmackerDecoder::decodeAudio(uint32_t frameIndex, int track, SmackerAudioFra
             return false;
         }
         uint8_t palRecordSize = frameData[frameOffset++];
-        size_t palBytes = (static_cast<size_t>(palRecordSize) + 1) * 3;
+        // Palette size byte represents (actual_bytes / 4) - 1
+        size_t palBytes = (static_cast<size_t>(palRecordSize) + 1) * 4;
         frameOffset += std::min(palBytes, frameSize - frameOffset);
     }
 
@@ -1029,9 +1134,16 @@ bool SmackerDecoder::decodeAudio(uint32_t frameIndex, int track, SmackerAudioFra
             if (t == track)
             {
                 // Found our track - decode it
+                audioSize &= 0x00FFFFFFu;
                 if (audioSize > 4 && frameOffset + audioSize - 4 <= frameSize)
                 {
-                    return decodeAudioTrack(frameData + frameOffset, audioSize - 4, track, outAudio);
+                    if (info.isBinkAudio)
+                    {
+                        return decodeBinkAudioTrack(frameData + frameOffset, audioSize - 4,
+                                                    frameIndex, track, outAudio);
+                    }
+                    return decodeAudioTrack(frameData + frameOffset, audioSize - 4, track,
+                                            outAudio);
                 }
                 return false;
             }
@@ -1044,6 +1156,193 @@ bool SmackerDecoder::decodeAudio(uint32_t frameIndex, int track, SmackerAudioFra
     }
 
     return false;
+}
+
+bool SmackerDecoder::decodeBinkAudioTrack(const uint8_t* data, size_t size, uint32_t frameIndex,
+                                          int track, SmackerAudioFrame& outAudio)
+{
+    SmackerAudioInfo info = getAudioInfo(track);
+    if (!info.hasAudio || !info.isBinkAudio || size < 4)
+    {
+        return false;
+    }
+
+    uint8_t channels = info.isStereo ? 2 : 1;
+    uint32_t sampleRate = info.sampleRate;
+
+    size_t frameLen = 0;
+    if (sampleRate < 22050)
+        frameLen = 512;
+    else if (sampleRate < 44100)
+        frameLen = 1024;
+    else
+        frameLen = 2048;
+
+    size_t overlapLen = frameLen / 16;
+    size_t halfFrameLen = frameLen / 2;
+
+    auto& state = binkAudioStates_[track];
+    if (state.frameLen != frameLen || state.channels != channels)
+    {
+        state.frameLen = frameLen;
+        state.channels = channels;
+        state.overlap.assign(overlapLen * channels, 0.0f);
+        state.lastFrame = UINT32_MAX;
+    }
+    else if (state.lastFrame != UINT32_MAX && state.lastFrame + 1 != frameIndex)
+    {
+        std::fill(state.overlap.begin(), state.overlap.end(), 0.0f);
+    }
+
+    BitReader bits(data, size);
+
+    uint32_t sampleCount = bits.readBits(32);
+    if (sampleCount == 0 || sampleCount > 10 * 1024 * 1024)
+    {
+        return false;
+    }
+
+    outAudio.sampleRate = sampleRate;
+    outAudio.channels = channels;
+    outAudio.is16Bit = true;
+
+    outAudio.samples.resize(static_cast<size_t>(sampleCount) * channels);
+
+    constexpr size_t kBandCount =
+        sizeof(kSmackerBinkAudioBands) / sizeof(kSmackerBinkAudioBands[0]);
+    size_t numBands = 1;
+    for (size_t i = 1; i < kBandCount; i++)
+    {
+        if (kSmackerBinkAudioBands[i] * halfFrameLen / 22050 >= halfFrameLen)
+        {
+            break;
+        }
+        numBands = i + 1;
+    }
+
+    std::vector<float> coeffs(frameLen);
+    std::vector<float> window(frameLen);
+
+    for (size_t i = 0; i < frameLen; i++)
+    {
+        window[i] = getWindow(i, frameLen);
+    }
+
+    size_t outPos = 0;
+    size_t remaining = outAudio.samples.size();
+
+    while (remaining > 0 && !bits.atEnd())
+    {
+        for (uint16_t ch = 0; ch < channels; ch++)
+        {
+            if (bits.atEnd())
+                break;
+
+            std::fill(coeffs.begin(), coeffs.end(), 0.0f);
+
+            std::vector<float> quant(numBands);
+            for (size_t i = 0; i < numBands; i++)
+            {
+                uint32_t q = bits.readBits(8);
+                if (q > 0)
+                {
+                    quant[i] = std::pow(2.0f, static_cast<float>(q) - 127.0f);
+                }
+                else
+                {
+                    quant[i] = 0.0f;
+                }
+            }
+
+            for (size_t band = 0; band < numBands; band++)
+            {
+                size_t startBin = kSmackerBinkAudioBands[band] * halfFrameLen / 22050;
+                size_t endBin = (band + 1 < numBands)
+                                    ? (kSmackerBinkAudioBands[band + 1] * halfFrameLen / 22050)
+                                    : halfFrameLen;
+
+                if (startBin >= halfFrameLen)
+                    break;
+                if (endBin > halfFrameLen)
+                    endBin = halfFrameLen;
+
+                for (size_t bin = startBin; bin < endBin; bin++)
+                {
+                    if (bits.atEnd())
+                        break;
+
+                    if (quant[band] == 0.0f)
+                    {
+                        coeffs[bin] = 0.0f;
+                        continue;
+                    }
+
+                    uint32_t zeros = 0;
+                    while (!bits.atEnd() && !bits.readBit())
+                    {
+                        zeros++;
+                        if (zeros > 100)
+                            break;
+                    }
+
+                    if (zeros > 0)
+                    {
+                        bin += zeros - 1;
+                        if (bin >= endBin)
+                            break;
+                    }
+
+                    int sign = bits.readBit() ? -1 : 1;
+                    coeffs[bin] = quant[band] * static_cast<float>(sign);
+                }
+            }
+
+            rdft(coeffs.data(), frameLen, true);
+
+            size_t overlapOffset = ch * overlapLen;
+            for (size_t i = 0; i < frameLen; i++)
+            {
+                size_t idx = outPos + i * channels + ch;
+                if (idx >= outAudio.samples.size())
+                {
+                    break;
+                }
+
+                float sample = coeffs[i] * window[i];
+
+                if (i < overlapLen)
+                {
+                    sample += state.overlap[overlapOffset + i];
+                }
+
+                float scaled = sample * 32767.0f;
+                if (scaled > 32767.0f)
+                    scaled = 32767.0f;
+                if (scaled < -32768.0f)
+                    scaled = -32768.0f;
+
+                outAudio.samples[idx] = static_cast<int16_t>(scaled);
+            }
+
+            for (size_t i = 0; i < overlapLen; i++)
+            {
+                size_t srcIdx = frameLen - overlapLen + i;
+                state.overlap[overlapOffset + i] = coeffs[srcIdx] * window[srcIdx];
+            }
+        }
+
+        outPos += (frameLen - overlapLen) * channels;
+        if (outPos >= remaining)
+            break;
+    }
+
+    for (size_t i = outPos; i < outAudio.samples.size(); i++)
+    {
+        outAudio.samples[i] = 0;
+    }
+
+    state.lastFrame = frameIndex;
+    return true;
 }
 
 bool SmackerDecoder::decodeAudioTrack(const uint8_t* data, size_t size, int track,
@@ -1098,7 +1397,7 @@ bool SmackerDecoder::decodeAudioTrack(const uint8_t* data, size_t size, int trac
     // Check data presence
     if (!bits.readBit())
     {
-        return false;  // No data
+        return false; // No data
     }
 
     bool isStereo = bits.readBit();
@@ -1180,47 +1479,27 @@ bool SmackerDecoder::decodeAudioTrack(const uint8_t* data, size_t size, int trac
         {
             if (is16Bit)
             {
-                // Decode low byte delta, then high byte delta
+                // Decode low byte delta, then high byte delta.
+                // Smacker relies on wraparound arithmetic, not clamping.
                 int treeIdxLo = static_cast<int>(ch * 2);
                 int treeIdxHi = static_cast<int>(ch * 2 + 1);
 
-                int deltaLo = audioTrees[treeIdxLo].lookup(bits);
-                int deltaHi = audioTrees[treeIdxHi].lookup(bits);
+                uint16_t deltaLo = static_cast<uint16_t>(audioTrees[treeIdxLo].lookup(bits));
+                uint16_t deltaHi = static_cast<uint16_t>(audioTrees[treeIdxHi].lookup(bits));
+                uint16_t delta = static_cast<uint16_t>((deltaHi << 8) | deltaLo);
 
-                // Apply deltas with overflow handling
-                int16_t prev = bases[ch];
-                int newLo = (prev & 0xFF) + deltaLo;
-                int newHi = ((prev >> 8) & 0xFF) + deltaHi;
-
-                // Handle overflow from low to high byte
-                if (newLo > 255)
-                {
-                    newLo -= 256;
-                    newHi++;
-                }
-                else if (newLo < 0)
-                {
-                    newLo += 256;
-                    newHi--;
-                }
-
-                bases[ch] = static_cast<int16_t>((newHi << 8) | (newLo & 0xFF));
+                uint16_t prev = static_cast<uint16_t>(bases[ch]);
+                uint16_t next = static_cast<uint16_t>(prev + delta);
+                bases[ch] = static_cast<int16_t>(next);
                 outAudio.samples[outIdx++] = bases[ch];
             }
             else
             {
                 // 8-bit: single delta per sample
-                int delta = audioTrees[ch].lookup(bits);
-                int prev = (bases[ch] >> 8) + 128;  // Convert back to unsigned
-                int newVal = prev + delta;
-
-                // Clamp to 0-255
-                if (newVal > 255)
-                    newVal = 255;
-                if (newVal < 0)
-                    newVal = 0;
-
-                bases[ch] = static_cast<int16_t>((newVal - 128) << 8);
+                int8_t delta = static_cast<int8_t>(audioTrees[ch].lookup(bits));
+                uint8_t prev = static_cast<uint8_t>((bases[ch] >> 8) + 128); // Convert to unsigned
+                uint8_t next = static_cast<uint8_t>(prev + delta);
+                bases[ch] = static_cast<int16_t>((static_cast<int>(next) - 128) << 8);
                 outAudio.samples[outIdx++] = bases[ch];
             }
         }
