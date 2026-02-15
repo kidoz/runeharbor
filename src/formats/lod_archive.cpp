@@ -266,107 +266,56 @@ bool LODArchive::buildDataIndex()
     }
 
     dataEntries.clear();
+    dataEntries.reserve(entries.size());
 
     file.seekg(0, std::ios::end);
     std::streamoff fileSize = file.tellg();
-    if (fileSize <= 0 || dataSectionStart <= 0 || dataSectionStart >= fileSize)
-    {
-        logger.error("Invalid data section start for LOD archive");
-        return false;
-    }
 
-    // Find first file name by smallest directory offset (used as order key)
-    std::string firstName;
-    uint32_t firstCompressedSize = 0;
-    if (!entries.empty())
+    for (const auto& entry : entries)
     {
-        const LODDirectoryEntry* first = &entries.front();
-        for (const auto& entry : entries)
+        std::string name;
+        for (int i = 0; i < 16 && entry.filename[i] != '\0'; i++)
         {
-            if (entry.offset < first->offset)
-            {
-                first = &entry;
-            }
+            name += entry.filename[i];
         }
 
-        for (int i = 0; i < 16 && first->filename[i] != '\0'; i++)
+        if (name.empty())
         {
-            firstName += first->filename[i];
+            continue;
         }
-        firstCompressedSize = first->size;
-    }
 
-    std::streamoff cursor = dataSectionStart;
+        // In MM7 LOD format, directory entry 'offset' is absolute.
+        // Each file data block starts with 8 bytes of metadata:
+        // [4 bytes uncompressed size][4 bytes flags]
+        // The directory entry 'size' is the COMPRESSED size including these 8 bytes?
+        // Actually, usually 'size' is compressed size of data only, and metadata is extra.
+        // Let's assume size is total data block size.
 
-    // Parse first file (no filename header)
-    if (!firstName.empty() && firstCompressedSize > 0 && cursor + 8 < fileSize &&
-        cursor + 8 + firstCompressedSize <= fileSize)
-    {
+        if (entry.offset >= fileSize)
+        {
+            logger.warning(std::format("Entry '{}' has invalid offset 0x{:X}", name, entry.offset));
+            continue;
+        }
+
+        file.seekg(entry.offset, std::ios::beg);
         uint32_t uncompressedSize = 0;
         uint32_t flags = 0;
-        file.seekg(cursor, std::ios::beg);
         file.read(reinterpret_cast<char*>(&uncompressedSize), 4);
         file.read(reinterpret_cast<char*>(&flags), 4);
 
-        std::streamoff dataOffset = cursor + 8;
-        if (dataOffset + firstCompressedSize <= fileSize && firstCompressedSize > 0)
-        {
-            dataEntries.push_back(
-                {firstName, firstCompressedSize, uncompressedSize, dataOffset, flags});
-            cursor = dataOffset + firstCompressedSize;
-        }
-    }
-
-    // Parse subsequent files with 48-byte headers
-    while (cursor + 48 < fileSize)
-    {
-        char nameBuf[16] = {};
-        file.seekg(cursor, std::ios::beg);
-        file.read(nameBuf, 16);
-
         if (!file.good())
         {
-            break;
+            logger.warning(std::format("Failed to read metadata for entry '{}'", name));
+            continue;
         }
 
-        if (nameBuf[0] == '\0')
-        {
-            break;
-        }
-
-        std::string name;
-        for (int i = 0; i < 16 && nameBuf[i] != '\0'; i++)
-        {
-            name += nameBuf[i];
-        }
-
-        uint32_t meta[8] = {};
-        file.read(reinterpret_cast<char*>(meta), sizeof(meta));
-        if (!file.good())
-        {
-            break;
-        }
-
-        uint32_t compressedSize = meta[1];
-        uint32_t uncompressedSize = meta[6];
-        uint32_t flags = meta[7];
-
-        std::streamoff dataOffset = cursor + 48;
-        if (compressedSize == 0 || dataOffset + compressedSize > fileSize)
-        {
-            break;
-        }
+        std::streamoff dataOffset = static_cast<std::streamoff>(entry.offset) + 8;
+        uint32_t compressedSize = (entry.size > 8) ? (entry.size - 8) : 0;
 
         dataEntries.push_back({name, compressedSize, uncompressedSize, dataOffset, flags});
-        cursor = dataOffset + compressedSize;
     }
 
     dataIndexBuilt = !dataEntries.empty();
-    if (!dataIndexBuilt)
-    {
-        logger.error("Failed to parse any LOD data entries");
-    }
-
     return dataIndexBuilt;
 }
 

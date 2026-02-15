@@ -1208,6 +1208,24 @@ std::vector<uint8_t> BinkDecoder::getFrameRGBA(uint32_t frameIndex)
     return frame.pixels;
 }
 
+std::optional<BinkYUVPlanes> BinkDecoder::getYUVPlanes() const
+{
+    if (planeY_.empty())
+    {
+        return std::nullopt;
+    }
+
+    BinkYUVPlanes planes;
+    planes.y = planeY_.data();
+    planes.u = planeU_.data();
+    planes.v = planeV_.data();
+    planes.yStride = planeWidthY_;
+    planes.uvStride = planeWidthC_;
+    planes.width = header_.width;
+    planes.height = header_.height;
+    return planes;
+}
+
 void BinkDecoder::reset()
 {
     data_.clear();

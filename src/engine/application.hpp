@@ -58,19 +58,81 @@ enum class GameState
     InGame,
 };
 
+enum class Race
+{
+    Human,
+    Elf,
+    Dwarf,
+    Goblin
+};
+
+enum class Gender
+{
+    Male,
+    Female
+};
+
+enum class CharacterClass
+{
+    Knight,
+    Paladin,
+    Archer,
+    Cleric,
+    Sorcerer,
+    Thief,
+    Monk,
+    Ranger,
+    Druid
+};
+
 struct Character
 {
-    std::string name = "Conan";
+    std::string name = "New Hero";
+    int faceId = 0;
+    CharacterClass charClass = CharacterClass::Knight;
+
     struct Stats
     {
-        int might = 15;
-        int intellect = 10;
-        int personality = 10;
-        int endurance = 15;
-        int speed = 10;
-        int accuracy = 10;
-        int luck = 10;
+        int might = 11;
+        int intellect = 11;
+        int personality = 11;
+        int endurance = 11;
+        int speed = 11;
+        int accuracy = 11;
+        int luck = 11;
+
+        int& byIndex(int i)
+        {
+            switch (i)
+            {
+            case 1: return intellect;
+            case 2: return personality;
+            case 3: return endurance;
+            case 4: return speed;
+            case 5: return accuracy;
+            case 6: return luck;
+            default: return might;
+            }
+        }
+
+        int byIndex(int i) const
+        {
+            switch (i)
+            {
+            case 0: return might;
+            case 1: return intellect;
+            case 2: return personality;
+            case 3: return endurance;
+            case 4: return speed;
+            case 5: return accuracy;
+            case 6: return luck;
+            default: return 0;
+            }
+        }
     } stats;
+
+    Stats baseStats;
+    std::vector<std::string> skills;
 };
 
 class Application
@@ -154,9 +216,17 @@ class Application
     int titleButtonHoverWidths[kTitleButtonCount] = {0};
     int titleButtonHoverHeights[kTitleButtonCount] = {0};
 
-    int characterMenuIndex = 0;
+    static constexpr int kPortraitCount = 20;
+    void* portraitTextures[kPortraitCount] = {};
+    int portraitWidths[kPortraitCount] = {};
+    int portraitHeights[kPortraitCount] = {};
+
+    int characterMenuIndex = 0; // Row: 0=NAME, 1=FACE, 2=CLASS, 3-9=stats
+    int activeCharacterIndex = 0;
+    static constexpr int kCharCreationRowCount = 10;
+    bool isNaming = false;
     bool quickStartReady = false;
-    Character current_character;
+    std::vector<Character> party;
 
     // UI Assets
     bool uiAssetsLoaded = false;
@@ -166,6 +236,7 @@ class Application
     void* loadingBackground = nullptr;
     int loadingBackgroundWidth = 0;
     int loadingBackgroundHeight = 0;
+    std::vector<uint8_t> screenPaletteRGB; // 768-byte RGB palette from background PCX
     std::vector<void*> loadingFrames;
     std::vector<int> loadingFrameWidths;
     std::vector<int> loadingFrameHeights;
@@ -249,6 +320,20 @@ class Application
     void updateTitleMenuHover();
     bool isMouseOver(const graphics::Rect& rect) const;
     bool wasMouseClickedIn(const graphics::Rect& rect) const;
+
+    // Coordinate scaling (640x480 game space <-> viewport)
+    int scaleX(int gameX) const;
+    int scaleY(int gameY) const;
+    int scaleW(int gameW) const;
+    int scaleH(int gameH) const;
+    int unscaleX(int screenX) const;
+    int unscaleY(int screenY) const;
+
+    // Character creation helpers
+    int calculateBonusPointsRemaining() const;
+    void initDefaultParty();
+    void updateCharacterForFace(Character& ch);
+    void updateSkillsForClass(Character& ch);
 };
 
 }

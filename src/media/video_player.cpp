@@ -15,7 +15,10 @@ using runeharbor::media::SmackerAudioFrame;
 namespace runeharbor::media
 {
 
-VideoPlayer::VideoPlayer() = default;
+VideoPlayer::VideoPlayer()
+{
+    dummyBinkFrame_ = std::make_unique<BinkFrame>();
+}
 
 VideoPlayer::~VideoPlayer()
 {
@@ -73,6 +76,7 @@ void VideoPlayer::start(uint64_t startTicks)
     clipStartTicks_ = startTicks;
     totalPausedTime_ = 0;
     currentFrame_ = 0;
+    lastAudioFrameQueued_ = UINT32_MAX;
     active_ = true;
     paused_ = false;
     finished_ = false;
@@ -135,8 +139,10 @@ void VideoPlayer::update(uint64_t nowTicks)
         return;
     }
 
+    uint32_t oldFrame = currentFrame_;
     updateFrame(nowTicks);
-    if (active_ && !paused_)
+    
+    if (active_ && !paused_ && currentFrame_ != oldFrame)
     {
         queueAudioForCurrentFrame();
     }
@@ -269,6 +275,17 @@ bool VideoPlayer::loadCurrentClip()
             return false;
         }
 
+        // Find first track with audio
+        audioTrack_ = 0;
+        for (int i = 0; i < 7; i++)
+        {
+            if (smackerDecoder_->hasAudio(i))
+            {
+                audioTrack_ = i;
+                break;
+            }
+        }
+
         setupAudioStream();
         return true;
     }
@@ -286,6 +303,17 @@ bool VideoPlayer::loadCurrentClip()
         {
             binkDecoder_.reset();
             return false;
+        }
+
+        // Find first track with audio
+        audioTrack_ = 0;
+        for (uint32_t i = 0; i < binkDecoder_->audioTrackCount(); i++)
+        {
+            if (binkDecoder_->hasAudio(i))
+            {
+                audioTrack_ = static_cast<int>(i);
+                break;
+            }
         }
 
         setupAudioStream();
@@ -329,38 +357,33 @@ void VideoPlayer::renderFrame(SDL_Renderer* renderer, int width, int height)
 {
     uint32_t vidWidth = 0;
     uint32_t vidHeight = 0;
-    std::vector<uint8_t> rgba;
+    uint32_t pixelFormat = SDL_PIXELFORMAT_RGBA32;
 
     if (smackerDecoder_)
     {
         vidWidth = smackerDecoder_->width();
         vidHeight = smackerDecoder_->height();
-        rgba = smackerDecoder_->getFrameRGBA(currentFrame_);
+        pixelFormat = SDL_PIXELFORMAT_RGBA32;
     }
     else if (binkDecoder_)
     {
         vidWidth = binkDecoder_->width();
         vidHeight = binkDecoder_->height();
-        rgba = binkDecoder_->getFrameRGBA(currentFrame_);
+        pixelFormat = SDL_PIXELFORMAT_IYUV;
     }
     else
     {
         return;
     }
 
-    if (rgba.empty())
-    {
-        return;
-    }
-
     // Create or recreate texture if needed
     if (!frameTexture_ || lastRenderer_ != renderer || textureWidth_ != vidWidth ||
-        textureHeight_ != vidHeight)
+        textureHeight_ != vidHeight || textureFormat_ != pixelFormat)
     {
         destroyTexture();
 
         frameTexture_ =
-            SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
+            SDL_CreateTexture(renderer, static_cast<SDL_PixelFormat>(pixelFormat), SDL_TEXTUREACCESS_STREAMING,
                               static_cast<int>(vidWidth), static_cast<int>(vidHeight));
 
         if (!frameTexture_)
@@ -371,10 +394,57 @@ void VideoPlayer::renderFrame(SDL_Renderer* renderer, int width, int height)
         lastRenderer_ = renderer;
         textureWidth_ = vidWidth;
         textureHeight_ = vidHeight;
+        textureFormat_ = pixelFormat;
+        lastRenderedFrame_ = UINT32_MAX;
     }
 
-    // Update texture
-    SDL_UpdateTexture(frameTexture_, nullptr, rgba.data(), static_cast<int>(vidWidth * 4));
+    // Update texture only if frame changed
+    if (currentFrame_ != lastRenderedFrame_)
+    {
+        if (smackerDecoder_)
+        {
+            const auto& rgba = smackerDecoder_->getFrameRGBA(currentFrame_);
+            if (!rgba.empty())
+            {
+                void* pixels;
+                int pitch;
+                if (SDL_LockTexture(frameTexture_, nullptr, &pixels, &pitch))
+                {
+                    if (pitch == static_cast<int>(vidWidth * 4))
+                    {
+                        std::memcpy(pixels, rgba.data(), rgba.size());
+                    }
+                    else
+                    {
+                        const uint8_t* src = rgba.data();
+                        uint8_t* dst = static_cast<uint8_t*>(pixels);
+                        for (uint32_t y = 0; y < vidHeight; y++)
+                        {
+                            std::memcpy(dst, src, vidWidth * 4);
+                            src += vidWidth * 4;
+                            dst += pitch;
+                        }
+                    }
+                    SDL_UnlockTexture(frameTexture_);
+                    lastRenderedFrame_ = currentFrame_;
+                }
+            }
+        }
+        else if (binkDecoder_)
+        {
+            // Decodes frame if needed
+            if (dummyBinkFrame_ && binkDecoder_->decodeFrame(currentFrame_, *dummyBinkFrame_)) {
+                 auto planes = binkDecoder_->getYUVPlanes();
+                 if (planes) {
+                     SDL_UpdateYUVTexture(frameTexture_, nullptr, 
+                                          planes->y, static_cast<int>(planes->yStride),
+                                          planes->u, static_cast<int>(planes->uvStride),
+                                          planes->v, static_cast<int>(planes->uvStride));
+                     lastRenderedFrame_ = currentFrame_;
+                 }
+            }
+        }
+    }
 
     // Calculate destination rect (fit to screen, maintaining aspect ratio)
     float videoAspect = static_cast<float>(vidWidth) / static_cast<float>(vidHeight);
@@ -464,11 +534,17 @@ bool VideoPlayer::hasAudio() const
 {
     if (smackerDecoder_)
     {
-        return smackerDecoder_->hasAudio(1); // Changed from 0 to 1 for Smacker
+        for (int i = 0; i < 7; i++)
+        {
+            if (smackerDecoder_->hasAudio(i)) return true;
+        }
     }
     if (binkDecoder_)
     {
-        return binkDecoder_->hasAudio(0);
+        for (uint32_t i = 0; i < binkDecoder_->audioTrackCount(); i++)
+        {
+            if (binkDecoder_->hasAudio(i)) return true;
+        }
     }
     return false;
 }
@@ -477,12 +553,12 @@ uint32_t VideoPlayer::audioSampleRate() const
 {
     if (smackerDecoder_)
     {
-        auto info = smackerDecoder_->getAudioInfo(1); // Changed from 0 to 1 for Smacker
+        auto info = smackerDecoder_->getAudioInfo(audioTrack_);
         return info.sampleRate;
     }
     if (binkDecoder_)
     {
-        auto info = binkDecoder_->getAudioInfo(0);
+        auto info = binkDecoder_->getAudioInfo(static_cast<uint32_t>(audioTrack_));
         return info.sampleRate;
     }
     return 0;
@@ -492,12 +568,12 @@ uint8_t VideoPlayer::audioChannels() const
 {
     if (smackerDecoder_)
     {
-        auto info = smackerDecoder_->getAudioInfo(1); // Changed from 0 to 1 for Smacker
+        auto info = smackerDecoder_->getAudioInfo(audioTrack_);
         return info.isStereo ? 2 : 1;
     }
     if (binkDecoder_)
     {
-        auto info = binkDecoder_->getAudioInfo(0);
+        auto info = binkDecoder_->getAudioInfo(static_cast<uint32_t>(audioTrack_));
         return static_cast<uint8_t>(info.channels);
     }
     return 0;
@@ -584,6 +660,12 @@ void VideoPlayer::queueAudioForCurrentFrame()
 
     uint32_t startFrame =
         (lastAudioFrameQueued_ == UINT32_MAX) ? currentFrame_ : lastAudioFrameQueued_ + 1;
+    
+    // Safety: don't queue more than 10 frames at once to avoid stalls
+    if (currentFrame_ > startFrame + 10) {
+        startFrame = currentFrame_ - 10;
+    }
+
     if (startFrame > currentFrame_)
     {
         return;
@@ -607,7 +689,7 @@ bool VideoPlayer::decodeAudioFrame(uint32_t frameIndex, std::vector<int16_t>& ou
     if (smackerDecoder_)
     {
         SmackerAudioFrame audioFrame;
-        if (smackerDecoder_->decodeAudio(frameIndex, 1, audioFrame)) // Changed from 0 to 1 for Smacker
+        if (smackerDecoder_->decodeAudio(frameIndex, audioTrack_, audioFrame))
         {
             outSamples = audioFrame.samples;
             return true;
@@ -616,7 +698,7 @@ bool VideoPlayer::decodeAudioFrame(uint32_t frameIndex, std::vector<int16_t>& ou
     if (binkDecoder_)
     {
         BinkAudioFrame audioFrame;
-        if (binkDecoder_->decodeAudio(frameIndex, 0, audioFrame))
+        if (binkDecoder_->decodeAudio(frameIndex, static_cast<uint32_t>(audioTrack_), audioFrame))
         {
             outSamples = audioFrame.samples;
             return true;

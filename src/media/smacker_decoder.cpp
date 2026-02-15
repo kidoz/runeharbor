@@ -157,8 +157,6 @@ struct Huff8Tree
         }
 
         // Consume terminator bit
-        // Note: While spec says should be 0, some files have 1
-        // We accept either to maximize compatibility
         bits.readBit();
 
         return true;
@@ -297,6 +295,7 @@ struct SmackerDecoder::BigHuffmanTree
             // Empty tree - single element
             tree.push_back(0);
             size = 1;
+            isEmpty = false;
             return true;
         }
 
@@ -350,9 +349,7 @@ struct SmackerDecoder::BigHuffmanTree
         tree.shrink_to_fit();
 
         // Check final terminator bit
-        // Note: When sub-trees are empty and tree has only 1 node,
-        // the terminator may not be 0 (observed in some files)
-        bits.readBit(); // Consume terminator without strict check
+        bits.readBit();
 
         return true;
     }
@@ -711,8 +708,8 @@ bool SmackerDecoder::decodeFrameInternal(uint32_t frameIndex)
         }
 
         uint8_t palRecordSize = frameData[frameOffset++];
-        // Palette size byte represents (actual_bytes / 4) - 1
-        size_t palBytes = (static_cast<size_t>(palRecordSize) + 1) * 4;
+        // Palette size byte represents (actual_bytes + 1) / 4
+        size_t palBytes = static_cast<size_t>(palRecordSize) * 4 - 1;
 
         if (frameOffset + palBytes > frameSize)
         {
@@ -772,7 +769,7 @@ bool SmackerDecoder::decodeFrameInternal(uint32_t frameIndex)
 
 bool SmackerDecoder::decodeVideoData(BitReader& bits, bool /*hasKeyframe*/)
 {
-    if (!typeTree_ || typeTree_->isEmpty)
+    if (!typeTree_)
     {
         return true;
     }
@@ -809,7 +806,13 @@ bool SmackerDecoder::decodeVideoData(BitReader& bits, bool /*hasKeyframe*/)
 
             case BLOCK_FILL:
             {
-                // SOLID/FILL blocks: color comes from typeData (bits 8-15 of typeDesc)
+                // SOLID/FILL blocks
+                if (isV4_)
+                {
+                    // In v4, fill color usually comes from MMAP tree
+                    uint16_t val = mmapTree_ ? mmapTree_->decode(bits) : 0;
+                    typeData = static_cast<uint8_t>(val & 0xFF);
+                }
                 decodeBlockFill(x, y, typeData);
                 break;
             }
@@ -861,7 +864,7 @@ void SmackerDecoder::decodePalette(const uint8_t* data, size_t size)
 
             for (uint8_t i = 0; i < count && palIdx < 256; i++, palIdx++)
             {
-                size_t src = (srcIdx + i) * 3;
+                size_t src = (static_cast<size_t>(srcIdx) + i) * 3;
                 size_t dst = palIdx * 3;
                 if (src + 2 < palette_.size() && dst + 2 < palette_.size())
                 {
@@ -941,39 +944,81 @@ void SmackerDecoder::decodeBlockFull(BitReader& bits, uint32_t x, uint32_t y)
         return;
     }
 
-    // Per libsmacker/FFmpeg: "The 4x4 block is divided into 4 2x2 blocks.
-    // Each 2x2 block is decoded using two 16-bit lookups from the 'Full' tree.
-    // Each lookup provides a vertical pair of pixels."
+    // Per libsmacker/FFmpeg: "The 4x4 block is divided into 4 2x2 blocks."
     for (int i = 0; i < 4; i++)
     {
         uint32_t subX = x + (i & 1) * 2;
         uint32_t subY = y + (i >> 1) * 2 * (doubleHigh_ ? 2 : 1);
 
-        for (int j = 0; j < 2; j++)
+        bool isSolid = false;
+        if (isV4_)
         {
-            uint16_t val = fullTree_->decode(bits);
-            uint8_t p0 = static_cast<uint8_t>(val & 0xFF);
-            uint8_t p1 = static_cast<uint8_t>((val >> 8) & 0xFF);
+            isSolid = bits.readBit();
+        }
 
-            uint32_t px = subX + j;
-            if (px < header_.width)
-            {
-                if (subY < header_.height)
-                {
-                    frameBuffer_[subY * header_.width + px] = p0;
-                    if (doubleHigh_ && (subY + 1) < header_.height)
-                    {
-                        frameBuffer_[(subY + 1) * header_.width + px] = p0;
-                    }
+        if (isSolid)
+        {
+            // v4 Solid sub-block
+            uint16_t val = mclrTree_ ? mclrTree_->decode(bits) : 0;
+            uint8_t color = static_cast<uint8_t>(val & 0xFF);
+            // uint8_t colorHi = static_cast<uint8_t>(val >> 8); 
+            // Note: libsmacker uses low byte. Some sources say high byte is another color?
+            // FFmpeg says: val = get_vlc2(... mclr ...); *p++ = val; *p++ = val; ...
+            // So it fills with the value.
+            // But wait, mclrTree returns 16-bit. 
+            // In v4 mono blocks, it returns 2 colors (low/high).
+            // Here, it seems to be just one color for solid fill.
+            // Let's assume low byte.
+            
+            uint32_t targetY = subY;
+            if (targetY < header_.height) {
+                frameBuffer_[targetY * header_.width + subX] = color;
+                frameBuffer_[targetY * header_.width + subX + 1] = color;
+                if (doubleHigh_ && (targetY + 1) < header_.height) {
+                    frameBuffer_[(targetY + 1) * header_.width + subX] = color;
+                    frameBuffer_[(targetY + 1) * header_.width + subX + 1] = color;
                 }
-                
-                uint32_t targetY1 = subY + (doubleHigh_ ? 2 : 1);
-                if (targetY1 < header_.height)
+            }
+            
+            targetY = subY + (doubleHigh_ ? 2 : 1);
+            if (targetY < header_.height) {
+                frameBuffer_[targetY * header_.width + subX] = color;
+                frameBuffer_[targetY * header_.width + subX + 1] = color;
+                if (doubleHigh_ && (targetY + 1) < header_.height) {
+                    frameBuffer_[(targetY + 1) * header_.width + subX] = color;
+                    frameBuffer_[(targetY + 1) * header_.width + subX + 1] = color;
+                }
+            }
+        }
+        else
+        {
+            // Standard pixel decoding (2 pairs of pixels)
+            for (int j = 0; j < 2; j++)
+            {
+                uint16_t val = fullTree_->decode(bits);
+                uint8_t p0 = static_cast<uint8_t>(val & 0xFF);
+                uint8_t p1 = static_cast<uint8_t>((val >> 8) & 0xFF);
+
+                uint32_t px = subX + j;
+                if (px < header_.width)
                 {
-                    frameBuffer_[targetY1 * header_.width + px] = p1;
-                    if (doubleHigh_ && (targetY1 + 1) < header_.height)
+                    if (subY < header_.height)
                     {
-                        frameBuffer_[(targetY1 + 1) * header_.width + px] = p1;
+                        frameBuffer_[subY * header_.width + px] = p0;
+                        if (doubleHigh_ && (subY + 1) < header_.height)
+                        {
+                            frameBuffer_[(subY + 1) * header_.width + px] = p0;
+                        }
+                    }
+                    
+                    uint32_t targetY1 = subY + (doubleHigh_ ? 2 : 1);
+                    if (targetY1 < header_.height)
+                    {
+                        frameBuffer_[targetY1 * header_.width + px] = p1;
+                        if (doubleHigh_ && (targetY1 + 1) < header_.height)
+                        {
+                            frameBuffer_[(targetY1 + 1) * header_.width + px] = p1;
+                        }
                     }
                 }
             }
@@ -989,18 +1034,21 @@ std::vector<uint8_t> SmackerDecoder::getFrameRGBA(uint32_t frameIndex)
         return {};
     }
 
-    std::vector<uint8_t> rgba(frame.width * frame.height * 4);
+    if (rgbaBuffer_.size() != frame.width * frame.height * 4)
+    {
+        rgbaBuffer_.resize(frame.width * frame.height * 4);
+    }
 
     for (size_t i = 0; i < frame.pixels.size(); i++)
     {
         uint8_t palIdx = frame.pixels[i];
-        rgba[i * 4 + 0] = palette_[palIdx * 3 + 0];
-        rgba[i * 4 + 1] = palette_[palIdx * 3 + 1];
-        rgba[i * 4 + 2] = palette_[palIdx * 3 + 2];
-        rgba[i * 4 + 3] = 255;
+        rgbaBuffer_[i * 4 + 0] = palette_[palIdx * 3 + 0];
+        rgbaBuffer_[i * 4 + 1] = palette_[palIdx * 3 + 1];
+        rgbaBuffer_[i * 4 + 2] = palette_[palIdx * 3 + 2];
+        rgbaBuffer_[i * 4 + 3] = 255;
     }
 
-    return rgba;
+    return rgbaBuffer_;
 }
 
 void SmackerDecoder::reset()
@@ -1112,8 +1160,8 @@ bool SmackerDecoder::decodeAudio(uint32_t frameIndex, int track, SmackerAudioFra
             return false;
         }
         uint8_t palRecordSize = frameData[frameOffset++];
-        // Palette size byte represents (actual_bytes / 4) - 1
-        size_t palBytes = (static_cast<size_t>(palRecordSize) + 1) * 4;
+        // Palette size byte represents (actual_bytes + 1) / 4
+        size_t palBytes = static_cast<size_t>(palRecordSize) * 4 - 1;
         frameOffset += std::min(palBytes, frameSize - frameOffset);
     }
 

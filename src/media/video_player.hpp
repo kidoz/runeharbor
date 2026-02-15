@@ -22,6 +22,7 @@ namespace runeharbor::media
 class VIDArchive;
 class SmackerDecoder;
 class BinkDecoder;
+struct BinkFrame;
 
 struct VideoClip
 {
@@ -99,6 +100,7 @@ class VideoPlayer
     uint64_t pauseStartTicks_ = 0;
     uint64_t totalPausedTime_ = 0;
     uint32_t currentFrame_ = 0;
+    uint32_t lastRenderedFrame_ = UINT32_MAX;
     bool active_ = false;
     bool paused_ = false;
     bool finished_ = false;
@@ -108,12 +110,15 @@ class VideoPlayer
     SDL_Renderer* lastRenderer_ = nullptr;
     uint32_t textureWidth_ = 0;
     uint32_t textureHeight_ = 0;
+    uint32_t textureFormat_ = 0;
 
     // Audio playback
     SDL_AudioStream* audioStream_ = nullptr;
     uint32_t audioStreamRate_ = 0;
     uint8_t audioStreamChannels_ = 0;
     uint32_t lastAudioFrameQueued_ = UINT32_MAX;
+    int audioTrack_ = 0;
+    std::unique_ptr<BinkFrame> dummyBinkFrame_;
 
     // Internal methods
     bool loadCurrentClip();

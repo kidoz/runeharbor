@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace runeharbor::media
@@ -42,10 +43,21 @@ struct BinkHeader
 
 struct BinkFrame
 {
-    std::vector<uint8_t> pixels; // RGBA pixels
+    std::vector<uint8_t> pixels; // RGBA pixels (fallback)
     uint32_t width;
     uint32_t height;
     bool isKeyframe;
+};
+
+struct BinkYUVPlanes
+{
+    const uint8_t* y;
+    const uint8_t* u;
+    const uint8_t* v;
+    uint32_t yStride;
+    uint32_t uvStride;
+    uint32_t width;
+    uint32_t height;
 };
 
 /**
@@ -204,6 +216,9 @@ class BinkDecoder
 
     // Get current frame as RGBA (convenience)
     std::vector<uint8_t> getFrameRGBA(uint32_t frameIndex);
+
+    // Get current frame as YUV planes (performance)
+    std::optional<BinkYUVPlanes> getYUVPlanes() const;
 
     // Reset decoder state
     void reset();

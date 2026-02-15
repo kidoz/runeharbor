@@ -32,6 +32,7 @@ namespace runeharbor::engine
 Application::Application(util::ILogger& logger, platform::IWindow& window)
     : logger(logger), window(window), vfs(std::make_unique<VirtualFileSystem>(logger))
 {
+    initDefaultParty();
 }
 
 namespace
@@ -66,6 +67,9 @@ const char* onOff(bool value)
     return value ? "ON" : "OFF";
 }
 
+constexpr int kGameWidth = 640;
+constexpr int kGameHeight = 480;
+
 const std::vector<std::string> kTitleMenuItems = {
     "NEW",
     "LOAD",
@@ -73,9 +77,76 @@ const std::vector<std::string> kTitleMenuItems = {
     "EXIT",
 };
 
-const std::vector<std::string> kCharacterMenuItems = {
-    "QUICK START",
-    "BACK",
+const std::vector<std::string> kRaceNames = {
+    "Human", "Elf", "Dwarf", "Goblin"
+};
+
+const std::vector<std::string> kGenderNames = {
+    "Male", "Female"
+};
+
+const std::vector<std::string> kClassNames = {
+    "Knight", "Paladin", "Archer", "Cleric", "Sorcerer", "Thief", "Monk", "Ranger", "Druid"
+};
+
+const std::vector<std::string> kStatNames = {
+    "Might", "Intellect", "Personality", "Endurance", "Speed", "Accuracy", "Luck"
+};
+
+// Race base stats: [race][stat] order: Might, Intellect, Personality, Endurance, Speed, Accuracy, Luck
+constexpr int kRaceBaseStats[4][7] = {
+    {11, 11, 11,  9, 11, 11, 9}, // Human
+    { 7, 14, 11,  7, 11, 14, 9}, // Elf
+    {14, 11, 11, 14,  7,  7, 9}, // Dwarf
+    {14,  7,  7, 11, 14, 11, 9}, // Goblin
+};
+
+// Race stat maximums
+constexpr int kRaceStatMax[4][7] = {
+    {25, 25, 25, 25, 25, 25, 25}, // Human
+    {15, 30, 25, 15, 25, 30, 20}, // Elf
+    {30, 25, 25, 30, 15, 15, 20}, // Dwarf
+    {30, 15, 15, 25, 30, 25, 20}, // Goblin
+};
+
+// Face-to-race: 0-7=Human, 8-11=Elf, 12-15=Dwarf, 16-19=Goblin
+Race raceFromFace(int faceId)
+{
+    if (faceId < 8) return Race::Human;
+    if (faceId < 12) return Race::Elf;
+    if (faceId < 16) return Race::Dwarf;
+    return Race::Goblin;
+}
+
+// Face-to-gender: first half of each race group is male, second half female
+Gender genderFromFace(int faceId)
+{
+    int raceStart = 0;
+    int raceCount = 8;
+    if (faceId >= 16) { raceStart = 16; raceCount = 4; }
+    else if (faceId >= 12) { raceStart = 12; raceCount = 4; }
+    else if (faceId >= 8) { raceStart = 8; raceCount = 4; }
+    int offset = faceId - raceStart;
+    return offset < raceCount / 2 ? Gender::Male : Gender::Female;
+}
+
+// Starting skills per class (indexed by CharacterClass enum order)
+struct ClassSkills
+{
+    const char* skill1;
+    const char* skill2;
+};
+
+constexpr ClassSkills kClassStartingSkills[] = {
+    {"Sword", "Leather Armor"}, // Knight
+    {"Mace", "Spirit Magic"},   // Paladin
+    {"Bow", "Air Magic"},       // Archer
+    {"Mace", "Body Magic"},     // Cleric
+    {"Staff", "Fire Magic"},    // Sorcerer
+    {"Dagger", "Stealing"},     // Thief
+    {"Dodging", "Unarmed"},     // Monk
+    {"Axe", "Perception"},      // Ranger
+    {"Dagger", "Earth Magic"},  // Druid
 };
 } // namespace
 
@@ -126,7 +197,7 @@ bool Application::initialize(const platform::WindowConfig& windowConfig)
 
     logger.info("Press ESC or close window to exit");
 
-    // TODO: Restore IntroVideo once video decoders are fixed
+    // Skip IntroVideo for now as decoders need more work
     setGameState(GameState::TitleScreen);
     initialized = true;
     return true;
@@ -284,7 +355,7 @@ void Application::configureBootFlow(const std::string& mapName, bool preferOutdo
     autoLoadMap = autoLoad;
 
     // If map name is specified via CLI, skip menu and go directly to loading
-    if (!mapName.empty() && autoLoad && gameState == GameState::TitleScreen)
+    if (!mapName.empty() && autoLoad && (gameState == GameState::TitleScreen || gameState == GameState::IntroVideo))
     {
         quickStartReady = true;
         setGameState(GameState::Loading);
@@ -730,6 +801,8 @@ void Application::setGameState(GameState state)
     {
         titleMenuIndex = 0;
         stateMessage.clear();
+        startupMapName.clear();
+        startupPreferOutdoor = false;
         titleMenuUI.buttons.clear(); // Re-layout on next frame
     }
     else if (state == GameState::CharacterCreation)
@@ -840,7 +913,9 @@ void Application::updateStateMachine()
                 else if (titleMenuIndex == 3)
                 {
                     // EXIT GAME
-                    stateMessage = "Use ESC or close window to exit";
+                    SDL_Event quitEvent = {};
+                    quitEvent.type = SDL_EVENT_QUIT;
+                    SDL_PushEvent(&quitEvent);
                 }
             }
         }
@@ -861,38 +936,153 @@ void Application::updateStateMachine()
         }
         else if (isKeyPressed(SDL_SCANCODE_Q) || isKeyPressed(SDL_SCANCODE_E))
         {
-            stateMessage = "Use ESC or close window to exit";
+            SDL_Event quitEvent = {};
+            quitEvent.type = SDL_EVENT_QUIT;
+            SDL_PushEvent(&quitEvent);
         }
         break;
     case GameState::CharacterCreation:
-        if (isKeyPressed(SDL_SCANCODE_UP))
         {
-            characterMenuIndex =
-                (characterMenuIndex + static_cast<int>(kCharacterMenuItems.size()) - 1) %
-                static_cast<int>(kCharacterMenuItems.size());
-        }
-        if (isKeyPressed(SDL_SCANCODE_DOWN))
-        {
-            characterMenuIndex =
-                (characterMenuIndex + 1) % static_cast<int>(kCharacterMenuItems.size());
-        }
+            // Select active character with 1-4
+            if (isKeyPressed(SDL_SCANCODE_1)) activeCharacterIndex = 0;
+            if (isKeyPressed(SDL_SCANCODE_2)) activeCharacterIndex = 1;
+            if (isKeyPressed(SDL_SCANCODE_3)) activeCharacterIndex = 2;
+            if (isKeyPressed(SDL_SCANCODE_4)) activeCharacterIndex = 3;
 
-        if (isKeyPressed(SDL_SCANCODE_RETURN))
-        {
-            if (characterMenuIndex == 0)
+            // Mouse click: column selection + bottom buttons
+            if (window.wasMousePressed(platform::MouseButton::Left))
             {
-                quickStartReady = true;
-                setGameState(GameState::Loading);
+                auto mouseState = window.getMouseState();
+                int gameX = unscaleX(mouseState.x);
+                int gameY = unscaleY(mouseState.y);
+
+                // Column click detection (4 columns)
+                constexpr int colX[] = {10, 168, 326, 484};
+                constexpr int colWidth = 155;
+                for (int i = 0; i < 4; i++)
+                {
+                    if (gameX >= colX[i] && gameX < colX[i] + colWidth &&
+                        gameY >= 30 && gameY < 420)
+                    {
+                        activeCharacterIndex = i;
+                        break;
+                    }
+                }
+
+                // OK button (game coords ~560-610, 440-460)
+                if (gameX >= 560 && gameX <= 620 && gameY >= 440 && gameY <= 465)
+                {
+                    quickStartReady = true;
+                    startupMapName = "out01.odm";
+                    startupPreferOutdoor = true;
+                    setGameState(GameState::Loading);
+                }
+                // CLEAR button (game coords ~490-550, 440-460)
+                else if (gameX >= 490 && gameX <= 555 && gameY >= 440 && gameY <= 465)
+                {
+                    Character& ch = party[activeCharacterIndex];
+                    ch.stats = ch.baseStats;
+                }
             }
-            else
+
+            Character& activeChar = party[activeCharacterIndex];
+
+            // Naming mode: capture text input
+            if (isNaming)
+            {
+                if (isKeyPressed(SDL_SCANCODE_BACKSPACE) && !activeChar.name.empty())
+                {
+                    activeChar.name.pop_back();
+                }
+                else if (isKeyPressed(SDL_SCANCODE_RETURN) || isKeyPressed(SDL_SCANCODE_ESCAPE))
+                {
+                    isNaming = false;
+                }
+                for (int i = SDL_SCANCODE_A; i <= SDL_SCANCODE_Z; i++)
+                {
+                    if (isKeyPressed(static_cast<SDL_Scancode>(i)))
+                    {
+                        if (activeChar.name.size() < 15)
+                        {
+                            char c = 'A' + (i - SDL_SCANCODE_A);
+                            activeChar.name += c;
+                        }
+                    }
+                }
+                break;
+            }
+
+            // Row navigation: UP/DOWN through 10 rows (NAME, FACE, CLASS, 7 stats)
+            if (isKeyPressed(SDL_SCANCODE_UP))
+            {
+                characterMenuIndex =
+                    (characterMenuIndex + kCharCreationRowCount - 1) % kCharCreationRowCount;
+            }
+            if (isKeyPressed(SDL_SCANCODE_DOWN))
+            {
+                characterMenuIndex =
+                    (characterMenuIndex + 1) % kCharCreationRowCount;
+            }
+
+            // Horizontal navigation
+            int hDelta = 0;
+            if (isKeyPressed(SDL_SCANCODE_LEFT)) hDelta = -1;
+            if (isKeyPressed(SDL_SCANCODE_RIGHT)) hDelta = 1;
+
+            if (hDelta != 0)
+            {
+                if (characterMenuIndex == 1) // FACE
+                {
+                    int oldRace = static_cast<int>(raceFromFace(activeChar.faceId));
+                    activeChar.faceId = (activeChar.faceId + hDelta + 20) % 20;
+                    int newRace = static_cast<int>(raceFromFace(activeChar.faceId));
+                    if (oldRace != newRace)
+                    {
+                        updateCharacterForFace(activeChar);
+                    }
+                }
+                else if (characterMenuIndex == 2) // CLASS
+                {
+                    int c = static_cast<int>(activeChar.charClass);
+                    c = (c + hDelta + static_cast<int>(kClassNames.size())) %
+                        static_cast<int>(kClassNames.size());
+                    activeChar.charClass = static_cast<CharacterClass>(c);
+                    updateSkillsForClass(activeChar);
+                }
+                else if (characterMenuIndex >= 3 && characterMenuIndex <= 9) // STATS
+                {
+                    int statIdx = characterMenuIndex - 3;
+                    Race race = raceFromFace(activeChar.faceId);
+                    int raceIdx = static_cast<int>(race);
+                    int minVal = activeChar.baseStats.byIndex(statIdx) - 2;
+                    int maxVal = kRaceStatMax[raceIdx][statIdx];
+
+                    if (hDelta > 0 && calculateBonusPointsRemaining() <= 0)
+                    {
+                        // No bonus points left
+                    }
+                    else
+                    {
+                        int& stat = activeChar.stats.byIndex(statIdx);
+                        stat = std::clamp(stat + hDelta, minVal, maxVal);
+                    }
+                }
+            }
+
+            // Enter key actions
+            if (isKeyPressed(SDL_SCANCODE_RETURN))
+            {
+                if (characterMenuIndex == 0) // NAME
+                {
+                    isNaming = true;
+                }
+            }
+
+            // ESC to go back
+            if (isKeyPressed(SDL_SCANCODE_ESCAPE))
             {
                 setGameState(GameState::TitleScreen);
             }
-        }
-
-        if (isKeyPressed(SDL_SCANCODE_ESCAPE))
-        {
-            setGameState(GameState::TitleScreen);
         }
         break;
     case GameState::Loading:
@@ -1053,33 +1243,132 @@ void Application::renderCharacterCreation()
     SDL_Renderer* sdlRenderer = renderer->getSDLRenderer();
     SDL_SetRenderDrawBlendMode(sdlRenderer, SDL_BLENDMODE_BLEND);
 
-    int scale = 2;
-    int menuX = 60;
-    int menuY = 100;
+    // Compute text scale from viewport
+    float gameScale = std::min(
+        static_cast<float>(viewportWidth) / static_cast<float>(kGameWidth),
+        static_cast<float>(viewportHeight) / static_cast<float>(kGameHeight));
+    int textScale = std::max(1, static_cast<int>(gameScale));
 
-    debugText->drawText(sdlRenderer, menuX, menuY, scale, 255, 230, 180, "CHARACTER CREATION");
+    // 4-column layout (game coords)
+    constexpr int colX[] = {10, 168, 326, 484};
+    constexpr int colWidth = 155;
 
-    // Display stats
-    int statY = menuY + 40;
-    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, "Name: " + current_character.name);
-    statY += 20;
-    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, std::format("Might: {}", current_character.stats.might));
-    statY += 20;
-    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, std::format("Intellect: {}", current_character.stats.intellect));
-    statY += 20;
-    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, std::format("Personality: {}", current_character.stats.personality));
-    statY += 20;
-    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, std::format("Endurance: {}", current_character.stats.endurance));
-    statY += 20;
-    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, std::format("Speed: {}", current_character.stats.speed));
-    statY += 20;
-    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, std::format("Accuracy: {}", current_character.stats.accuracy));
-    statY += 20;
-    debugText->drawText(sdlRenderer, menuX, statY, scale, 255, 255, 255, std::format("Luck: {}", current_character.stats.luck));
+    for (int c = 0; c < 4; c++)
+    {
+        const Character& ch = party[c];
+        bool isActive = (c == activeCharacterIndex);
 
-    // Render menu
-    int menuY_bottom = viewportHeight > 0 ? viewportHeight - 100 : 480;
-    renderMenu(kCharacterMenuItems, characterMenuIndex, menuX, menuY_bottom, scale);
+        int sx = scaleX(colX[c]);
+
+        // Highlight active column
+        if (isActive)
+        {
+            SDL_FRect highlight = {
+                static_cast<float>(sx),
+                static_cast<float>(scaleY(30)),
+                static_cast<float>(scaleW(colWidth)),
+                static_cast<float>(scaleH(420)),
+            };
+            SDL_SetRenderDrawColor(sdlRenderer, 255, 255, 100, 30);
+            SDL_RenderFillRect(sdlRenderer, &highlight);
+        }
+
+        // Portrait
+        int portraitY = scaleY(35);
+        if (ch.faceId >= 0 && ch.faceId < kPortraitCount && portraitTextures[ch.faceId])
+        {
+            int pw = scaleW(std::min(portraitWidths[ch.faceId], colWidth - 10));
+            int ph = scaleH(portraitHeights[ch.faceId]);
+            int px = sx + scaleW(colWidth / 2) - pw / 2;
+            renderer->renderTexture(portraitTextures[ch.faceId], px, portraitY, pw, ph);
+        }
+        else
+        {
+            debugText->drawText(sdlRenderer, sx + scaleW(20), portraitY + scaleH(30),
+                                textScale, 100, 100, 100,
+                                std::format("[Face {}]", ch.faceId + 1));
+        }
+
+        // Face navigation arrows (active character, FACE row selected)
+        if (isActive && characterMenuIndex == 1)
+        {
+            debugText->drawText(sdlRenderer, sx, portraitY, textScale, 255, 255, 0, "<");
+            debugText->drawText(sdlRenderer, sx + scaleW(colWidth - 12), portraitY,
+                                textScale, 255, 255, 0, ">");
+        }
+
+        // Name
+        int nameY = scaleY(130);
+        uint8_t nr = 200, ng = 200, nb = 200;
+        if (isActive && characterMenuIndex == 0)
+        {
+            nr = 255; ng = 255; nb = 0;
+        }
+        std::string nameStr = ch.name;
+        if (isActive && isNaming) nameStr += "_";
+        debugText->drawText(sdlRenderer, sx, nameY, textScale, nr, ng, nb, nameStr);
+
+        // Race + Gender
+        Race race = raceFromFace(ch.faceId);
+        Gender gender = genderFromFace(ch.faceId);
+        std::string raceGender = kRaceNames[static_cast<int>(race)] + " " +
+                                 kGenderNames[static_cast<int>(gender)];
+        debugText->drawText(sdlRenderer, sx, scaleY(148), textScale, 180, 180, 180, raceGender);
+
+        // Class
+        uint8_t cr = 200, cg = 200, cb = 200;
+        if (isActive && characterMenuIndex == 2)
+        {
+            cr = 255; cg = 255; cb = 0;
+        }
+        std::string classStr = kClassNames[static_cast<int>(ch.charClass)];
+        if (isActive && characterMenuIndex == 2) classStr = "< " + classStr + " >";
+        debugText->drawText(sdlRenderer, sx, scaleY(166), textScale, cr, cg, cb, classStr);
+
+        // Stats
+        for (int s = 0; s < 7; s++)
+        {
+            int statY = scaleY(195 + s * 18);
+            uint8_t sr = 180, sg = 180, sb = 180;
+            if (isActive && characterMenuIndex == 3 + s)
+            {
+                sr = 255; sg = 255; sb = 0;
+            }
+
+            std::string marker = (isActive && characterMenuIndex == 3 + s) ? "> " : "  ";
+            std::string statLine = std::format("{}{}:{}", marker, kStatNames[s].substr(0, 3),
+                                               ch.stats.byIndex(s));
+            debugText->drawText(sdlRenderer, sx, statY, textScale, sr, sg, sb, statLine);
+        }
+
+        // Skills
+        int skillY = scaleY(325);
+        for (const auto& skill : ch.skills)
+        {
+            debugText->drawText(sdlRenderer, sx, skillY, textScale, 150, 200, 150, skill);
+            skillY += debugText->lineHeight(textScale);
+        }
+    }
+
+    // Bottom controls
+    int bonusPoints = calculateBonusPointsRemaining();
+    uint8_t bonusR = bonusPoints > 0 ? 255 : 100;
+    uint8_t bonusG = bonusPoints > 0 ? 230 : 255;
+    uint8_t bonusB = 150;
+    debugText->drawText(sdlRenderer, scaleX(20), scaleY(440), textScale,
+                        bonusR, bonusG, bonusB,
+                        std::format("BONUS: {}", bonusPoints));
+
+    debugText->drawText(sdlRenderer, scaleX(560), scaleY(440), textScale,
+                        200, 255, 200, "OK");
+
+    debugText->drawText(sdlRenderer, scaleX(490), scaleY(440), textScale,
+                        255, 200, 200, "CLEAR");
+
+    // Help text
+    debugText->drawText(sdlRenderer, scaleX(20), scaleY(460),
+                        std::max(1, textScale - 1), 150, 150, 150,
+                        "1-4:Select  Arrows:Navigate  Enter:Edit name  ESC:Back");
 }
 
 void Application::renderLoadingScreen()
@@ -1338,23 +1627,63 @@ bool Application::loadUiAssets()
                    titleBackgroundWidth, titleBackgroundHeight);
     loadPcxTexture({"makeme.pcx", "MAKEME.PCX", "Create.pcx", "CREATE.PCX"}, "Create",
                    createBackground, createBackgroundWidth, createBackgroundHeight);
+
+    // Extract palette from MAKEME.PCX for use with paletted textures that have paletteId=0
+    // In the original VGA engine, the background PCX set the shared screen palette
+    for (const auto& pcxName : {"makeme.pcx", "MAKEME.PCX", "Create.pcx", "CREATE.PCX"})
+    {
+        auto pcxData = vfs->readFile(pcxName);
+        if (!pcxData.has_value())
+        {
+            continue;
+        }
+        auto pcx = formats::decodePCX(*pcxData, logger);
+        if (pcx.has_value() && !pcx->is24Bit())
+        {
+            screenPaletteRGB.resize(768);
+            for (int i = 0; i < 256; i++)
+            {
+                auto c = pcx->palette.getColor(static_cast<uint8_t>(i));
+                screenPaletteRGB[i * 3] = c.r;
+                screenPaletteRGB[i * 3 + 1] = c.g;
+                screenPaletteRGB[i * 3 + 2] = c.b;
+            }
+            logger.info(std::format("Extracted screen palette from {} ({} colors)", pcxName, 256));
+            break;
+        }
+    }
+
     loadPcxSequence("loading", loadingFrames, loadingFrameWidths, loadingFrameHeights);
     loadPcxTexture({"loading.pcx", "Loading.pcx", "LOADING.PCX"}, "Loading", loadingBackground,
                    loadingBackgroundWidth, loadingBackgroundHeight);
 
     // Load per-button hover textures from ICONS.LOD
-    // These are the highlighted versions shown when hovering/selecting a menu item
+    // title_* are the correct title screen overlays (~85x30)
+    // New1/Load1/Quit1 are in-game pause menu assets (214x40) — used as fallbacks
     const std::vector<std::string> hoverNames[] = {
-        {"New1"},  // NEW GAME
-        {"Load1"}, // LOAD GAME
-        {"Cred1"}, // CREDITS (may not exist)
-        {"Quit1"}, // EXIT GAME
+        {"title_new", "New1"},   // NEW GAME
+        {"title_load", "Load1"}, // LOAD GAME
+        {"title_cred", "Cred1"}, // CREDITS
+        {"title_exit", "Quit1"}, // EXIT GAME
     };
     for (int i = 0; i < kTitleButtonCount; i++)
     {
-        loadPcxTexture(hoverNames[i], std::string("Button ") + hoverNames[i][0],
+        loadPcxTexture(hoverNames[i], std::string("TitleBtn ") + std::to_string(i),
                        titleButtonHoverTextures[i], titleButtonHoverWidths[i],
                        titleButtonHoverHeights[i]);
+    }
+
+    // Load portrait textures (pc01 through pc20) from ICONS.LOD
+    for (int i = 0; i < kPortraitCount; i++)
+    {
+        std::string num = std::format("{:02d}", i + 1);
+        std::vector<std::string> portraitCandidates = {
+            "pc" + num,
+            "pc" + num + "01",
+            "pc" + num + "-01",
+        };
+        loadPcxTexture(portraitCandidates, std::format("Portrait {}", i + 1),
+                       portraitTextures[i], portraitWidths[i], portraitHeights[i]);
     }
 
     uiAssetsLoaded = true;
@@ -1371,6 +1700,10 @@ void Application::unloadUiAssets()
         for (int i = 0; i < kTitleButtonCount; i++)
         {
             renderer->destroyTexture(titleButtonHoverTextures[i]);
+        }
+        for (int i = 0; i < kPortraitCount; i++)
+        {
+            renderer->destroyTexture(portraitTextures[i]);
         }
         for (auto* tex : loadingFrames)
         {
@@ -1392,6 +1725,12 @@ void Application::unloadUiAssets()
         titleButtonHoverTextures[i] = nullptr;
         titleButtonHoverWidths[i] = 0;
         titleButtonHoverHeights[i] = 0;
+    }
+    for (int i = 0; i < kPortraitCount; i++)
+    {
+        portraitTextures[i] = nullptr;
+        portraitWidths[i] = 0;
+        portraitHeights[i] = 0;
     }
     loadingFrames.clear();
     loadingFrameWidths.clear();
@@ -1492,7 +1831,76 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
         }
     }
 
-    logger.error(std::format("Failed to load texture '{}' from any candidate file", label));
+    // Third fallback: try raw paletted data from image archives
+    for (const auto& name : candidates)
+    {
+        auto imgInfo = vfs->getImageInfo(name);
+        if (!imgInfo.has_value() || imgInfo->width == 0 || imgInfo->height == 0)
+        {
+            continue;
+        }
+
+        auto pixelData = vfs->readFile(name);
+        if (!pixelData.has_value())
+        {
+            continue;
+        }
+
+        // Load palette
+        // paletteId=0 means "use the active screen palette" (VGA-era concept)
+        std::optional<std::vector<uint8_t>> palData;
+        if (imgInfo->paletteId == 0 && !screenPaletteRGB.empty())
+        {
+            palData = screenPaletteRGB;
+        }
+        else
+        {
+            int palId = imgInfo->paletteId > 0 ? imgInfo->paletteId : 1;
+            std::string palName = std::format("PAL{:03d}", palId);
+            palData = vfs->readFile(palName);
+            if (!palData.has_value() && palId != 1)
+            {
+                palData = vfs->readFile("PAL001");
+            }
+        }
+        if (!palData.has_value())
+        {
+            logger.warning(std::format("No palette found for '{}' (paletteId={})", name,
+                                        imgInfo->paletteId));
+            continue;
+        }
+
+        try
+        {
+            auto palette = graphics::Palette::fromRGBData(*palData);
+            // Index 0 is transparent
+            palette.setColor(0, graphics::Palette::Color(0, 0, 0, 0));
+
+            auto image = graphics::Image::fromPalettedData(
+                *pixelData, imgInfo->width, imgInfo->height, palette);
+            if (image)
+            {
+                void* tex = renderer->createTexture(*image);
+                if (tex)
+                {
+                    renderer->destroyTexture(textureHandle);
+                    textureHandle = tex;
+                    width = static_cast<int>(imgInfo->width);
+                    height = static_cast<int>(imgInfo->height);
+                    logger.info(std::format("Loaded UI texture '{}' as paletted: {} ({}x{})",
+                                            label, name, width, height));
+                    return true;
+                }
+            }
+        }
+        catch (const std::exception& ex)
+        {
+            logger.warning(
+                std::format("Failed to convert paletted image '{}': {}", name, ex.what()));
+        }
+    }
+
+    logger.warning(std::format("Failed to load texture '{}' from any candidate", label));
     return false;
 }
 
@@ -2016,6 +2424,121 @@ bool Application::wasMouseClickedIn(const graphics::Rect& rect) const
     return isMouseOver(rect);
 }
 
+int Application::scaleX(int gameX) const
+{
+    float s = std::min(
+        static_cast<float>(viewportWidth) / static_cast<float>(kGameWidth),
+        static_cast<float>(viewportHeight) / static_cast<float>(kGameHeight));
+    float offsetX = (viewportWidth - kGameWidth * s) / 2.0f;
+    return static_cast<int>(offsetX + gameX * s);
+}
+
+int Application::scaleY(int gameY) const
+{
+    float s = std::min(
+        static_cast<float>(viewportWidth) / static_cast<float>(kGameWidth),
+        static_cast<float>(viewportHeight) / static_cast<float>(kGameHeight));
+    float offsetY = (viewportHeight - kGameHeight * s) / 2.0f;
+    return static_cast<int>(offsetY + gameY * s);
+}
+
+int Application::scaleW(int gameW) const
+{
+    float s = std::min(
+        static_cast<float>(viewportWidth) / static_cast<float>(kGameWidth),
+        static_cast<float>(viewportHeight) / static_cast<float>(kGameHeight));
+    return static_cast<int>(gameW * s);
+}
+
+int Application::scaleH(int gameH) const
+{
+    float s = std::min(
+        static_cast<float>(viewportWidth) / static_cast<float>(kGameWidth),
+        static_cast<float>(viewportHeight) / static_cast<float>(kGameHeight));
+    return static_cast<int>(gameH * s);
+}
+
+int Application::unscaleX(int screenX) const
+{
+    float s = std::min(
+        static_cast<float>(viewportWidth) / static_cast<float>(kGameWidth),
+        static_cast<float>(viewportHeight) / static_cast<float>(kGameHeight));
+    if (s <= 0.0f) return 0;
+    float offsetX = (viewportWidth - kGameWidth * s) / 2.0f;
+    return static_cast<int>((screenX - offsetX) / s);
+}
+
+int Application::unscaleY(int screenY) const
+{
+    float s = std::min(
+        static_cast<float>(viewportWidth) / static_cast<float>(kGameWidth),
+        static_cast<float>(viewportHeight) / static_cast<float>(kGameHeight));
+    if (s <= 0.0f) return 0;
+    float offsetY = (viewportHeight - kGameHeight * s) / 2.0f;
+    return static_cast<int>((screenY - offsetY) / s);
+}
+
+int Application::calculateBonusPointsRemaining() const
+{
+    int totalSpent = 0;
+    for (const auto& ch : party)
+    {
+        for (int i = 0; i < 7; i++)
+        {
+            totalSpent += ch.stats.byIndex(i) - ch.baseStats.byIndex(i);
+        }
+    }
+    return 50 - totalSpent;
+}
+
+void Application::initDefaultParty()
+{
+    party.resize(4);
+
+    party[0].name = "Zoltan";
+    party[0].faceId = 17;
+    party[0].charClass = CharacterClass::Knight;
+    updateCharacterForFace(party[0]);
+    updateSkillsForClass(party[0]);
+
+    party[1].name = "Roderick";
+    party[1].faceId = 3;
+    party[1].charClass = CharacterClass::Thief;
+    updateCharacterForFace(party[1]);
+    updateSkillsForClass(party[1]);
+
+    party[2].name = "Serena";
+    party[2].faceId = 14;
+    party[2].charClass = CharacterClass::Cleric;
+    updateCharacterForFace(party[2]);
+    updateSkillsForClass(party[2]);
+
+    party[3].name = "Alexis";
+    party[3].faceId = 10;
+    party[3].charClass = CharacterClass::Sorcerer;
+    updateCharacterForFace(party[3]);
+    updateSkillsForClass(party[3]);
+}
+
+void Application::updateCharacterForFace(Character& ch)
+{
+    Race race = raceFromFace(ch.faceId);
+    int raceIdx = static_cast<int>(race);
+    for (int i = 0; i < 7; i++)
+    {
+        ch.baseStats.byIndex(i) = kRaceBaseStats[raceIdx][i];
+    }
+    ch.stats = ch.baseStats;
+}
+
+void Application::updateSkillsForClass(Character& ch)
+{
+    int classIdx = static_cast<int>(ch.charClass);
+    ch.skills.clear();
+    ch.skills.push_back(kClassStartingSkills[classIdx].skill1);
+    ch.skills.push_back(kClassStartingSkills[classIdx].skill2);
+}
+
 void Application::layoutTitleMenuButtons()
 {
     if (viewportWidth == 0 || viewportHeight == 0)
@@ -2024,25 +2547,28 @@ void Application::layoutTitleMenuButtons()
     }
     titleMenuUI.buttons.clear();
 
-    const int buttonWidth = 332;
-    const int buttonHeight = 70;
-    int currentY = static_cast<int>(static_cast<float>(viewportHeight) * 0.45f);
+    // MM7-accurate button positions (640x480 game coords)
+    constexpr int kButtonGameX = 495;
+    constexpr int kButtonGameY[] = {172, 227, 282, 337};
 
     for (int i = 0; i < kTitleButtonCount; ++i)
     {
+        // Use actual texture dimensions for hit area, with sensible defaults
+        int btnW = titleButtonHoverWidths[i] > 0 ? titleButtonHoverWidths[i] : 85;
+        int btnH = titleButtonHoverHeights[i] > 0 ? titleButtonHoverHeights[i] : 30;
+
         MenuButton button;
         button.id = kTitleMenuItems[static_cast<size_t>(i)];
         button.bounds = {
-            (viewportWidth - buttonWidth) / 2,
-            currentY,
-            buttonWidth,
-            buttonHeight,
+            scaleX(kButtonGameX),
+            scaleY(kButtonGameY[i]),
+            scaleW(btnW),
+            scaleH(btnH),
         };
         button.hoverTexture = titleButtonHoverTextures[i];
         button.textureWidth = titleButtonHoverWidths[i];
         button.textureHeight = titleButtonHoverHeights[i];
         titleMenuUI.buttons.push_back(button);
-        currentY += buttonHeight;
     }
 }
 

@@ -165,6 +165,7 @@ class SmackerDecoder
     std::vector<uint32_t> keyframeIndices_;
     std::vector<uint8_t> palette_;     // 256 * 3 = 768 bytes
     std::vector<uint8_t> frameBuffer_; // Current decoded frame (indexed)
+    std::vector<uint8_t> rgbaBuffer_;  // Cached RGBA conversion
 
     size_t dataOffset_ = 0;  // Start of frame data in buffer
     size_t treesOffset_ = 0; // Start of Huffman trees
