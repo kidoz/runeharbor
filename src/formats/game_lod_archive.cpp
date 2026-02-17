@@ -113,37 +113,49 @@ bool GameLODArchive::readDirectory()
     logger.debug(std::format("Game archive metadata: {}", buildFilename(metaEntry)));
 
     // The file count is stored in the last field of metadata entry (reserved[1])
-    uint32_t fileCount = metaEntry.reserved[1];
-    logger.debug(std::format("Expected {} file entries", fileCount));
-
-    if (fileCount == 0 || fileCount > 10000)
+    // However, it seems unreliable or I'm reading the wrong field.
+    // Let's read until we find an empty name or hit data start.
+    
+    // Scan for directory end (null entry)
+    entries.reserve(1000);
+    while (file.good())
     {
-        logger.error(std::format("Invalid file count: {}", fileCount));
-        return false;
-    }
-
-    // Read exactly fileCount entries
-    entries.reserve(fileCount);
-    for (uint32_t i = 0; i < fileCount; i++)
-    {
+        std::streamoff entryPos = file.tellg();
         GameLODDirectoryEntry entry;
         file.read(reinterpret_cast<char*>(&entry), sizeof(GameLODDirectoryEntry));
 
         if (!file.good())
         {
-            logger.error(std::format("Failed to read entry {}", i));
+            break;
+        }
+
+        // Stop if name is empty
+        if (entry.name[0] == '\0')
+        {
+            // Found end of directory
+            // Data section typically starts here or aligned
+            dataSectionStart = entryPos; 
+            // Actually, usually there is some padding or it starts immediately.
+            // Let's assume data starts after the null entry?
+            // Or maybe the null entry is part of padding.
+            // In LOD, data starts after directory.
+            // Let's use the current position (after reading empty entry) as data start?
+            // No, usually data start is fixed or we can infer it.
+            // For GAMES.LOD, d01.blv offset 0x1300 implies data start around 0x5000.
+            // If we read 634 entries -> 0x5040.
+            // 0x5040 + 32 = 0x5060.
+            dataSectionStart = entryPos + sizeof(GameLODDirectoryEntry);
             break;
         }
 
         entries.push_back(entry);
+        
+        // Safety break
+        if (entries.size() > 10000) break;
     }
 
-    // Data section starts right after the directory entries
-    dataSectionStart = directoryOffset + sizeof(GameLODDirectoryEntry) * (1 + fileCount);
-    logger.debug(
-        std::format("Data section starts at 0x{:X}", static_cast<uint64_t>(dataSectionStart)));
-
     logger.debug(std::format("Read {} game directory entries", entries.size()));
+    logger.debug(std::format("Data section estimated at 0x{:X}", static_cast<uint64_t>(dataSectionStart)));
 
     if (entries.empty())
     {

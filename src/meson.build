@@ -51,6 +51,10 @@ graphics_sources = files(
     'graphics/debug_text.cpp',
     'graphics/palette.cpp',
     'graphics/image.cpp',
+    'graphics/image_loader.cpp',
+    'graphics/sprite_decoder.cpp',
+    'graphics/sprite_loader.cpp',
+    'graphics/texture_manager.cpp',
     'graphics/sdl_renderer.cpp',
     'graphics/camera.cpp',
     'graphics/line_renderer.cpp',
@@ -69,6 +73,11 @@ media_sources = files(
 # Game sources
 game_sources = files(
     'game/character.cpp',
+)
+
+# UI sources
+ui_sources = files(
+    'ui/layout.cpp',
 )
 
 # Dependencies
@@ -94,6 +103,7 @@ executable(
         game_sources,
         graphics_sources,
         media_sources,
+        ui_sources,
     ],
     include_directories: inc_dirs,
     dependencies: [sdl3_dep, zlib_dep],
