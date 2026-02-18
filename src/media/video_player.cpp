@@ -28,7 +28,7 @@ VideoPlayer::~VideoPlayer()
 
 bool VideoPlayer::loadArchive(const std::filesystem::path& path)
 {
-    auto archive = std::make_unique<VIDArchive>();
+    auto archive = std::make_unique<VidArchive>();
     if (!archive->open(path))
     {
         return false;
@@ -141,7 +141,7 @@ void VideoPlayer::update(uint64_t nowTicks)
 
     uint32_t oldFrame = currentFrame_;
     updateFrame(nowTicks);
-    
+
     if (active_ && !paused_ && currentFrame_ != oldFrame)
     {
         queueAudioForCurrentFrame();
@@ -240,7 +240,7 @@ bool VideoPlayer::loadCurrentClip()
     const std::string& name = playlist_[currentIndex_].name;
 
     // Find archive containing this clip
-    VIDArchive* archive = findArchiveWithClip(name);
+    VidArchive* archive = findArchiveWithClip(name);
     if (!archive)
     {
         // Clip not found - treat as placeholder
@@ -253,7 +253,7 @@ bool VideoPlayer::loadCurrentClip()
         return false;
     }
 
-    const VIDEntry* entry = archive->getEntry(*entryIdx);
+    const VidEntry* entry = archive->getEntry(*entryIdx);
     if (!entry)
     {
         return false;
@@ -323,7 +323,7 @@ bool VideoPlayer::loadCurrentClip()
     return false;
 }
 
-VIDArchive* VideoPlayer::findArchiveWithClip(const std::string& name)
+VidArchive* VideoPlayer::findArchiveWithClip(const std::string& name)
 {
     for (auto& archive : archives_)
     {
@@ -382,9 +382,9 @@ void VideoPlayer::renderFrame(SDL_Renderer* renderer, int width, int height)
     {
         destroyTexture();
 
-        frameTexture_ =
-            SDL_CreateTexture(renderer, static_cast<SDL_PixelFormat>(pixelFormat), SDL_TEXTUREACCESS_STREAMING,
-                              static_cast<int>(vidWidth), static_cast<int>(vidHeight));
+        frameTexture_ = SDL_CreateTexture(renderer, static_cast<SDL_PixelFormat>(pixelFormat),
+                                          SDL_TEXTUREACCESS_STREAMING, static_cast<int>(vidWidth),
+                                          static_cast<int>(vidHeight));
 
         if (!frameTexture_)
         {
@@ -433,15 +433,17 @@ void VideoPlayer::renderFrame(SDL_Renderer* renderer, int width, int height)
         else if (binkDecoder_)
         {
             // Decodes frame if needed
-            if (dummyBinkFrame_ && binkDecoder_->decodeFrame(currentFrame_, *dummyBinkFrame_)) {
-                 auto planes = binkDecoder_->getYUVPlanes();
-                 if (planes) {
-                     SDL_UpdateYUVTexture(frameTexture_, nullptr, 
-                                          planes->y, static_cast<int>(planes->yStride),
-                                          planes->u, static_cast<int>(planes->uvStride),
-                                          planes->v, static_cast<int>(planes->uvStride));
-                     lastRenderedFrame_ = currentFrame_;
-                 }
+            if (dummyBinkFrame_ && binkDecoder_->decodeFrame(currentFrame_, *dummyBinkFrame_))
+            {
+                auto planes = binkDecoder_->getYUVPlanes();
+                if (planes)
+                {
+                    SDL_UpdateYUVTexture(frameTexture_, nullptr, planes->y,
+                                         static_cast<int>(planes->yStride), planes->u,
+                                         static_cast<int>(planes->uvStride), planes->v,
+                                         static_cast<int>(planes->uvStride));
+                    lastRenderedFrame_ = currentFrame_;
+                }
             }
         }
     }
@@ -536,14 +538,16 @@ bool VideoPlayer::hasAudio() const
     {
         for (int i = 0; i < 7; i++)
         {
-            if (smackerDecoder_->hasAudio(i)) return true;
+            if (smackerDecoder_->hasAudio(i))
+                return true;
         }
     }
     if (binkDecoder_)
     {
         for (uint32_t i = 0; i < binkDecoder_->audioTrackCount(); i++)
         {
-            if (binkDecoder_->hasAudio(i)) return true;
+            if (binkDecoder_->hasAudio(i))
+                return true;
         }
     }
     return false;
@@ -660,9 +664,10 @@ void VideoPlayer::queueAudioForCurrentFrame()
 
     uint32_t startFrame =
         (lastAudioFrameQueued_ == UINT32_MAX) ? currentFrame_ : lastAudioFrameQueued_ + 1;
-    
+
     // Safety: don't queue more than 10 frames at once to avoid stalls
-    if (currentFrame_ > startFrame + 10) {
+    if (currentFrame_ > startFrame + 10)
+    {
         startFrame = currentFrame_ - 10;
     }
 

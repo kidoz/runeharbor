@@ -3,7 +3,7 @@
 
 #include "../../src/formats/hostile_parser.hpp"
 #include "../../src/util/console_logger.hpp"
-#include "../../src/util/string_utils.hpp" 
+#include "../../src/util/string_utils.hpp"
 
 TEST_CASE("HostileParser parsing HOSTILE.TXT", "[hostile_parser]")
 {
@@ -16,7 +16,7 @@ Party	0	0	0
 Angel	0	0	0
 Archer	0	0	0
 )";
-    
+
     std::vector<uint8_t> data(sample_data.begin(), sample_data.end());
 
     SECTION("Parser successfully parses sample data")
@@ -58,7 +58,8 @@ Archer	0	0	0
         std::string malformed_header_data = R"(
 Party	0	0	0
 )";
-        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(), malformed_header_data.end());
+        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(),
+                                           malformed_header_data.end());
         REQUIRE_FALSE(parser.parse(malformed_vec));
         REQUIRE(parser.getHostileMatrix().getEntityNames().empty());
     }
@@ -68,7 +69,8 @@ Party	0	0	0
         std::string malformed_header_data = R"(	 	 	
 Party	0	0	0
 )";
-        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(), malformed_header_data.end());
+        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(),
+                                           malformed_header_data.end());
         REQUIRE_FALSE(parser.parse(malformed_vec));
         REQUIRE(parser.getHostileMatrix().getEntityNames().empty());
     }
@@ -83,8 +85,10 @@ Angel	0	0	0
         REQUIRE(parser.parse(malformed_vec));
         const auto& hostileMatrix = parser.getHostileMatrix();
         REQUIRE(hostileMatrix.getEntityNames().size() == 3); // Party, Angel, Archer
-        REQUIRE(hostileMatrix.getHostility("Angel", "Party") == 0); // This row should still be parsed
-        REQUIRE(hostileMatrix.getHostility("", "Party") == std::nullopt); // Empty row label is skipped
+        REQUIRE(hostileMatrix.getHostility("Angel", "Party") ==
+                0); // This row should still be parsed
+        REQUIRE(hostileMatrix.getHostility("", "Party") ==
+                std::nullopt); // Empty row label is skipped
     }
 
     SECTION("Malformed data row (incorrect number of fields) is skipped")
@@ -100,6 +104,7 @@ Archer	0	0	0
         REQUIRE(hostileMatrix.getEntityNames().size() == 3); // Party, Angel, Archer
         REQUIRE(hostileMatrix.getHostility("Party", "Party") == 0);
         REQUIRE(hostileMatrix.getHostility("Archer", "Party") == 0);
-        REQUIRE(hostileMatrix.getHostility("Angel", "Party") == std::nullopt); // The malformed row was skipped, so Angel's data is not added.
+        REQUIRE(hostileMatrix.getHostility("Angel", "Party") ==
+                std::nullopt); // The malformed row was skipped, so Angel's data is not added.
     }
 }

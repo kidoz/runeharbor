@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <format>
+
 #include <cstring>
 #include <zlib.h>
 
@@ -44,7 +45,8 @@ bool SndArchive::open(const std::filesystem::path& path)
     {
         SndEntryRaw raw;
         file.read(reinterpret_cast<char*>(&raw), sizeof(SndEntryRaw));
-        if (!file) break;
+        if (!file)
+            break;
 
         SndEntry entry;
         entry.offset = raw.offset;
@@ -54,7 +56,7 @@ bool SndArchive::open(const std::filesystem::path& path)
         // Extract name and handle potential extension
         std::string baseName = raw.name;
         std::string ext;
-        
+
         // Look for extension after the first null
         size_t baseLen = baseName.length();
         if (baseLen + 1 < 40 && raw.name[baseLen + 1] != '\0')
@@ -75,7 +77,8 @@ bool SndArchive::open(const std::filesystem::path& path)
     }
 
     opened = true;
-    logger.info(std::format("Opened SND archive '{}' with {} entries", path.string(), entries.size()));
+    logger.info(
+        std::format("Opened SND archive '{}' with {} entries", path.string(), entries.size()));
     return true;
 }
 
@@ -107,19 +110,21 @@ std::vector<std::string> SndArchive::listFiles() const
 
 std::optional<std::vector<uint8_t>> SndArchive::extractFile(const std::string& filename)
 {
-    if (!opened) return std::nullopt;
+    if (!opened)
+        return std::nullopt;
 
-    auto it = std::find_if(entries.begin(), entries.end(), [&](const SndEntry& e) {
-        return util::equalsIgnoreCase(e.name, filename);
-    });
+    auto it = std::find_if(entries.begin(), entries.end(), [&](const SndEntry& e)
+                           { return util::equalsIgnoreCase(e.name, filename); });
 
     // Also try without extension if the filename has none
     if (it == entries.end() && filename.find('.') == std::string::npos)
     {
-        it = std::find_if(entries.begin(), entries.end(), [&](const SndEntry& e) {
-            std::string_view base(e.name.data(), e.name.find('.'));
-            return util::equalsIgnoreCase(base, filename);
-        });
+        it = std::find_if(entries.begin(), entries.end(),
+                          [&](const SndEntry& e)
+                          {
+                              std::string_view base(e.name.data(), e.name.find('.'));
+                              return util::equalsIgnoreCase(base, filename);
+                          });
     }
 
     if (it == entries.end())
@@ -146,13 +151,15 @@ std::optional<std::vector<uint8_t>> SndArchive::extractFile(const std::string& f
     return data;
 }
 
-std::vector<uint8_t> SndArchive::decompressZlib(const std::vector<uint8_t>& data, uint32_t uncompressedSize)
+std::vector<uint8_t> SndArchive::decompressZlib(const std::vector<uint8_t>& data,
+                                                uint32_t uncompressedSize)
 {
-    if (data.empty()) return {};
+    if (data.empty())
+        return {};
 
     std::vector<uint8_t> result(uncompressedSize);
     uLongf destLen = uncompressedSize;
-    
+
     // We use uncompress which handles the zlib header
     int res = uncompress(result.data(), &destLen, data.data(), data.size());
 
@@ -164,7 +171,8 @@ std::vector<uint8_t> SndArchive::decompressZlib(const std::vector<uint8_t>& data
 
     if (destLen != uncompressedSize)
     {
-        logger.warning(std::format("Decompressed size mismatch: expected {}, got {}", uncompressedSize, destLen));
+        logger.warning(std::format("Decompressed size mismatch: expected {}, got {}",
+                                   uncompressedSize, destLen));
         result.resize(destLen);
     }
 

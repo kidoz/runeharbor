@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
 
 #include "../util/ilogger.hpp"
 
@@ -19,12 +19,12 @@ struct AutonoteEntry
 
 class AutonoteParser
 {
-public:
+  public:
     explicit AutonoteParser(util::ILogger& logger);
     bool parse(const std::vector<uint8_t>& data);
     const std::vector<AutonoteEntry>& getAutonoteEntries() const { return entries; }
 
-private:
+  private:
     util::ILogger& logger;
     std::vector<AutonoteEntry> entries;
     // Will use runeharbor::util::splitString from string_utils.hpp

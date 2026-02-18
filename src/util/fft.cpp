@@ -2,8 +2,9 @@
 #include "fft.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <numbers>
+
+#include <cmath>
 
 namespace runeharbor::util
 {
@@ -82,7 +83,7 @@ void FFT::dct(std::span<float> data, bool inverse)
             std::vector<float> imag(n);
 
             constexpr float kPi = std::numbers::pi_v<float>;
-            
+
             real[0] = data[0];
             for (size_t i = 1; i < n; i++)
             {
@@ -98,7 +99,7 @@ void FFT::dct(std::span<float> data, bool inverse)
                 data[i * 2] = real[i] * 2.0f;
                 data[i * 2 + 1] = real[n - 1 - i] * 2.0f;
             }
-            
+
             // Re-apply normalization for DCT
             float scale = 1.0f / std::sqrt(static_cast<float>(n));
             for (size_t i = 0; i < n; i++)
@@ -122,7 +123,7 @@ void FFT::dct(std::span<float> data, bool inverse)
 
             constexpr float kPi = std::numbers::pi_v<float>;
             float scale = std::sqrt(2.0f / static_cast<float>(n));
-            
+
             data[0] = real[0] * scale / std::sqrt(2.0f);
             for (size_t k = 1; k < n; k++)
             {
@@ -146,8 +147,8 @@ void FFT::dct(std::span<float> data, bool inverse)
             float sum = temp[0] / 2.0f;
             for (size_t k = 1; k < n; k++)
             {
-                float angle =
-                    kPi * static_cast<float>(k) * (static_cast<float>(i) + 0.5f) / static_cast<float>(n);
+                float angle = kPi * static_cast<float>(k) * (static_cast<float>(i) + 0.5f) /
+                              static_cast<float>(n);
                 sum += temp[k] * std::cos(angle);
             }
             data[i] = sum * scale;
@@ -162,8 +163,8 @@ void FFT::dct(std::span<float> data, bool inverse)
             float sum = 0.0f;
             for (size_t i = 0; i < n; i++)
             {
-                float angle =
-                    kPi * static_cast<float>(k) * (static_cast<float>(i) + 0.5f) / static_cast<float>(n);
+                float angle = kPi * static_cast<float>(k) * (static_cast<float>(i) + 0.5f) /
+                              static_cast<float>(n);
                 sum += temp[i] * std::cos(angle);
             }
             data[k] = sum * scale;

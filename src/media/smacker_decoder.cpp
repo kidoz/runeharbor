@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstring>
+
 #include "../util/fft.hpp"
 
 namespace runeharbor::media
@@ -961,30 +962,34 @@ void SmackerDecoder::decodeBlockFull(BitReader& bits, uint32_t x, uint32_t y)
             // v4 Solid sub-block
             uint16_t val = mclrTree_ ? mclrTree_->decode(bits) : 0;
             uint8_t color = static_cast<uint8_t>(val & 0xFF);
-            // uint8_t colorHi = static_cast<uint8_t>(val >> 8); 
+            // uint8_t colorHi = static_cast<uint8_t>(val >> 8);
             // Note: libsmacker uses low byte. Some sources say high byte is another color?
             // FFmpeg says: val = get_vlc2(... mclr ...); *p++ = val; *p++ = val; ...
             // So it fills with the value.
-            // But wait, mclrTree returns 16-bit. 
+            // But wait, mclrTree returns 16-bit.
             // In v4 mono blocks, it returns 2 colors (low/high).
             // Here, it seems to be just one color for solid fill.
             // Let's assume low byte.
-            
+
             uint32_t targetY = subY;
-            if (targetY < header_.height) {
+            if (targetY < header_.height)
+            {
                 frameBuffer_[targetY * header_.width + subX] = color;
                 frameBuffer_[targetY * header_.width + subX + 1] = color;
-                if (doubleHigh_ && (targetY + 1) < header_.height) {
+                if (doubleHigh_ && (targetY + 1) < header_.height)
+                {
                     frameBuffer_[(targetY + 1) * header_.width + subX] = color;
                     frameBuffer_[(targetY + 1) * header_.width + subX + 1] = color;
                 }
             }
-            
+
             targetY = subY + (doubleHigh_ ? 2 : 1);
-            if (targetY < header_.height) {
+            if (targetY < header_.height)
+            {
                 frameBuffer_[targetY * header_.width + subX] = color;
                 frameBuffer_[targetY * header_.width + subX + 1] = color;
-                if (doubleHigh_ && (targetY + 1) < header_.height) {
+                if (doubleHigh_ && (targetY + 1) < header_.height)
+                {
                     frameBuffer_[(targetY + 1) * header_.width + subX] = color;
                     frameBuffer_[(targetY + 1) * header_.width + subX + 1] = color;
                 }
@@ -1010,7 +1015,7 @@ void SmackerDecoder::decodeBlockFull(BitReader& bits, uint32_t x, uint32_t y)
                             frameBuffer_[(subY + 1) * header_.width + px] = p0;
                         }
                     }
-                    
+
                     uint32_t targetY1 = subY + (doubleHigh_ ? 2 : 1);
                     if (targetY1 < header_.height)
                     {

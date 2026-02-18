@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
 
 #include "../util/ilogger.hpp"
 
@@ -18,12 +18,12 @@ struct NPCNames
 
 class NPCNamesParser
 {
-public:
+  public:
     explicit NPCNamesParser(util::ILogger& logger);
     bool parse(const std::vector<uint8_t>& data);
     const NPCNames& getNPCNames() const { return names; }
 
-private:
+  private:
     util::ILogger& logger;
     NPCNames names;
     // Will use runeharbor::util::splitString from string_utils.hpp

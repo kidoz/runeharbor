@@ -157,7 +157,8 @@ class BinkTree
     uint8_t sortedSymbols_[MAX_SYMBOLS];
 
     // Fast lookup table for the first 8 bits
-    struct LookupEntry {
+    struct LookupEntry
+    {
         uint8_t symbol;
         uint8_t len;
     } lookup_[256];

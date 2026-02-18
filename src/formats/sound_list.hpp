@@ -4,8 +4,8 @@
 #include <array>
 #include <cstdint>
 #include <string>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #include "../util/ilogger.hpp"
 
@@ -45,10 +45,10 @@ class SoundList
     explicit SoundList(util::ILogger& logger);
 
     bool parse(const std::vector<uint8_t>& data);
-    
+
     const SoundEvent* getSound(uint32_t soundId) const;
     const SoundEvent* getSoundByName(const std::string& name) const;
-    
+
     const std::unordered_map<uint32_t, SoundEvent>& getAllSounds() const { return sounds; }
 
   private:

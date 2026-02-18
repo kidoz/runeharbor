@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
 
 #include "../util/ilogger.hpp"
 
@@ -15,7 +15,7 @@ struct MonsterEncounter
     std::string picture;
     std::string name;
     std::string countRange; // e.g., "1-5" or just a number
-    std::string id; // Changed from int to string, as it often contains ranges like "2-5"
+    std::string id;         // Changed from int to string, as it often contains ranges like "2-5"
 };
 
 struct MapStatsEntry
@@ -39,24 +39,24 @@ struct MapStatsEntry
 
     MonsterEncounter monster1;
     MonsterEncounter monster2;
-        MonsterEncounter monster3;
-    
-        std::string track;          // Field labeled 'Track'
+    MonsterEncounter monster3;
+
+    std::string track;           // Field labeled 'Track'
     std::string eaxEnvironments; // Field labeled 'EAX Environments'
-    std::string mapDesigner;    // Field labeled 'Map Designer'
-    std::string notes;          // Field labeled 'Notes'
+    std::string mapDesigner;     // Field labeled 'Map Designer'
+    std::string notes;           // Field labeled 'Notes'
     std::string notesExtraField; // Extra empty field found between notes and inArea
-    std::string inArea;         // Field labeled 'in area' - can be 'x', '0', etc.
+    std::string inArea;          // Field labeled 'in area' - can be 'x', '0', etc.
 };
 
 class MapStatsParser
 {
-public:
+  public:
     explicit MapStatsParser(util::ILogger& logger);
     bool parse(const std::vector<uint8_t>& data);
     const std::vector<MapStatsEntry>& getMapStats() const { return mapStats; }
 
-private:
+  private:
     util::ILogger& logger;
     std::vector<MapStatsEntry> mapStats;
 };

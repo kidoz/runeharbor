@@ -1,11 +1,10 @@
-#include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
-#include "spells_parser.hpp"
-
+#include "../util/string_utils.hpp"
 #include <algorithm>
 #include <format>
 #include <sstream> // For std::istringstream and std::getline
 
+#include "spells_parser.hpp"
 
 namespace runeharbor::formats
 {
@@ -36,8 +35,10 @@ bool SpellsParser::parse(const std::vector<uint8_t>& data)
             continue;
         }
 
-        // Skip section headers (e.g., "	Lvl	Fire Spells	Res		Spell Description")
-        if (line.length() >= 4 && line[0] == '	' && line[1] == 'L' && line[2] == 'v' && line[3] == 'l')
+        // Skip section headers (e.g., "	Lvl	Fire Spells	Res		Spell
+        // Description")
+        if (line.length() >= 4 && line[0] == '	' && line[1] == 'L' && line[2] == 'v' &&
+            line[3] == 'l')
         {
             logger.debug(std::format("Skipping section header: {}", line));
             continue;
@@ -49,10 +50,11 @@ bool SpellsParser::parse(const std::vector<uint8_t>& data)
             logger.debug(std::format("Skipping main column header: {}", line));
             continue;
         }
-        
+
         // Data line
         SpellEntry entry;
-        std::vector<std::string> fields = util::splitString(line, '	', '"'); // Split by tab, handle quotes
+        std::vector<std::string> fields =
+            util::splitString(line, '	', '"'); // Split by tab, handle quotes
 
         // We expect at least 11 fields based on spells.md analysis
         // # Lvl Name Res Short Name Description Normal Expert Master Grand Master Stats
@@ -67,47 +69,58 @@ bool SpellsParser::parse(const std::vector<uint8_t>& data)
             size_t fieldIndex = 0;
 
             // 1. ID
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.id = std::stoi(fields[fieldIndex]);
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.id = std::stoi(fields[fieldIndex]);
             fieldIndex++;
 
             // 2. Lvl
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.level = std::stoi(fields[fieldIndex]);
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.level = std::stoi(fields[fieldIndex]);
             fieldIndex++;
 
             // 3. Name (Spell Name)
-            if (fieldIndex < fields.size()) entry.name = fields[fieldIndex];
+            if (fieldIndex < fields.size())
+                entry.name = fields[fieldIndex];
             fieldIndex++;
 
             // 4. Res (Resistance)
-            if (fieldIndex < fields.size()) entry.resistance = fields[fieldIndex];
+            if (fieldIndex < fields.size())
+                entry.resistance = fields[fieldIndex];
             fieldIndex++;
 
             // 5. Short Name
-            if (fieldIndex < fields.size()) entry.shortName = fields[fieldIndex];
+            if (fieldIndex < fields.size())
+                entry.shortName = fields[fieldIndex];
             fieldIndex++;
 
             // 6. Description
-            if (fieldIndex < fields.size()) entry.description = fields[fieldIndex];
+            if (fieldIndex < fields.size())
+                entry.description = fields[fieldIndex];
             fieldIndex++;
 
             // 7. Normal Effect
-            if (fieldIndex < fields.size()) entry.normalEffect = fields[fieldIndex];
+            if (fieldIndex < fields.size())
+                entry.normalEffect = fields[fieldIndex];
             fieldIndex++;
 
             // 8. Expert Effect
-            if (fieldIndex < fields.size()) entry.expertEffect = fields[fieldIndex];
+            if (fieldIndex < fields.size())
+                entry.expertEffect = fields[fieldIndex];
             fieldIndex++;
 
             // 9. Master Effect
-            if (fieldIndex < fields.size()) entry.masterEffect = fields[fieldIndex];
+            if (fieldIndex < fields.size())
+                entry.masterEffect = fields[fieldIndex];
             fieldIndex++;
 
             // 10. Grand Master Effect
-            if (fieldIndex < fields.size()) entry.grandMasterEffect = fields[fieldIndex];
+            if (fieldIndex < fields.size())
+                entry.grandMasterEffect = fields[fieldIndex];
             fieldIndex++;
 
             // 11. Stats
-            if (fieldIndex < fields.size()) entry.stats = fields[fieldIndex];
+            if (fieldIndex < fields.size())
+                entry.stats = fields[fieldIndex];
             fieldIndex++;
 
             spells.push_back(entry);

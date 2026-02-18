@@ -184,7 +184,8 @@ TEST_CASE("SmackerDecoder DPCM uses wraparound deltas for 8-bit audio", "[smacke
     header.mclrSize = 0;
     header.fullSize = 0;
     header.typeSize = 0;
-    header.audioRate[0] = 0x40000000u | 0x80000000u | 8000u; // has audio, compressed, 8-bit (is16Bit=false), mono, 8kHz
+    header.audioRate[0] = 0x40000000u | 0x80000000u |
+                          8000u; // has audio, compressed, 8-bit (is16Bit=false), mono, 8kHz
 
     BitWriter writer;
     writer.writeBit(true);  // data present

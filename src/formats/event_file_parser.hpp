@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
 
 #include "../util/ilogger.hpp"
 
@@ -46,12 +46,12 @@ struct EventEntry
 
 class EventFileParser
 {
-public:
+  public:
     explicit EventFileParser(util::ILogger& logger);
     bool parse(const std::vector<uint8_t>& data);
     const std::vector<EventEntry>& getEvents() const { return events; }
 
-private:
+  private:
     util::ILogger& logger;
     std::vector<EventEntry> events;
 };

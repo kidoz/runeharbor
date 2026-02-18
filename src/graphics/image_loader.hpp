@@ -1,15 +1,19 @@
+// SPDX-License-Identifier: MIT
 #pragma once
 #include <memory>
 #include <string>
 #include <unordered_map>
+
+#include "../formats/image_lod_archive.hpp"
 #include "image.hpp"
 #include "palette.hpp"
-#include "../formats/image_lod_archive.hpp"
 
-namespace runeharbor::graphics {
+namespace runeharbor::graphics
+{
 
-class ImageLoader {
-public:
+class ImageLoader
+{
+  public:
     explicit ImageLoader(formats::ImageLODArchive& archive);
 
     // Load an image by name (e.g. "A1b")
@@ -19,7 +23,7 @@ public:
     // Load a palette by ID (e.g. 132 -> "pal132")
     const Palette& loadPalette(int paletteId);
 
-private:
+  private:
     formats::ImageLODArchive& archive;
     std::unordered_map<int, Palette> paletteCache;
 };

@@ -1,13 +1,13 @@
 #include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
-#include "game_lod_archive.hpp"
-
 #include <algorithm>
 #include <format>
 
 #include <cctype>
 #include <cstring>
 #include <zlib.h>
+
+#include "game_lod_archive.hpp"
 
 namespace runeharbor::formats
 {
@@ -115,7 +115,7 @@ bool GameLODArchive::readDirectory()
     // The file count is stored in the last field of metadata entry (reserved[1])
     // However, it seems unreliable or I'm reading the wrong field.
     // Let's read until we find an empty name or hit data start.
-    
+
     // Scan for directory end (null entry)
     entries.reserve(1000);
     while (file.good())
@@ -134,7 +134,7 @@ bool GameLODArchive::readDirectory()
         {
             // Found end of directory
             // Data section typically starts here or aligned
-            dataSectionStart = entryPos; 
+            dataSectionStart = entryPos;
             // Actually, usually there is some padding or it starts immediately.
             // Let's assume data starts after the null entry?
             // Or maybe the null entry is part of padding.
@@ -149,13 +149,15 @@ bool GameLODArchive::readDirectory()
         }
 
         entries.push_back(entry);
-        
+
         // Safety break
-        if (entries.size() > 10000) break;
+        if (entries.size() > 10000)
+            break;
     }
 
     logger.debug(std::format("Read {} game directory entries", entries.size()));
-    logger.debug(std::format("Data section estimated at 0x{:X}", static_cast<uint64_t>(dataSectionStart)));
+    logger.debug(
+        std::format("Data section estimated at 0x{:X}", static_cast<uint64_t>(dataSectionStart)));
 
     if (entries.empty())
     {
@@ -274,7 +276,7 @@ std::optional<std::vector<uint8_t>> GameLODArchive::extractFile(const std::strin
 
     if (!found)
     {
-        logger.error(std::format("File not found: {}", filename));
+        logger.debug(std::format("File not found: {}", filename));
         return std::nullopt;
     }
 

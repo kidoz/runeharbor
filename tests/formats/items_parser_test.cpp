@@ -3,7 +3,7 @@
 
 #include "../../src/formats/items_parser.hpp"
 #include "../../src/util/console_logger.hpp"
-#include "../../src/util/string_utils.hpp" 
+#include "../../src/util/string_utils.hpp"
 
 TEST_CASE("ItemsParser parsing ITEMS.TXT", "[items_parser]")
 {
@@ -11,14 +11,15 @@ TEST_CASE("ItemsParser parsing ITEMS.TXT", "[items_parser]")
     runeharbor::formats::ItemsParser parser(logger);
 
     // Sample data from test_extracted/ITEMS.TXT
-    std::string sample_data = R"(Item #	Pic File	Name	Value	Equip Stat	Skill Group	Mod1	Mod2	material	ID/Rep/St	Not identified name	Sprite Index	VarA	VarB	Equip X	Equip Y	Notes
+    std::string sample_data =
+        R"(Item #	Pic File	Name	Value	Equip Stat	Skill Group	Mod1	Mod2	material	ID/Rep/St	Not identified name	Sprite Index	VarA	VarB	Equip X	Equip Y	Notes
 0	null	_item0	0	0	0	0	0	0	0	_item0	0	0	0	0	0	Description here.
 1	item001	Crude Longsword	50	Weapon	Sword	3d3	0	8	1	Longsword	1	0	0	5	120	"Though notched and dented, this longsword is still an effective weapon."
 2	item002	Elven Saber	200	Weapon	Sword	3d3	3	8	3	Saber	1	0	0	6	153	"A common elven weapon, this saber is a deadly, if unremarkable weapon."
 3	item003	Keen Longsword	350	Weapon	Sword	3d3	6	8	6	Longsword	1	0	0	-2	118	"Although this longsword appears quite old, the edge of the blade is unusually sharp.  It was quite probably enchanted to remain that way during its creation."
 160	null	_item160	0	0	0	0	0	0	0	_item160	0	0	0	0	0	Description here.
 )"; // Adding an item with all zeros and a simple description for robust testing.
-    
+
     std::vector<uint8_t> data(sample_data.begin(), sample_data.end());
 
     SECTION("Parser successfully parses sample data")
@@ -71,7 +72,8 @@ TEST_CASE("ItemsParser parsing ITEMS.TXT", "[items_parser]")
         REQUIRE(items[1].varB == 0);
         REQUIRE(items[1].equipX == 5);
         REQUIRE(items[1].equipY == 120);
-        REQUIRE(items[1].notes == "Though notched and dented, this longsword is still an effective weapon.");
+        REQUIRE(items[1].notes ==
+                "Though notched and dented, this longsword is still an effective weapon.");
     }
 
     SECTION("Empty data returns false")
@@ -83,16 +85,19 @@ TEST_CASE("ItemsParser parsing ITEMS.TXT", "[items_parser]")
 
     SECTION("Malformed header (missing first line) returns false")
     {
-        std::string malformed_header_data = R"(1	item001	Crude Longsword	50	Weapon	Sword	3d3	0	8	1	Longsword	1	0	0	5	120	"Notes"
+        std::string malformed_header_data =
+            R"(1	item001	Crude Longsword	50	Weapon	Sword	3d3	0	8	1	Longsword	1	0	0	5	120	"Notes"
 )";
-        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(), malformed_header_data.end());
+        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(),
+                                           malformed_header_data.end());
         REQUIRE_FALSE(parser.parse(malformed_vec));
         REQUIRE(parser.getItems().empty());
     }
 
     SECTION("Malformed data line (too few fields) is skipped")
     {
-        std::string malformed_line_data = R"(Item #	Pic File	Name	Value	Equip Stat	Skill Group	Mod1	Mod2	material	ID/Rep/St	Not identified name	Sprite Index	VarA	VarB	Equip X	Equip Y	Notes
+        std::string malformed_line_data =
+            R"(Item #	Pic File	Name	Value	Equip Stat	Skill Group	Mod1	Mod2	material	ID/Rep/St	Not identified name	Sprite Index	VarA	VarB	Equip X	Equip Y	Notes
 1	item001	Crude Longsword	50	Weapon	Sword	3d3	0	8	1	Longsword	1	0	0	5	120	"Notes"
 MALFORMED	LINE
 2	item002	Elven Saber	200	Weapon	Sword	3d3	3	8	3	Saber	1	0	0	6	153	"Notes"

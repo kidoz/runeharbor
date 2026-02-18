@@ -1,11 +1,10 @@
-#include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
-#include "event_file_parser.hpp"
-
+#include "../util/string_utils.hpp"
 #include <algorithm>
 #include <format>
 #include <sstream> // For std::istringstream and std::getline
 
+#include "event_file_parser.hpp"
 
 namespace runeharbor::formats
 {
@@ -72,104 +71,134 @@ bool EventFileParser::parse(const std::vector<uint8_t>& data)
             size_t fieldIndex = 0;
 
             // 1. mainId
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.mainId = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.mainId = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
             // 2. subId
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.subId = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.subId = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
             // 3. type
-            if (fieldIndex < fields.size()) entry.type = util::trim(fields[fieldIndex]);
+            if (fieldIndex < fields.size())
+                entry.type = util::trim(fields[fieldIndex]);
             fieldIndex++;
 
             // 4. mapId
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.mapId = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.mapId = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
             // 5. pictureId
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.pictureId = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.pictureId = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
             // 6. name
-            if (fieldIndex < fields.size()) entry.name = util::trim(fields[fieldIndex]);
+            if (fieldIndex < fields.size())
+                entry.name = util::trim(fields[fieldIndex]);
             fieldIndex++;
 
             // 7. proprietorName
-            if (fieldIndex < fields.size()) entry.proprietorName = util::trim(fields[fieldIndex]);
+            if (fieldIndex < fields.size())
+                entry.proprietorName = util::trim(fields[fieldIndex]);
             fieldIndex++;
 
             // 8. title
-            if (fieldIndex < fields.size()) entry.title = util::trim(fields[fieldIndex]);
+            if (fieldIndex < fields.size())
+                entry.title = util::trim(fields[fieldIndex]);
             fieldIndex++;
 
             // Fields 9-16
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field9_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field9_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field10_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field10_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field11_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field11_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field12_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field12_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field13_float = std::stof(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field13_float = std::stof(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field14_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field14_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
-            if (fieldIndex < fields.size()) entry.field15_str = util::trim(fields[fieldIndex]);
+            if (fieldIndex < fields.size())
+                entry.field15_str = util::trim(fields[fieldIndex]);
             fieldIndex++;
 
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field16_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field16_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
             // Fields 17-24
-            if (fieldIndex < fields.size()) entry.field17_str = util::trim(fields[fieldIndex]);
+            if (fieldIndex < fields.size())
+                entry.field17_str = util::trim(fields[fieldIndex]);
             fieldIndex++;
 
-            if (fieldIndex < fields.size()) entry.field18_str = util::trim(fields[fieldIndex]);
+            if (fieldIndex < fields.size())
+                entry.field18_str = util::trim(fields[fieldIndex]);
             fieldIndex++;
 
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field19_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field19_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field20_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field20_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field21_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field21_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field22_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field22_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
-            if (fieldIndex < fields.size()) entry.field23_str = util::trim(fields[fieldIndex]);
+            if (fieldIndex < fields.size())
+                entry.field23_str = util::trim(fields[fieldIndex]);
             fieldIndex++;
 
-            if (fieldIndex < fields.size()) entry.field24_str = util::trim(fields[fieldIndex]);
+            if (fieldIndex < fields.size())
+                entry.field24_str = util::trim(fields[fieldIndex]);
             fieldIndex++;
 
             // New fields: field25_int to field30_int
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field25_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field25_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field26_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field26_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field27_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field27_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field28_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field28_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field29_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field29_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.field30_int = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.field30_int = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
             events.push_back(entry);

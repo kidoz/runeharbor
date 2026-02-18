@@ -2,6 +2,7 @@
 #pragma once
 
 #include <SDL3/SDL.h>
+
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -48,10 +49,27 @@ class IRenderer
     /// @param height Height to render (0 = use texture height)
     virtual void renderTexture(void* texture, int x, int y, int width = 0, int height = 0) = 0;
 
+    /// Draw a rectangle outline
+    /// @param x X position (screen coordinates)
+    /// @param y Y position (screen coordinates)
+    /// @param w Width
+    /// @param h Height
+    /// @param r Red component (0-255)
+    /// @param g Green component (0-255)
+    /// @param b Blue component (0-255)
+    /// @param a Alpha component (0-255)
+    virtual void drawRect(int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b,
+                          uint8_t a = 255) = 0;
+
+    /// Draw a filled rectangle
+    virtual void drawFilledRect(int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b,
+                                uint8_t a = 255) = 0;
+
     /// Render a textured polygon from a list of vertices
     /// @param vertices The vertices of the polygon
     /// @param texture The texture to apply
-    virtual void renderTexturedPolygon(const std::vector<SDL_Vertex>& vertices, SDL_Texture* texture) = 0;
+    virtual void renderTexturedPolygon(const std::vector<SDL_Vertex>& vertices,
+                                       SDL_Texture* texture) = 0;
 
     /// Get the underlying SDL renderer (for advanced use)
     virtual SDL_Renderer* getSDLRenderer() = 0;

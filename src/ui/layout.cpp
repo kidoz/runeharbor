@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "layout.hpp"
 
 namespace runeharbor::ui

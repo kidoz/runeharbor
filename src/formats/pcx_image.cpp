@@ -1,12 +1,12 @@
-#include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
-#include "pcx_image.hpp"
-
+#include "../util/string_utils.hpp"
 #include <algorithm>
 #include <exception>
 #include <format>
 
 #include <cstring>
+
+#include "pcx_image.hpp"
 
 namespace runeharbor::formats
 {
@@ -47,7 +47,7 @@ std::optional<PcxImage> decodePCX(const std::vector<uint8_t>& data, util::ILogge
 {
     if (data.size() < sizeof(PcxHeader))
     {
-        logger.error("PCX decode failed: data too small for header");
+        logger.debug("PCX decode failed: data too small for header");
         return std::nullopt;
     }
 
@@ -56,19 +56,19 @@ std::optional<PcxImage> decodePCX(const std::vector<uint8_t>& data, util::ILogge
 
     if (header.manufacturer != 0x0A || header.encoding != 1)
     {
-        logger.error("PCX decode failed: unsupported manufacturer or encoding");
+        logger.debug("PCX decode failed: unsupported manufacturer or encoding");
         return std::nullopt;
     }
 
     if (header.bitsPerPixel != 8)
     {
-        logger.error("PCX decode failed: only 8-bit PCX is supported");
+        logger.debug("PCX decode failed: only 8-bit PCX is supported");
         return std::nullopt;
     }
 
     if (header.colorPlanes != 1 && header.colorPlanes != 3)
     {
-        logger.error(
+        logger.debug(
             std::format("PCX decode failed: unsupported plane count {}", header.colorPlanes));
         return std::nullopt;
     }

@@ -167,9 +167,9 @@ class SmackerDecoder
     std::vector<uint8_t> frameBuffer_; // Current decoded frame (indexed)
     std::vector<uint8_t> rgbaBuffer_;  // Cached RGBA conversion
 
-    size_t dataOffset_ = 0;  // Start of frame data in buffer
-    size_t treesOffset_ = 0; // Start of Huffman trees
-    bool isV4_ = false;      // SMK4 format
+    size_t dataOffset_ = 0;   // Start of frame data in buffer
+    size_t treesOffset_ = 0;  // Start of Huffman trees
+    bool isV4_ = false;       // SMK4 format
     bool doubleHigh_ = false; // Video uses double-height rows
 
     // Huffman trees for decoding (16-bit values)

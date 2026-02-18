@@ -247,15 +247,15 @@ std::streamoff ImageLODArchive::calculateDataOffset(const ImageLODDirectoryEntry
     // For mixed archives (BITMAPS.LOD): files stored with absolute offsets in the directory entry.
     // The previous sequential calculation was incorrect.
     // We trust the offset stored in the directory entry.
-    
-    // Note: For some archives, we might need to apply offsetDelta, 
+
+    // Note: For some archives, we might need to apply offsetDelta,
     // but based on reverse engineering, BITMAPS.LOD entries have absolute file offsets.
     // If offsetDelta is set (e.g. ICONS.LOD logic), we might want to respect it,
     // but typically mixed archives don't use it in the same way.
-    
-    // Checking if it's mixed or external-only to be safe? 
+
+    // Checking if it's mixed or external-only to be safe?
     // The method is mostly used for extractCustom (mixed).
-    
+
     return static_cast<std::streamoff>(targetEntry.offset);
 }
 
@@ -330,8 +330,8 @@ ImageLODArchive::extractExternal(const ImageLODDirectoryEntry& entry, const std:
             decompressed.resize(destLen);
         }
 
-        logger.debug(std::format("Extracted '{}': {}x{}, {} -> {} bytes", filename,
-                                 imgHeader.width, imgHeader.height, compressedSize, destLen));
+        logger.debug(std::format("Extracted '{}': {}x{}, {} -> {} bytes", filename, imgHeader.width,
+                                 imgHeader.height, compressedSize, destLen));
         return decompressed;
     }
 

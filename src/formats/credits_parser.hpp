@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
 
 #include "../util/ilogger.hpp"
 
@@ -18,12 +18,12 @@ struct CreditsSection
 
 class CreditsParser
 {
-public:
+  public:
     explicit CreditsParser(util::ILogger& logger);
     bool parse(const std::vector<uint8_t>& data);
     const std::vector<CreditsSection>& getCreditsSections() const { return sections; }
 
-private:
+  private:
     util::ILogger& logger;
     std::vector<CreditsSection> sections;
     // Will use string manipulation

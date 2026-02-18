@@ -32,7 +32,12 @@ class SDLRenderer : public IRenderer
     void* createTexture(const Image& image) override;
     void destroyTexture(void* texture) override;
     void renderTexture(void* texture, int x, int y, int width = 0, int height = 0) override;
-    void renderTexturedPolygon(const std::vector<SDL_Vertex>& vertices, SDL_Texture* texture) override;
+    void drawRect(int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b,
+                  uint8_t a = 255) override;
+    void drawFilledRect(int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b,
+                        uint8_t a = 255) override;
+    void renderTexturedPolygon(const std::vector<SDL_Vertex>& vertices,
+                               SDL_Texture* texture) override;
     SDL_Renderer* getSDLRenderer() override { return renderer; }
     int getViewportWidth() const override;
     int getViewportHeight() const override;

@@ -1,12 +1,12 @@
 #include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
-#include "lod_archive.hpp"
-
 #include <algorithm>
 #include <format>
 
 #include <cstring>
 #include <zlib.h>
+
+#include "lod_archive.hpp"
 
 namespace runeharbor::formats
 {
@@ -128,8 +128,8 @@ bool LODArchive::readDirectory()
             break;
         }
 
-        // Note: entry.offset is a SORT KEY (not file position)
-        // entry.size semantics vary by position (see extractFile for details)
+        // entry.offset = absolute file position of the data block
+        // entry.size = total data block size (8-byte header + compressed data)
         entries.push_back(entry);
     }
 
@@ -201,7 +201,7 @@ std::optional<std::vector<uint8_t>> LODArchive::extractFile(const std::string& f
 
     if (!target)
     {
-        logger.error(std::format("File not found in archive: {}", filename));
+        logger.debug(std::format("File not found in archive: {}", filename));
         return std::nullopt;
     }
 

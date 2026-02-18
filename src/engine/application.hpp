@@ -2,49 +2,59 @@
 #ifndef RUNEHARBOR_APPLICATION_HPP
 #define RUNEHARBOR_APPLICATION_HPP
 
+#include <SDL3/SDL.h>
+
 #include <atomic>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
-#include <vector>
 #include <thread>
-#include <mutex>
+#include <unordered_map>
+#include <vector>
 
-#include <SDL3/SDL.h>
-
-#include "map_scene.hpp"
+#include "../game/character.hpp"
 #include "../graphics/camera.hpp"
-#include "../graphics/primitives.hpp"
 #include "../graphics/debug_text.hpp"
 #include "../media/video_player.hpp"
+#include "map_scene.hpp"
+#include "states/igame_state.hpp"
 
 // Forward declarations
 namespace runeharbor::platform
 {
-    class IWindow;
-    struct WindowConfig;
-}
+class IWindow;
+struct WindowConfig;
+} // namespace runeharbor::platform
 namespace runeharbor::util
 {
-    class ILogger;
+class ILogger;
 }
 namespace runeharbor::graphics
 {
-    class IRenderer;
-    class LineRenderer;
-    class DebugText;
-    class WorldRenderer;
-    class SDLRenderer;
-}
+class IRenderer;
+class LineRenderer;
+class DebugText;
+class WorldRenderer;
+class SDLRenderer;
+} // namespace runeharbor::graphics
 namespace runeharbor::media
 {
-    class VideoPlayer;
+class VideoPlayer;
 }
 namespace runeharbor::engine
 {
-    class VirtualFileSystem;
-}
+class VirtualFileSystem;
+class IGameState;
+struct StateContext;
+struct SharedGameData;
+class IntroState;
+class TitleState;
+class CharacterCreationState;
+class LoadingState;
+class InGameState;
+} // namespace runeharbor::engine
 
 namespace runeharbor::engine
 {
@@ -58,82 +68,12 @@ enum class GameState
     InGame,
 };
 
-enum class Race
-{
-    Human,
-    Elf,
-    Dwarf,
-    Goblin
-};
-
-enum class Gender
-{
-    Male,
-    Female
-};
-
-enum class CharacterClass
-{
-    Knight,
-    Paladin,
-    Archer,
-    Cleric,
-    Sorcerer,
-    Thief,
-    Monk,
-    Ranger,
-    Druid
-};
-
-struct Character
-{
-    std::string name = "New Hero";
-    int faceId = 0;
-    CharacterClass charClass = CharacterClass::Knight;
-
-    struct Stats
-    {
-        int might = 11;
-        int intellect = 11;
-        int personality = 11;
-        int endurance = 11;
-        int speed = 11;
-        int accuracy = 11;
-        int luck = 11;
-
-        int& byIndex(int i)
-        {
-            switch (i)
-            {
-            case 1: return intellect;
-            case 2: return personality;
-            case 3: return endurance;
-            case 4: return speed;
-            case 5: return accuracy;
-            case 6: return luck;
-            default: return might;
-            }
-        }
-
-        int byIndex(int i) const
-        {
-            switch (i)
-            {
-            case 0: return might;
-            case 1: return intellect;
-            case 2: return personality;
-            case 3: return endurance;
-            case 4: return speed;
-            case 5: return accuracy;
-            case 6: return luck;
-            default: return 0;
-            }
-        }
-    } stats;
-
-    Stats baseStats;
-    std::vector<std::string> skills;
-};
+// Character types from game:: namespace, re-exported into engine:: for backward compatibility
+using game::CharacterClass;
+using game::Gender;
+using game::Race;
+using game::Stats;
+using Character = game::Character;
 
 class Application
 {
@@ -162,10 +102,19 @@ class Application
     int viewportWidth = 0;
     int viewportHeight = 0;
 
+    // State machine
+    std::unique_ptr<StateContext> stateCtx;
+    std::unique_ptr<SharedGameData> sharedData;
+    IGameState* activeState = nullptr;
+    GameStateId activeStateId = GameStateId::IntroVideo;
+    std::unique_ptr<IntroState> introState;
+    std::unique_ptr<TitleState> titleState;
+    std::unique_ptr<CharacterCreationState> charCreationState;
+    std::unique_ptr<LoadingState> loadingState;
+    std::unique_ptr<InGameState> inGameState;
+
     // Game state management
     GameState gameState = GameState::IntroVideo;
-    uint64_t stateStartTicks = 0;
-    std::string stateMessage;
 
     // Input state
     const bool* keyState = nullptr;
@@ -194,23 +143,7 @@ class Application
     std::vector<media::VideoClip> introPlaylist;
 
     // UI state
-    struct MenuButton
-    {
-        std::string id;
-        graphics::Rect bounds;
-        void* hoverTexture = nullptr;
-        int textureWidth = 0;
-        int textureHeight = 0;
-        bool isHovered = false;
-    };
-
-    struct TitleMenuUI
-    {
-        std::vector<MenuButton> buttons;
-        int selectedIndex = 0;
-    } titleMenuUI;
     static constexpr int kTitleButtonCount = 4;
-    int titleMenuIndex = 0;
     void* titleBackground = nullptr;
     void* titleButtonHoverTextures[kTitleButtonCount] = {nullptr};
     int titleButtonHoverWidths[kTitleButtonCount] = {0};
@@ -221,10 +154,6 @@ class Application
     int portraitWidths[kPortraitCount] = {};
     int portraitHeights[kPortraitCount] = {};
 
-    int characterMenuIndex = 0; // Row: 0=NAME, 1=FACE, 2=CLASS, 3-9=stats
-    int activeCharacterIndex = 0;
-    static constexpr int kCharCreationRowCount = 10;
-    bool isNaming = false;
     bool quickStartReady = false;
     std::vector<Character> party;
 
@@ -240,7 +169,6 @@ class Application
     std::vector<void*> loadingFrames;
     std::vector<int> loadingFrameWidths;
     std::vector<int> loadingFrameHeights;
-    uint32_t loadingFrameDurationMs = 100;
     int titleBackgroundWidth = 0;
     int titleBackgroundHeight = 0;
 
@@ -259,16 +187,15 @@ class Application
     std::unique_ptr<MapScene> loadingTaskScene;
     std::string loadingTaskError;
     bool loadingTaskSuccess = false;
-    bool loadingStarted = false;
 
-    // In-game state
-    MapRenderOptions mapRenderOptions;
-    bool showGrid = false;
-    bool showAxes = true;
-    bool showHelpOverlay = true;
+    // Map texture cache (face texture name -> GPU texture handle)
+    std::unordered_map<std::string, void*> mapTextureCache;
 
     // Methods
     void setGameState(GameState state);
+    void transitionTo(GameStateId id);
+    void initStates();
+    void updateStateContext();
     void updateStateMachine();
     void updateViewport();
     void renderFrame();
@@ -281,7 +208,6 @@ class Application
     bool loadOutdoorMap(const std::string& mapName);
     bool loadFirstOutdoorMap();
 
-
     // Loading thread logic
     void startLoadingTask();
     void finalizeLoadingTask();
@@ -293,49 +219,27 @@ class Application
 
     // In-game rendering
     void configureCameraForMap();
+    void wireUpMapTextures();
+    void clearMapTextureCache();
 
     // Input handling
     void pollKeyboardState();
     void commitKeyboardState();
-    void updateCameraInput();
-    bool isKeyDown(SDL_Scancode code) const;
-    bool isKeyPressed(SDL_Scancode code) const;
 
-    // UI rendering
-    void renderIntroVideo();
-    void renderTitleScreen();
-    void renderCharacterCreation();
-    void renderLoadingScreen();
-    void renderOverlay();
-    void renderMenu(const std::vector<std::string>& items, int selectedIndex, int x, int y,
-                    int scale);
-    void renderFullscreenTexture(void* textureHandle, int texWidth, int texHeight);
+    // Asset loading
     bool loadUiAssets();
     void unloadUiAssets();
     bool loadPcxTexture(const std::vector<std::string>& candidates, const std::string& label,
                         void*& textureHandle, int& width, int& height);
     bool loadPcxSequence(const std::string& prefix, std::vector<void*>& textures,
                          std::vector<int>& widths, std::vector<int>& heights);
-    void layoutTitleMenuButtons();
-    void updateTitleMenuHover();
-    bool isMouseOver(const graphics::Rect& rect) const;
-    bool wasMouseClickedIn(const graphics::Rect& rect) const;
 
-    // Coordinate scaling (640x480 game space <-> viewport)
-    int scaleX(int gameX) const;
-    int scaleY(int gameY) const;
-    int scaleW(int gameW) const;
-    int scaleH(int gameH) const;
-    int unscaleX(int screenX) const;
-    int unscaleY(int screenY) const;
-
-    // Character creation helpers
-    int calculateBonusPointsRemaining() const;
+    // Character helpers (used by initDefaultParty)
     void initDefaultParty();
     void updateCharacterForFace(Character& ch);
     void updateSkillsForClass(Character& ch);
 };
 
-}
+} // namespace runeharbor::engine
 
 #endif // RUNEHARBOR_APPLICATION_HPP

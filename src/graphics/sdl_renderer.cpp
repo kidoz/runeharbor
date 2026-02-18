@@ -2,7 +2,9 @@
 #include "sdl_renderer.hpp"
 
 #include <SDL3/SDL.h>
+
 #include <vector>
+
 #include "image.hpp"
 
 namespace runeharbor::graphics
@@ -149,7 +151,31 @@ void SDLRenderer::renderTexture(void* texture, int x, int y, int width, int heig
     SDL_RenderTexture(renderer, sdlTexture, nullptr, &dstRect);
 }
 
-void SDLRenderer::renderTexturedPolygon(const std::vector<SDL_Vertex>& vertices, SDL_Texture* texture)
+void SDLRenderer::drawRect(int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b, uint8_t a)
+{
+    if (!renderer)
+        return;
+    SDL_SetRenderDrawBlendMode(renderer, a < 255 ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+    SDL_FRect rect = {static_cast<float>(x), static_cast<float>(y), static_cast<float>(w),
+                      static_cast<float>(h)};
+    SDL_RenderRect(renderer, &rect);
+}
+
+void SDLRenderer::drawFilledRect(int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b,
+                                 uint8_t a)
+{
+    if (!renderer)
+        return;
+    SDL_SetRenderDrawBlendMode(renderer, a < 255 ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+    SDL_FRect rect = {static_cast<float>(x), static_cast<float>(y), static_cast<float>(w),
+                      static_cast<float>(h)};
+    SDL_RenderFillRect(renderer, &rect);
+}
+
+void SDLRenderer::renderTexturedPolygon(const std::vector<SDL_Vertex>& vertices,
+                                        SDL_Texture* texture)
 {
     if (!renderer)
     {

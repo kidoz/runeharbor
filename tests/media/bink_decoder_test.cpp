@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
-#include <catch2/catch_test_macros.hpp>
 #include <vector>
+
+#include <catch2/catch_test_macros.hpp>
+
 #include "../../src/media/bink_decoder.hpp"
 
 using runeharbor::media::BinkBitReader;
@@ -17,7 +19,7 @@ TEST_CASE("BinkBitReader reads bits correctly", "[bink][bitreader]")
     REQUIRE(reader.readBit() == true);
     REQUIRE(reader.readBit() == false);
     REQUIRE(reader.readBits(6) == 0);
-    
+
     REQUIRE(reader.readBit() == true);
     REQUIRE(reader.readBits(6) == 0);
     REQUIRE(reader.readBit() == true);
@@ -38,13 +40,13 @@ TEST_CASE("BinkTree decode returns correct symbols", "[bink][huffman]")
     // Bit 8: 1 (last bit of code 0001)
     // Byte 0: 0000 0 000 -> 0x00
     // Byte 1: 1 0000000 -> 0x01
-    
+
     std::vector<uint8_t> data = {0x00, 0x01};
     BinkBitReader reader(data.data(), data.size());
-    
+
     BinkTree tree;
     REQUIRE(tree.build(reader, 4));
-    
+
     int symbol = tree.decode(reader);
-    CHECK(symbol == 1); 
+    CHECK(symbol == 1);
 }

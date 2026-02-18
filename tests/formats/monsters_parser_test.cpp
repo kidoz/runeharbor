@@ -3,7 +3,7 @@
 
 #include "../../src/formats/monsters_parser.hpp"
 #include "../../src/util/console_logger.hpp"
-#include "../../src/util/string_utils.hpp" 
+#include "../../src/util/string_utils.hpp"
 
 TEST_CASE("MonstersParser parsing MONSTERS.TXT", "[monsters_parser]")
 {
@@ -11,14 +11,15 @@ TEST_CASE("MonstersParser parsing MONSTERS.TXT", "[monsters_parser]")
     runeharbor::formats::MonstersParser parser(logger);
 
     // Sample data from test_extracted/MONSTERS.TXT
-    std::string sample_data = R"(Default Monster Data					Stats								Movement and Combat					Attack 1			Attack 2			    Spell Attack		    Spell Attack 2		Resistances										Misc
+    std::string sample_data =
+        R"(Default Monster Data					Stats								Movement and Combat					Attack 1			Attack 2			    Spell Attack		    Spell Attack 2		Resistances										Misc
 #	Name	Picture	LVL	 HP 	AC	 EXP 	Treasure	Quest	Fly	Move	AI Type	Hst	Spd	Rec	Pref	Bonus	Type	Damage	Miss	Att%	Type	Damage	Miss	Use%	"Spl,Mas,Skil"	Use%	"Spl,Mas,Skil"	Fire	Air	Water	Earth	Mind	Spirit	Body	Light	Dark	Phys	Special
 1	Angel	Angel A	30	180	25	1200	5%50D20+L4Sword	1	Y	Free	Aggress	3	250	60	0	0	Phys	2D8+10	0	0	0	0	0	30	"Light Bolt,M,8"	20	"Dispel Magic,M,8"	20	20	20	20	30	15	30	Imm	10	20	0
 2	Angel Lord	Angel B	50	400	35	3000	10%75D20+L5Sword	1	Y	Free	Aggress	3	275	50	0	0	Phys	2D8+15	0	0	0	0	0	30	"Light Bolt,M,12"	50	"Day of Protection,M,12"	30	30	30	30	40	15	40	Imm	10	20	0
 3	Archangel	Angel C	70	700	45	5600	15%100D20+L6Sword	1	Y	Free	Suicidal	3	300	40	2	0	Phys	2D8+20	0	0	0	0	0	30	"Light Bolt,G,16"	50	"Hour of Power,G,16"	40	40	40	40	50	15	50	Imm	10	20	0
 264	Mega-Dragon	zUltra Dragon C	100	" 1,300 "	100	" 11,000 "	0	1	Y	Short	Suicidal	4	300	30	4	Errad	Ener	20D8	Ener	0	0	0	0	0	0	0	0	Imm	70	70	70	70	15	Imm	30	30	70	"Summon,air,Dragon C"
 )";
-    
+
     std::vector<uint8_t> data(sample_data.begin(), sample_data.end());
 
     SECTION("Parser successfully parses sample data")
@@ -86,7 +87,7 @@ TEST_CASE("MonstersParser parsing MONSTERS.TXT", "[monsters_parser]")
         // This is the last entry in the sample data
         REQUIRE(monsters[3].id == 264);
         REQUIRE(monsters[3].name == "Mega-Dragon");
-        REQUIRE(monsters[3].hitPoints == 1300); // Check cleaned HP
+        REQUIRE(monsters[3].hitPoints == 1300);   // Check cleaned HP
         REQUIRE(monsters[3].experience == 11000); // Check cleaned EXP
         REQUIRE(monsters[3].canFly == true);
         REQUIRE(monsters[3].aiType == "Suicidal");
@@ -117,10 +118,12 @@ TEST_CASE("MonstersParser parsing MONSTERS.TXT", "[monsters_parser]")
 
     SECTION("Malformed header (missing category header) returns false")
     {
-        std::string malformed_header_data = R"(#	Name	Picture	LVL	 HP 	AC	 EXP 	Treasure	Quest	Fly	Move	AI Type	Hst	Spd	Rec	Pref	Bonus	Type	Damage	Miss	Att%	Type	Damage	Miss	Use%	"Spl,Mas,Skil"	Use%	"Spl,Mas,Skil"	Fire	Air	Water	Earth	Mind	Spirit	Body	Light	Dark	Phys	Special
+        std::string malformed_header_data =
+            R"(#	Name	Picture	LVL	 HP 	AC	 EXP 	Treasure	Quest	Fly	Move	AI Type	Hst	Spd	Rec	Pref	Bonus	Type	Damage	Miss	Att%	Type	Damage	Miss	Use%	"Spl,Mas,Skil"	Use%	"Spl,Mas,Skil"	Fire	Air	Water	Earth	Mind	Spirit	Body	Light	Dark	Phys	Special
 1	Angel	Angel A	30	180	25	1200	5%50D20+L4Sword	1	Y	Free	Aggress	3	250	60	0	0	Phys	2D8+10	0	0	0	0	0	30	"Light Bolt,M,8"	20	"Dispel Magic,M,8"	20	20	20	20	30	15	30	Imm	10	20	0
 )";
-        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(), malformed_header_data.end());
+        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(),
+                                           malformed_header_data.end());
         REQUIRE_FALSE(parser.parse(malformed_vec));
         REQUIRE(parser.getMonsters().empty());
     }
@@ -131,7 +134,8 @@ TEST_CASE("MonstersParser parsing MONSTERS.TXT", "[monsters_parser]")
 #	Name	Picture	LVL	 HP 	AC	 EXP 	Treasure	Quest	Fly	Move	AI Type	Hst	Spd	Rec	Pref	Bonus	Type	Damage	Miss	Att%	Type	Damage	Miss	Use%	"Spl,Mas,Skil"	Use%	"Spl,Mas,Skil"	Fire	Air	Water	Earth	Mind	Spirit	Body	Light	Dark	Phys	Special_WRONG
 1	Angel	Angel A	30	180	25	1200	5%50D20+L4Sword	1	Y	Free	Aggress	3	250	60	0	0	Phys	2D8+10	0	0	0	0	0	30	"Light Bolt,M,8"	20	"Dispel Magic,M,8"	20	20	20	20	30	15	30	Imm	10	20	0
 )";
-        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(), malformed_header_data.end());
+        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(),
+                                           malformed_header_data.end());
         REQUIRE_FALSE(parser.parse(malformed_vec));
         REQUIRE(parser.getMonsters().empty());
     }

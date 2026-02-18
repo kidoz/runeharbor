@@ -9,19 +9,19 @@
 namespace runeharbor::media
 {
 
-VIDArchive::~VIDArchive()
+VidArchive::~VidArchive()
 {
     close();
 }
 
-VIDArchive::VIDArchive(VIDArchive&& other) noexcept
+VidArchive::VidArchive(VidArchive&& other) noexcept
     : path_(std::move(other.path_)), file_(std::move(other.file_)),
       entries_(std::move(other.entries_)), fileSize_(other.fileSize_)
 {
     other.fileSize_ = 0;
 }
 
-VIDArchive& VIDArchive::operator=(VIDArchive&& other) noexcept
+VidArchive& VidArchive::operator=(VidArchive&& other) noexcept
 {
     if (this != &other)
     {
@@ -35,7 +35,7 @@ VIDArchive& VIDArchive::operator=(VIDArchive&& other) noexcept
     return *this;
 }
 
-bool VIDArchive::open(const std::filesystem::path& path)
+bool VidArchive::open(const std::filesystem::path& path)
 {
     close();
 
@@ -77,7 +77,7 @@ bool VIDArchive::open(const std::filesystem::path& path)
             return false;
         }
 
-        VIDEntry entry;
+        VidEntry entry;
         entry.name = nameBuffer;
         entry.offset = offset;
         entry.size = 0; // Will be calculated below
@@ -111,7 +111,7 @@ bool VIDArchive::open(const std::filesystem::path& path)
     return true;
 }
 
-void VIDArchive::close()
+void VidArchive::close()
 {
     if (file_.is_open())
     {
@@ -122,7 +122,7 @@ void VIDArchive::close()
     path_.clear();
 }
 
-VideoFormat VIDArchive::detectFormat(uint32_t offset)
+VideoFormat VidArchive::detectFormat(uint32_t offset)
 {
     if (!file_.is_open())
     {
@@ -157,7 +157,7 @@ VideoFormat VIDArchive::detectFormat(uint32_t offset)
     return VideoFormat::Unknown;
 }
 
-std::string VIDArchive::toLower(const std::string& str)
+std::string VidArchive::toLower(const std::string& str)
 {
     std::string result = str;
     std::transform(result.begin(), result.end(), result.begin(),
@@ -165,7 +165,7 @@ std::string VIDArchive::toLower(const std::string& str)
     return result;
 }
 
-std::optional<size_t> VIDArchive::findEntry(const std::string& name) const
+std::optional<size_t> VidArchive::findEntry(const std::string& name) const
 {
     std::string lowerName = toLower(name);
 
@@ -180,7 +180,7 @@ std::optional<size_t> VIDArchive::findEntry(const std::string& name) const
     return std::nullopt;
 }
 
-const VIDEntry* VIDArchive::getEntry(size_t index) const
+const VidEntry* VidArchive::getEntry(size_t index) const
 {
     if (index >= entries_.size())
     {
@@ -189,7 +189,7 @@ const VIDEntry* VIDArchive::getEntry(size_t index) const
     return &entries_[index];
 }
 
-std::vector<uint8_t> VIDArchive::readVideoData(size_t index)
+std::vector<uint8_t> VidArchive::readVideoData(size_t index)
 {
     if (index >= entries_.size() || !file_.is_open())
     {
@@ -215,7 +215,7 @@ std::vector<uint8_t> VIDArchive::readVideoData(size_t index)
     return data;
 }
 
-std::vector<uint8_t> VIDArchive::readVideoData(const std::string& name)
+std::vector<uint8_t> VidArchive::readVideoData(const std::string& name)
 {
     auto index = findEntry(name);
     if (!index)
@@ -225,7 +225,7 @@ std::vector<uint8_t> VIDArchive::readVideoData(const std::string& name)
     return readVideoData(*index);
 }
 
-bool VIDArchive::seekToVideo(size_t index)
+bool VidArchive::seekToVideo(size_t index)
 {
     if (index >= entries_.size() || !file_.is_open())
     {

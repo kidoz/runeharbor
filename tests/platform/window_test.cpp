@@ -42,7 +42,6 @@ class MockWindow : public IWindow
     bool wasMousePressed(MouseButton) const override { return false; }
     void resetFrameState() override {}
 
-
     // Test control
     bool shouldSucceed = true;
     bool closeRequested = false;

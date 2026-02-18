@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "camera.hpp"
-#include "sdl_renderer.hpp"
 #include "../engine/map_scene.hpp"
+#include "camera.hpp"
+#include "indoor_renderer.hpp"
+#include "outdoor_renderer.hpp"
+#include "sdl_renderer.hpp"
 
 namespace runeharbor::graphics
 {
-class IndoorRenderer;
 
 class WorldRenderer
 {
@@ -15,11 +16,12 @@ class WorldRenderer
     WorldRenderer(SDLRenderer& renderer, util::ILogger& logger);
     ~WorldRenderer();
 
+    void setTextureLookup(TextureLookup lookup);
     void render(const engine::MapScene& scene, const Camera& camera);
 
   private:
-    util::ILogger& logger;
     std::unique_ptr<IndoorRenderer> indoorRenderer;
+    std::unique_ptr<OutdoorRenderer> outdoorRenderer;
 };
 
 } // namespace runeharbor::graphics

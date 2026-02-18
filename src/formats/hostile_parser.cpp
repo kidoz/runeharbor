@@ -1,18 +1,18 @@
-#include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
-#include "hostile_parser.hpp"
-
+#include "../util/string_utils.hpp"
 #include <algorithm>
 #include <format>
-#include <sstream> // For std::istringstream and std::getline
 #include <set>     // For std::set in getEntityNames
+#include <sstream> // For std::istringstream and std::getline
 
+#include "hostile_parser.hpp"
 
 namespace runeharbor::formats
 {
 
 // HostileMatrix methods
-std::optional<int> HostileMatrix::getHostility(const std::string& source, const std::string& target) const
+std::optional<int> HostileMatrix::getHostility(const std::string& source,
+                                               const std::string& target) const
 {
     auto itRow = matrix.find(source);
     if (itRow != matrix.end())
@@ -32,7 +32,8 @@ void HostileMatrix::addHostility(const std::string& source, const std::string& t
     // This is optional depending on whether order matters outside of parsing.
     // For a simple map, this is not strictly needed for functionality but can be useful
     // for introspection or reconstructing the matrix in order.
-    if (std::find(rowLabels.begin(), rowLabels.end(), source) == rowLabels.end()) {
+    if (std::find(rowLabels.begin(), rowLabels.end(), source) == rowLabels.end())
+    {
         rowLabels.push_back(source);
     }
     // Target is already handled by colLabels which is set once from the header.
@@ -59,14 +60,13 @@ std::vector<std::string> HostileMatrix::getEntityNames() const
     return std::vector<std::string>(uniqueNames.begin(), uniqueNames.end());
 }
 
-
 // HostileParser methods
 HostileParser::HostileParser(util::ILogger& logger) : logger(logger) {}
 
 bool HostileParser::parse(const std::vector<uint8_t>& data)
 {
     // Clear any previous data
-    hostileMatrix = HostileMatrix(); 
+    hostileMatrix = HostileMatrix();
 
     if (data.empty())
     {
@@ -91,17 +91,20 @@ bool HostileParser::parse(const std::vector<uint8_t>& data)
         logger.error("No column headers found.");
         return false;
     }
-    
+
     std::vector<std::string> parsedColLabels;
     // The first field is empty, so start from the second field.
-    for (size_t i = 1; i < colFields.size(); ++i) {
+    for (size_t i = 1; i < colFields.size(); ++i)
+    {
         std::string trimmed_field = util::trim(colFields[i]);
-        if (!trimmed_field.empty()) { // Ensure label is not empty
-             parsedColLabels.push_back(trimmed_field);
+        if (!trimmed_field.empty())
+        { // Ensure label is not empty
+            parsedColLabels.push_back(trimmed_field);
         }
     }
 
-    if (parsedColLabels.empty()) {
+    if (parsedColLabels.empty())
+    {
         logger.error("No valid column labels extracted from header.");
         return false;
     }
@@ -118,26 +121,31 @@ bool HostileParser::parse(const std::vector<uint8_t>& data)
         }
 
         std::vector<std::string> rowFields = util::splitString(line, '	');
-        if (rowFields.empty()) {
+        if (rowFields.empty())
+        {
             logger.warning(std::format("Skipping empty row data line: '{}'", line));
             continue;
         }
 
         std::string rowLabel = util::trim(rowFields[0]);
-        if (rowLabel.empty()) {
+        if (rowLabel.empty())
+        {
             logger.warning(std::format("Skipping row with empty label: '{}'", line));
             continue;
         }
-        
+
         // Data starts from the second field in the row, matching column labels
-        if (rowFields.size() -1 != parsedColLabels.size()) { // -1 because row label is first field
-             logger.warning(std::format("Row '{}' has {} data fields, but expected {}. Skipping.", rowLabel, rowFields.size() - 1, parsedColLabels.size()));
-             continue;
+        if (rowFields.size() - 1 != parsedColLabels.size())
+        { // -1 because row label is first field
+            logger.warning(std::format("Row '{}' has {} data fields, but expected {}. Skipping.",
+                                       rowLabel, rowFields.size() - 1, parsedColLabels.size()));
+            continue;
         }
 
         for (size_t i = 1; i < rowFields.size(); ++i) // Start from 1 to skip row label
         {
-            std::string targetLabel = parsedColLabels[i-1]; // i-1 because parsedColLabels is 0-indexed
+            std::string targetLabel =
+                parsedColLabels[i - 1]; // i-1 because parsedColLabels is 0-indexed
             try
             {
                 int hostilityValue = std::stoi(util::trim(rowFields[i]));
@@ -145,14 +153,17 @@ bool HostileParser::parse(const std::vector<uint8_t>& data)
             }
             catch (const std::exception& e)
             {
-                logger.error(std::format("Error parsing hostility value for {}-{} in line '{}': {}", rowLabel, targetLabel, line, e.what()));
-                // Continue parsing other values in the same row, or return false, depending on desired error handling
-                // For now, continue to allow partial parsing if some values are malformed.
+                logger.error(std::format("Error parsing hostility value for {}-{} in line '{}': {}",
+                                         rowLabel, targetLabel, line, e.what()));
+                // Continue parsing other values in the same row, or return false, depending on
+                // desired error handling For now, continue to allow partial parsing if some values
+                // are malformed.
             }
         }
     }
 
-    logger.info(std::format("Successfully parsed hostility matrix with {} rows.", hostileMatrix.getEntityNames().size()));
+    logger.info(std::format("Successfully parsed hostility matrix with {} rows.",
+                            hostileMatrix.getEntityNames().size()));
     return true;
 }
 

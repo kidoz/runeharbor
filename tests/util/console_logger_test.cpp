@@ -9,6 +9,9 @@
 
 using namespace runeharbor::util;
 
+namespace
+{
+
 // Mock logger for testing that captures output
 class TestLogger : public ILogger
 {
@@ -24,6 +27,8 @@ class TestLogger : public ILogger
     std::string lastMessage;
     int logCount = 0;
 };
+
+} // namespace
 
 TEST_CASE("ILogger interface methods", "[logger]")
 {

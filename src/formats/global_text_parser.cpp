@@ -1,11 +1,10 @@
-#include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
-#include "global_text_parser.hpp"
-
+#include "../util/string_utils.hpp"
 #include <algorithm>
 #include <format>
 #include <sstream> // For std::istringstream and std::getline
 
+#include "global_text_parser.hpp"
 
 namespace runeharbor::formats
 {
@@ -33,15 +32,16 @@ bool GlobalTextParser::parse(const std::vector<uint8_t>& data)
         logger.error("Failed to read header line.");
         return false;
     }
-    if (line != "Global Text") {
-        logger.warning(std::format("Expected 'Global Text' header, got '{}'. Attempting to parse anyway.", line));
+    if (line != "Global Text")
+    {
+        logger.warning(std::format(
+            "Expected 'Global Text' header, got '{}'. Attempting to parse anyway.", line));
         // Reset stream and re-add the line to be parsed as data if it's not the header.
         iss.seekg(0, std::ios::beg);
-        iss.clear(); // Clear EOF flags
-        iss.str(content); // Reset content
+        iss.clear();             // Clear EOF flags
+        iss.str(content);        // Reset content
         std::getline(iss, line); // Read the first line again as a data line
     }
-
 
     // Process data lines
     while (std::getline(iss, line))
@@ -56,7 +56,8 @@ bool GlobalTextParser::parse(const std::vector<uint8_t>& data)
 
         if (fields.size() < 2)
         {
-            logger.warning(std::format("Skipping malformed global text line (too few fields): {}", line));
+            logger.warning(
+                std::format("Skipping malformed global text line (too few fields): {}", line));
             continue;
         }
 

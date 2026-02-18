@@ -1,13 +1,15 @@
+// SPDX-License-Identifier: MIT
 #include "sprite_decoder.hpp"
-#include <cstring>
+
 #include <algorithm>
+
+#include <cstring>
 
 namespace runeharbor::graphics
 {
 
-std::unique_ptr<Image> SpriteDecoder::decode(const std::vector<uint8_t>& data, 
-                                            const Palette& palette, 
-                                            util::ILogger& logger)
+std::unique_ptr<Image> SpriteDecoder::decode(const std::vector<uint8_t>& data,
+                                             const Palette& palette, util::ILogger& logger)
 {
     // Format: [width:2][height:2][centerX:2][centerY:2][paletteId:2][lineInfo:height*8][pixels...]
     if (data.size() < 10)
@@ -84,7 +86,7 @@ std::unique_ptr<Image> SpriteDecoder::decode(const std::vector<uint8_t>& data,
             const auto& color = palette.getColor(paletteIndex);
 
             // Store RGBA
-            // Note: Palette alpha is 255 by default. 
+            // Note: Palette alpha is 255 by default.
             // If the sprite pixel exists here, it is opaque.
             // Transparent parts are skipped by the RLE-like structure (xStart/xEnd segments).
             rgbaData[pixelOffset + 0] = color.r;

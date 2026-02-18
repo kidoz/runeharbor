@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
 
 #include "../util/ilogger.hpp"
 
@@ -33,12 +33,12 @@ struct ItemEntry
 
 class ItemsParser
 {
-public:
+  public:
     explicit ItemsParser(util::ILogger& logger);
     bool parse(const std::vector<uint8_t>& data);
     const std::vector<ItemEntry>& getItems() const { return items; }
 
-private:
+  private:
     util::ILogger& logger;
     std::vector<ItemEntry> items;
     // Will use runeharbor::util::splitString from string_utils.hpp

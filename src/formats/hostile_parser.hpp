@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include <string>
-#include <vector>
 #include <map>
 #include <optional>
 #include <set> // For unique entity names
+#include <string>
+#include <vector>
 
 #include "../util/ilogger.hpp"
 
@@ -15,7 +15,7 @@ namespace runeharbor::formats
 // Represents the hostility matrix
 class HostileMatrix
 {
-public:
+  public:
     // Returns the hostility value from 'source' to 'target'
     std::optional<int> getHostility(const std::string& source, const std::string& target) const;
 
@@ -31,7 +31,7 @@ public:
     // Get the column labels
     const std::vector<std::string>& getColLabels() const { return colLabels; }
 
-private:
+  private:
     std::map<std::string, std::map<std::string, int>> matrix;
     std::vector<std::string> rowLabels; // To maintain order and unique names
     std::vector<std::string> colLabels; // To maintain order and unique names
@@ -39,12 +39,12 @@ private:
 
 class HostileParser
 {
-public:
+  public:
     explicit HostileParser(util::ILogger& logger);
     bool parse(const std::vector<uint8_t>& data);
     const HostileMatrix& getHostileMatrix() const { return hostileMatrix; }
 
-private:
+  private:
     util::ILogger& logger;
     HostileMatrix hostileMatrix;
     // Will use runeharbor::util::splitString from string_utils.hpp

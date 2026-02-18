@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include "sound_list.hpp"
 
-#include <cstring>
 #include <format>
+
+#include <cstring>
 
 #include "../util/string_utils.hpp"
 
@@ -22,7 +23,8 @@ bool SoundList::parse(const std::vector<uint8_t>& data)
     uint32_t count = *reinterpret_cast<const uint32_t*>(data.data());
     if (data.size() < 4 + count * sizeof(SoundInfoRaw))
     {
-        logger.error(std::format("SoundList: data size {} too small for {} entries", data.size(), count));
+        logger.error(
+            std::format("SoundList: data size {} too small for {} entries", data.size(), count));
         return false;
     }
 
@@ -35,7 +37,7 @@ bool SoundList::parse(const std::vector<uint8_t>& data)
     for (uint32_t i = 0; i < count; i++)
     {
         const auto& raw = rawEntries[i];
-        
+
         SoundEvent event;
         event.name = raw.name;
         event.soundId = raw.soundId;

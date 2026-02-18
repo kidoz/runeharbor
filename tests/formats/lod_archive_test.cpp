@@ -13,6 +13,9 @@ using namespace runeharbor;
 using namespace runeharbor::formats;
 using namespace runeharbor::util;
 
+namespace
+{
+
 // Mock logger for testing
 class TestLogger : public ILogger
 {
@@ -73,13 +76,13 @@ class TestLODFile
         file.write(reinterpret_cast<const char*>(&header), sizeof(LODHeader));
 
         // Write one directory entry at offset 0x100
-        // The 'size' field contains the compressed data size
-        // The 'offset' field is used as a sort key (not actual position)
+        // 'offset' is the absolute file position of the data block (8-byte header + compressed
+        // data) 'size' is the total data block size (8-byte header + compressed data)
         file.seekp(0x100);
         LODDirectoryEntry entry = {};
         std::strncpy(entry.filename, "TEST.TXT", 16);
-        entry.offset = 0; // Sort key (first file)
-        entry.size = static_cast<uint32_t>(compressed.size());
+        entry.offset = 0x128; // Absolute offset to data block (after directory + null entry gap)
+        entry.size = static_cast<uint32_t>(compressed.size() + 8); // 8-byte header + compressed
         file.write(reinterpret_cast<const char*>(&entry), sizeof(LODDirectoryEntry));
 
         // Write null entry to terminate directory (only need 8 zero bytes)
@@ -87,12 +90,8 @@ class TestLODFile
         LODDirectoryEntry nullEntry = {};
         file.write(reinterpret_cast<const char*>(&nullEntry), sizeof(LODDirectoryEntry));
 
-        // Data section starts at null entry position + 8 bytes
-        // For file #0: [8-byte header][compressed data]
-        // Current position after null entry: 0x100 + 32 + 32 = 0x140
-        // Data section starts at: 0x120 + 8 = 0x128
-
-        // Write data at the correct position (dataSectionStart = 0x128)
+        // Data block for TEST.TXT at offset 0x128 (matches entry.offset)
+        // Layout: [4-byte uncompressed size][4-byte flags][compressed data]
         file.seekp(0x128);
 
         // Write 8-byte header: [uncompressed size (4 bytes)][unknown (4 bytes)]
@@ -107,6 +106,8 @@ class TestLODFile
 
     std::filesystem::path filepath;
 };
+
+} // namespace
 
 TEST_CASE("LODArchive construction", "[lod]")
 {
@@ -192,11 +193,11 @@ TEST_CASE("LODArchive file extraction", "[lod]")
         REQUIRE_FALSE(data.has_value());
     }
 
-    SECTION("Logs error for non-existent file")
+    SECTION("Logs debug for non-existent file")
     {
         logger.logCount = 0;
         archive.extractFile("MISSING.TXT");
-        REQUIRE(logger.lastLevel == LogLevel::Error);
+        REQUIRE(logger.lastLevel == LogLevel::Debug);
         REQUIRE(logger.lastMessage.find("not found") != std::string::npos);
     }
 }

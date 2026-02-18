@@ -3,7 +3,7 @@
 
 #include "../../src/formats/mapstats_parser.hpp"
 #include "../../src/util/console_logger.hpp"
-#include "../../src/util/string_utils.hpp" 
+#include "../../src/util/string_utils.hpp"
 
 TEST_CASE("MapStatsParser parsing MAPSTATS.TXT", "[mapstats_parser]")
 {
@@ -11,14 +11,15 @@ TEST_CASE("MapStatsParser parsing MAPSTATS.TXT", "[mapstats_parser]")
     runeharbor::formats::MapStatsParser parser(logger);
 
     // Sample data from test_extracted/MAPSTATS.TXT
-    std::string sample_data = R"(	Map Stats			First					x5	D20's		Random Encounter																					
+    std::string sample_data =
+        R"(	Map Stats			First					x5	D20's		Random Encounter																					
 			Reset	Visit	Per	Refil	Alert	Steal	Lock	Trap	Tres	Enc	M1	M2	M3			Dif	Appear			Dif	Appear			Dif	Appear	Redbook					
 #	Name	File name	#	Day	0-20	Days	Days	Perm	0-20	0-10	0-6	%	%	%	%	Mon1 Pic	Mon 1	 1-5	#	Mon2 Pic	Mon 2	 1-5	#	Mon3 Pic	Mon 3	 1-5	#	Track	EAX Environments	Map Designer	Notes	in area	
 1	Emerald Island	Out01.Odm	0	0	0	672	7	0	0	1	0	10	100	0	0	Dragonfly	Dragonfly	1	 2-5	0	0	1	 1-3	0	0	1	 1-3	20	FOREST	0	"Training Island--Lush, tropical island"		x
 2	Harmondale	Out02.Odm	0	0	2	672	7	1	2	1	0	10	100	0	0	Goblin	Goblin	3	 2-5	Swordsman	Swordsman	3	 1-3	0	0	1	 1-3	4	PLAINS	0	Home town map--hills and scattered trees.  Water ok		x
 3	Erathia	Out03.odm	0	0	4	672	7	3	4	2	1	10	50	50	0	Fighter Leather	Fighter Leather	2	 1-3	Griffin	Griffin	1	 1-3	0	0	1	 1-3	17	PLAINS	0	"Human Capital--low hills, river (with fort built on top), near lake"
 )";
-    
+
     std::vector<uint8_t> data(sample_data.begin(), sample_data.end());
 
     SECTION("Parser successfully parses sample data")
@@ -110,7 +111,8 @@ TEST_CASE("MapStatsParser parsing MAPSTATS.TXT", "[mapstats_parser]")
         REQUIRE(mapStats[2].track == "17");
         REQUIRE(mapStats[2].eaxEnvironments == "PLAINS");
         REQUIRE(mapStats[2].mapDesigner == "0");
-        REQUIRE(mapStats[2].notes == "Human Capital--low hills, river (with fort built on top), near lake");
+        REQUIRE(mapStats[2].notes ==
+                "Human Capital--low hills, river (with fort built on top), near lake");
         REQUIRE(mapStats[2].inArea == ""); // Empty for this entry
     }
 
@@ -123,30 +125,35 @@ TEST_CASE("MapStatsParser parsing MAPSTATS.TXT", "[mapstats_parser]")
 
     SECTION("Malformed header (missing first line) returns false")
     {
-        std::string malformed_header_data = R"(			Reset	Visit	Per	Refil	Alert	Steal	Lock	Trap	Tres	Enc	M1	M2	M3			Dif	Appear			Dif	Appear			Dif	Appear	Redbook					
+        std::string malformed_header_data =
+            R"(			Reset	Visit	Per	Refil	Alert	Steal	Lock	Trap	Tres	Enc	M1	M2	M3			Dif	Appear			Dif	Appear			Dif	Appear	Redbook					
 #	Name	File name	#	Day	0-20	Days	Days	Perm	0-20	0-10	0-6	%	%	%	%	Mon1 Pic	Mon 1	 1-5	#	Mon2 Pic	Mon 2	 1-5	#	Mon3 Pic	Mon 3	 1-5	#	Track	EAX Environments	Map Designer	Notes	in area	
 1	Emerald Island	Out01.Odm	0	0	0	672	7	0	0	1	0	10	100	0	0	Dragonfly	Dragonfly	1	 2-5	0	0	1	 1-3	0	0	1	 1-3	20	FOREST	0	"Training Island--Lush, tropical island"		x
 )";
-        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(), malformed_header_data.end());
+        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(),
+                                           malformed_header_data.end());
         REQUIRE_FALSE(parser.parse(malformed_vec));
         REQUIRE(parser.getMapStats().empty());
     }
 
     SECTION("Malformed header (incorrect field names header) returns false")
     {
-        std::string malformed_header_data = R"(	Map Stats			First					x5	D20's		Random Encounter																					
+        std::string malformed_header_data =
+            R"(	Map Stats			First					x5	D20's		Random Encounter																					
 			Reset	Visit	Per	Refil	Alert	Steal	Lock	Trap	Tres	Enc	M1	M2	M3			Dif	Appear			Dif	Appear			Dif	Appear	Redbook					
 #	Name	File name	#	Day_WRONG	0-20	Days	Days	Perm	0-20	0-10	0-6	%	%	%	%	Mon1 Pic	Mon 1	 1-5	#	Mon2 Pic	Mon 2	 1-5	#	Mon3 Pic	Mon 3	 1-5	#	Track	EAX Environments	Map Designer	Notes	in area	
 1	Emerald Island	Out01.Odm	0	0	0	672	7	0	0	1	0	10	100	0	0	Dragonfly	Dragonfly	1	 2-5	0	0	1	 1-3	0	0	1	 1-3	20	FOREST	0	"Training Island--Lush, tropical island"		x
 )";
-        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(), malformed_header_data.end());
+        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(),
+                                           malformed_header_data.end());
         REQUIRE_FALSE(parser.parse(malformed_vec));
         REQUIRE(parser.getMapStats().empty());
     }
 
     SECTION("Malformed data line (too few fields) is skipped")
     {
-        std::string malformed_line_data = R"(	Map Stats			First					x5	D20's		Random Encounter																					
+        std::string malformed_line_data =
+            R"(	Map Stats			First					x5	D20's		Random Encounter																					
 			Reset	Visit	Per	Refil	Alert	Steal	Lock	Trap	Tres	Enc	M1	M2	M3			Dif	Appear			Dif	Appear			Dif	Appear	Redbook					
 #	Name	File name	#	Day	0-20	Days	Days	Perm	0-20	0-10	0-6	%	%	%	%	Mon1 Pic	Mon 1	 1-5	#	Mon2 Pic	Mon 2	 1-5	#	Mon3 Pic	Mon 3	 1-5	#	Track	EAX Environments	Map Designer	Notes	in area	
 1	Emerald Island	Out01.Odm	0	0	0	672	7	0	0	1	0	10	100	0	0	Dragonfly	Dragonfly	1	 2-5	0	0	1	 1-3	0	0	1	 1-3	20	FOREST	0	"Training Island--Lush, tropical island"		x

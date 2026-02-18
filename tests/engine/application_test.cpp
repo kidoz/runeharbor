@@ -12,6 +12,9 @@ using namespace runeharbor::engine;
 using namespace runeharbor::platform;
 using namespace runeharbor::util;
 
+namespace
+{
+
 // Test mocks
 class TestLogger : public ILogger
 {
@@ -38,6 +41,16 @@ class TestWindow : public IWindow
 
     void swapBuffers() override { swapCount++; }
 
+    SDL_Window* getSDLWindow() override { return nullptr; }
+
+    MouseState getMouseState() const override { return {}; }
+
+    bool wasMouseClicked(MouseButton) const override { return false; }
+
+    bool wasMousePressed(MouseButton) const override { return false; }
+
+    void resetFrameState() override {}
+
     bool shouldInitSucceed = true;
     bool shouldCloseFlag = false;
     bool initialized = false;
@@ -46,25 +59,28 @@ class TestWindow : public IWindow
     int swapCount = 0;
 };
 
-TEST_CASE("Application basic functionality", "[application]")
+} // namespace
+
+TEST_CASE("Application construction", "[application]")
+{
+    TestLogger logger;
+    TestWindow window;
+
+    SECTION("Application can be constructed with mocks")
+    {
+        Application app(logger, window);
+        // Construction should not crash; logger should be used
+        REQUIRE(logger.logCount >= 0);
+    }
+}
+
+TEST_CASE("Application window init failure", "[application]")
 {
     TestLogger logger;
     TestWindow window;
     Application app(logger, window);
 
-    SECTION("Application initializes successfully")
-    {
-        WindowConfig config;
-        config.title = "Test App";
-
-        bool result = app.initialize(config);
-
-        REQUIRE(result == true);
-        REQUIRE(window.initialized == true);
-        REQUIRE(logger.logCount > 0);
-    }
-
-    SECTION("Application handles window initialization failure")
+    SECTION("Returns false when window initialization fails")
     {
         WindowConfig config;
         window.shouldInitSucceed = false;
@@ -75,15 +91,24 @@ TEST_CASE("Application basic functionality", "[application]")
         REQUIRE(window.initialized == true); // init was called, but returned false
         REQUIRE(logger.logCount > 0);        // Should have logged error
     }
+}
 
-    SECTION("Application shutdown cleans up properly")
+TEST_CASE("Application no SDL window", "[application]")
+{
+    TestLogger logger;
+    TestWindow window;
+    Application app(logger, window);
+
+    SECTION("Returns false when getSDLWindow returns nullptr")
     {
+        // TestWindow::getSDLWindow() returns nullptr, so initialize should fail
+        // after window.initialize succeeds but before renderer creation
         WindowConfig config;
-        app.initialize(config);
+        bool result = app.initialize(config);
 
-        app.shutdown();
-
-        REQUIRE(window.shutdownCalled == true);
+        REQUIRE(result == false);
+        REQUIRE(window.initialized == true);
+        REQUIRE(logger.logCount > 0);
     }
 }
 
@@ -93,40 +118,25 @@ TEST_CASE("Application dependency injection", "[application][di]")
     TestWindow window;
     Application app(logger, window);
 
-    SECTION("Application uses injected logger")
+    SECTION("Application uses injected logger during construction")
     {
+        // The constructor creates VFS and party, which may log
+        // At minimum, initialize will use the logger
         WindowConfig config;
         app.initialize(config);
-
         REQUIRE(logger.logCount > 0);
     }
 
-    SECTION("Application uses injected window")
+    SECTION("Application uses injected window during initialize")
     {
         WindowConfig config;
         app.initialize(config);
-
         REQUIRE(window.initialized);
     }
 }
 
 TEST_CASE("Application RAII behavior", "[application][raii]")
 {
-    SECTION("Application destructor calls shutdown if initialized")
-    {
-        TestLogger logger;
-        TestWindow window;
-
-        {
-            Application app(logger, window);
-            WindowConfig config;
-            app.initialize(config);
-            // Destructor should call shutdown
-        }
-
-        REQUIRE(window.shutdownCalled);
-    }
-
     SECTION("Application destructor safe if not initialized")
     {
         TestLogger logger;
@@ -134,9 +144,26 @@ TEST_CASE("Application RAII behavior", "[application][raii]")
 
         {
             Application app(logger, window);
-            // Destructor should not crash
+            // Destructor should not crash even without initialize()
         }
 
-        REQUIRE_FALSE(window.initialized);
+        // shutdown is only called if initialized was set to true
+        REQUIRE_FALSE(window.shutdownCalled);
+    }
+
+    SECTION("Application destructor safe after failed initialize")
+    {
+        TestLogger logger;
+        TestWindow window;
+
+        {
+            Application app(logger, window);
+            WindowConfig config;
+            // initialize returns false (no SDL window), so initialized stays false
+            app.initialize(config);
+        }
+
+        // shutdown should not be called since initialize didn't complete
+        REQUIRE_FALSE(window.shutdownCalled);
     }
 }

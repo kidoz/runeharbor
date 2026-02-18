@@ -13,7 +13,6 @@
 
 namespace runeharbor::engine
 {
-using namespace std;
 
 VirtualFileSystem::VirtualFileSystem(util::ILogger& logger) : logger(logger) {}
 

@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+
 #include <fstream>
 
 #include "../util/ilogger.hpp"
@@ -15,7 +16,7 @@ namespace runeharbor::formats
 
 /**
  * SND Archive Format (Audio.snd)
- * 
+ *
  * Used in MM7/8 for audio assets.
  * Structure:
  * - Header: uint32_t entryCount
@@ -63,7 +64,8 @@ class SndArchive
     std::optional<std::vector<uint8_t>> extractFile(const std::string& filename);
 
   private:
-    std::vector<uint8_t> decompressZlib(const std::vector<uint8_t>& data, uint32_t uncompressedSize);
+    std::vector<uint8_t> decompressZlib(const std::vector<uint8_t>& data,
+                                        uint32_t uncompressedSize);
 
     util::ILogger& logger;
     std::ifstream file;

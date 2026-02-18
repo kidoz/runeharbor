@@ -1,11 +1,10 @@
-#include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
-#include "npcnamess_parser.hpp"
-
+#include "../util/string_utils.hpp"
 #include <algorithm>
 #include <format>
 #include <sstream> // For std::istringstream and std::getline
 
+#include "npcnames_parser.hpp"
 
 namespace runeharbor::formats
 {
@@ -14,7 +13,7 @@ NPCNamesParser::NPCNamesParser(util::ILogger& logger) : logger(logger) {}
 
 bool NPCNamesParser::parse(const std::vector<uint8_t>& data)
 {
-    names.maleNames.clear(); // Clear any previous data
+    names.maleNames.clear();   // Clear any previous data
     names.femaleNames.clear(); // Clear any previous data
 
     if (data.empty())
@@ -37,11 +36,11 @@ bool NPCNamesParser::parse(const std::vector<uint8_t>& data)
     const std::string expected_header = "Male	Female";
     if (util::trim(line) != expected_header)
     {
-        logger.error(std::format("Malformed header: Expected '{}', got '{}'", expected_header, util::trim(line)));
+        logger.error(std::format("Malformed header: Expected '{}', got '{}'", expected_header,
+                                 util::trim(line)));
         return false;
     }
     logger.debug(std::format("Skipping header: {}", line));
-
 
     // Process data lines
     while (std::getline(iss, line))
@@ -57,7 +56,9 @@ bool NPCNamesParser::parse(const std::vector<uint8_t>& data)
         // We expect exactly 2 fields
         if (fields.size() != 2)
         {
-            logger.warning(std::format("Skipping malformed NPCNames line (expected 2 fields, got {}): {}", fields.size(), line));
+            logger.warning(
+                std::format("Skipping malformed NPCNames line (expected 2 fields, got {}): {}",
+                            fields.size(), line));
             continue;
         }
 
@@ -70,7 +71,8 @@ bool NPCNamesParser::parse(const std::vector<uint8_t>& data)
         names.femaleNames.push_back(female_name);
     }
 
-    logger.info(std::format("Successfully parsed {} male and {} female NPC names", names.maleNames.size(), names.femaleNames.size()));
+    logger.info(std::format("Successfully parsed {} male and {} female NPC names",
+                            names.maleNames.size(), names.femaleNames.size()));
     return true;
 }
 

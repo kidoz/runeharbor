@@ -3,7 +3,7 @@
 
 #include "../../src/formats/autonote_parser.hpp"
 #include "../../src/util/console_logger.hpp"
-#include "../../src/util/string_utils.hpp" 
+#include "../../src/util/string_utils.hpp"
 
 TEST_CASE("AutonoteParser parsing AUTONOTE.TXT", "[autonote_parser]")
 {
@@ -16,7 +16,7 @@ TEST_CASE("AutonoteParser parsing AUTONOTE.TXT", "[autonote_parser]")
 2	50 points of temporary Fire resistance from the central town well on Emerald Island.	Stat	1	Stat
 19	"25 points of temporary Might, Intellect, Personality, Endurance, Speed, Accuracy, and Luck from the central fountain in Celeste."	Stat	7
 )";
-    
+
     std::vector<uint8_t> data(sample_data.begin(), sample_data.end());
 
     SECTION("Parser successfully parses sample data")
@@ -31,7 +31,8 @@ TEST_CASE("AutonoteParser parsing AUTONOTE.TXT", "[autonote_parser]")
         parser.parse(data);
         const auto& entries = parser.getAutonoteEntries();
         REQUIRE(entries[0].noteBit == 1);
-        REQUIRE(entries[0].autonoteText == "Accepted fireball wand from Mr. Malwick on Emerald Island.");
+        REQUIRE(entries[0].autonoteText ==
+                "Accepted fireball wand from Mr. Malwick on Emerald Island.");
         REQUIRE(entries[0].category == "Misc");
     }
 
@@ -40,7 +41,9 @@ TEST_CASE("AutonoteParser parsing AUTONOTE.TXT", "[autonote_parser]")
         parser.parse(data);
         const auto& entries = parser.getAutonoteEntries();
         REQUIRE(entries[1].noteBit == 2);
-        REQUIRE(entries[1].autonoteText == "50 points of temporary Fire resistance from the central town well on Emerald Island.");
+        REQUIRE(
+            entries[1].autonoteText ==
+            "50 points of temporary Fire resistance from the central town well on Emerald Island.");
         REQUIRE(entries[1].category == "Stat");
     }
 
@@ -49,7 +52,9 @@ TEST_CASE("AutonoteParser parsing AUTONOTE.TXT", "[autonote_parser]")
         parser.parse(data);
         const auto& entries = parser.getAutonoteEntries();
         REQUIRE(entries[2].noteBit == 19);
-        REQUIRE(entries[2].autonoteText == "25 points of temporary Might, Intellect, Personality, Endurance, Speed, Accuracy, and Luck from the central fountain in Celeste.");
+        REQUIRE(entries[2].autonoteText ==
+                "25 points of temporary Might, Intellect, Personality, Endurance, Speed, Accuracy, "
+                "and Luck from the central fountain in Celeste.");
         REQUIRE(entries[2].category == "Stat");
     }
 
@@ -65,7 +70,8 @@ TEST_CASE("AutonoteParser parsing AUTONOTE.TXT", "[autonote_parser]")
         std::string malformed_header_data = R"(Note bit_WRONG	Autonote Text	Category
 1	"Some text"	Misc
 )";
-        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(), malformed_header_data.end());
+        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(),
+                                           malformed_header_data.end());
         REQUIRE_FALSE(parser.parse(malformed_vec));
         REQUIRE(parser.getAutonoteEntries().empty());
     }

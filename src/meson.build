@@ -15,6 +15,12 @@ engine_sources = files(
     'engine/application.cpp',
     'engine/map_scene.cpp',
     'engine/virtual_filesystem.cpp',
+    'engine/states/state_context.cpp',
+    'engine/states/intro_state.cpp',
+    'engine/states/title_state.cpp',
+    'engine/states/character_creation_state.cpp',
+    'engine/states/loading_state.cpp',
+    'engine/states/ingame_state.cpp',
 )
 
 # Formats sources
@@ -41,7 +47,7 @@ formats_sources = files(
     'formats/awards_parser.cpp',
     'formats/hostile_parser.cpp',
     'formats/npctext_parser.cpp',
-    'formats/npcnamess_parser.cpp',
+    'formats/npcnames_parser.cpp',
     'formats/autonote_parser.cpp',
     'formats/credits_parser.cpp',
 )
@@ -60,6 +66,8 @@ graphics_sources = files(
     'graphics/line_renderer.cpp',
     'graphics/world_renderer.cpp',
     'graphics/indoor_renderer.cpp',
+    'graphics/outdoor_renderer.cpp',
+    'graphics/visibility.cpp',
 )
 
 media_sources = files(
@@ -73,11 +81,29 @@ media_sources = files(
 # Game sources
 game_sources = files(
     'game/character.cpp',
+    'game/party.cpp',
+    'game/game_world.cpp',
+    'game/event_engine.cpp',
+    'game/inventory.cpp',
+    'game/combat.cpp',
+    'game/spells.cpp',
+    'game/quest_log.cpp',
+    'game/save_game.cpp',
+)
+
+# Audio sources
+audio_sources = files(
+    'audio/audio_system.cpp',
 )
 
 # UI sources
 ui_sources = files(
     'ui/layout.cpp',
+    'ui/widget.cpp',
+    'ui/widgets.cpp',
+    'ui/ui_manager.cpp',
+    'ui/hud.cpp',
+    'ui/dialogue.cpp',
 )
 
 # Dependencies
@@ -103,6 +129,7 @@ executable(
         game_sources,
         graphics_sources,
         media_sources,
+        audio_sources,
         ui_sources,
     ],
     include_directories: inc_dirs,

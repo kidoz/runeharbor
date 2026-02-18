@@ -1,10 +1,9 @@
-#include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
-#include "sprite_parser.hpp"
-
+#include "../util/string_utils.hpp"
 #include <format>
 
 #include "../util/ilogger.hpp"
+#include "sprite_parser.hpp"
 
 namespace runeharbor::formats
 {
@@ -12,27 +11,27 @@ namespace runeharbor::formats
 namespace
 {
 #pragma pack(push, 1)
-    struct MM7SpriteHeader
-    {
-        uint16_t width;
-        uint16_t height;
-        uint16_t frameCount;
-        uint16_t paletteData;
-        uint16_t paletteIndex;
-        uint32_t unknown;
-    };
+struct MM7SpriteHeader
+{
+    uint16_t width;
+    uint16_t height;
+    uint16_t frameCount;
+    uint16_t paletteData;
+    uint16_t paletteIndex;
+    uint32_t unknown;
+};
 
-    struct MM7SpriteFrameInfo
-    {
-        uint16_t left;
-        uint16_t top;
-        uint16_t width;
-        uint16_t height;
-        uint32_t dataSize;
-        uint32_t unknown;
-    };
+struct MM7SpriteFrameInfo
+{
+    uint16_t left;
+    uint16_t top;
+    uint16_t width;
+    uint16_t height;
+    uint32_t dataSize;
+    uint32_t unknown;
+};
 #pragma pack(pop)
-}
+} // namespace
 
 SpriteParser::SpriteParser(util::ILogger& logger) : logger(logger) {}
 
@@ -42,7 +41,7 @@ Sprite SpriteParser::parse(const std::vector<uint8_t>& data)
 
     if (data.size() < sizeof(MM7SpriteHeader))
     {
-        logger.error("Sprite data is smaller than sprite header");
+        logger.debug("Sprite data is smaller than sprite header");
         return sprite;
     }
 
@@ -57,7 +56,7 @@ Sprite SpriteParser::parse(const std::vector<uint8_t>& data)
     // After the unknown data block, there is a 768-byte palette.
     if (static_cast<size_t>(data.data() + data.size() - p) < 768)
     {
-        logger.error("Not enough data for sprite palette");
+        logger.debug("Not enough data for sprite palette");
         return sprite;
     }
     std::vector<uint8_t> paletteData(768);
@@ -65,12 +64,11 @@ Sprite SpriteParser::parse(const std::vector<uint8_t>& data)
     sprite.palette = graphics::Palette::fromRGBData(paletteData);
     p += 768;
 
-
     for (int i = 0; i < header->frameCount; i++)
     {
         if (static_cast<size_t>(data.data() + data.size() - p) < sizeof(MM7SpriteFrameInfo))
         {
-            logger.error("Not enough data for sprite frame info");
+            logger.debug("Not enough data for sprite frame info");
             return sprite;
         }
         const MM7SpriteFrameInfo* frameInfo = reinterpret_cast<const MM7SpriteFrameInfo*>(p);
@@ -81,10 +79,10 @@ Sprite SpriteParser::parse(const std::vector<uint8_t>& data)
         frame.top = frameInfo->top;
         frame.width = frameInfo->width;
         frame.height = frameInfo->height;
-        
+
         if (static_cast<size_t>(data.data() + data.size() - p) < frameInfo->dataSize)
         {
-            logger.error("Not enough data for sprite frame data");
+            logger.debug("Not enough data for sprite frame data");
             return sprite;
         }
         frame.data.resize(frameInfo->dataSize);
@@ -93,7 +91,6 @@ Sprite SpriteParser::parse(const std::vector<uint8_t>& data)
 
         sprite.frames.push_back(frame);
     }
-
 
     return sprite;
 }

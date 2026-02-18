@@ -3,7 +3,7 @@
 
 #include "../../src/formats/credits_parser.hpp"
 #include "../../src/util/console_logger.hpp"
-#include "../../src/util/string_utils.hpp" 
+#include "../../src/util/string_utils.hpp"
 
 TEST_CASE("CreditsParser parsing Credits.txt", "[credits_parser]")
 {
@@ -21,7 +21,7 @@ Paul Rattner
 _Executive Producer:
 Mark Caldwell
 )";
-    
+
     std::vector<uint8_t> data(sample_data.begin(), sample_data.end());
 
     SECTION("Parser successfully parses sample data")

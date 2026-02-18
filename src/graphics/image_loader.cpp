@@ -1,31 +1,39 @@
+// SPDX-License-Identifier: MIT
 #include "image_loader.hpp"
+
 #include <format>
 #include <iostream>
 #include <vector>
 
-namespace runeharbor::graphics {
+namespace runeharbor::graphics
+{
 
 ImageLoader::ImageLoader(formats::ImageLODArchive& archive) : archive(archive) {}
 
-std::unique_ptr<Image> ImageLoader::loadImage(const std::string& name) {
+std::unique_ptr<Image> ImageLoader::loadImage(const std::string& name)
+{
     auto info = archive.getFileInfo(name);
-    if (!info) {
+    if (!info)
+    {
         return nullptr;
     }
 
     auto data = archive.extractFile(name);
-    if (!data) {
+    if (!data)
+    {
         return nullptr;
     }
 
     const Palette& palette = loadPalette(info->paletteId);
-    
+
     // Create image from raw data + palette
     return Image::fromPalettedData(*data, info->width, info->height, palette);
 }
 
-const Palette& ImageLoader::loadPalette(int paletteId) {
-    if (paletteCache.contains(paletteId)) {
+const Palette& ImageLoader::loadPalette(int paletteId)
+{
+    if (paletteCache.contains(paletteId))
+    {
         return paletteCache.at(paletteId);
     }
 
@@ -33,13 +41,15 @@ const Palette& ImageLoader::loadPalette(int paletteId) {
     std::string palName = std::format("pal{}", paletteId);
     auto data = archive.extractFile(palName);
 
-    if (!data) {
+    if (!data)
+    {
         // Try padded with zeros if needed, e.g. PAL001
         palName = std::format("pal{:03d}", paletteId);
         data = archive.extractFile(palName);
     }
 
-    if (!data) {
+    if (!data)
+    {
         // Try fully uppercase? Though archive is case-insensitive.
         // Maybe try "palette" prefix?
         // Fallback to default palette
@@ -48,30 +58,36 @@ const Palette& ImageLoader::loadPalette(int paletteId) {
         paletteCache[paletteId] = defaultPal;
         return paletteCache[paletteId];
     }
-    
+
     // Validate size (should be exactly 768 bytes for 256 RGB colors)
-    if (data->size() < 768) {
+    if (data->size() < 768)
+    {
         // Log warning?
         static Palette defaultPal = Palette::createDefaultPalette();
         paletteCache[paletteId] = defaultPal;
         return paletteCache[paletteId];
     }
-    
-    // If larger than 768, take the LAST 768 bytes just in case there's a header we didn't strip properly
-    // (though ImageLODArchive should handle headers)
-    // Palettes are raw RGB data.
+
+    // If larger than 768, take the LAST 768 bytes just in case there's a header we didn't strip
+    // properly (though ImageLODArchive should handle headers) Palettes are raw RGB data.
     std::vector<uint8_t> rgbData;
-    if (data->size() > 768) {
+    if (data->size() > 768)
+    {
         rgbData.assign(data->end() - 768, data->end());
-    } else {
+    }
+    else
+    {
         rgbData = *data;
     }
-    
-    try {
+
+    try
+    {
         Palette pal = Palette::fromRGBData(rgbData);
         paletteCache[paletteId] = pal;
         return paletteCache[paletteId];
-    } catch (...) {
+    }
+    catch (...)
+    {
         static Palette defaultPal = Palette::createDefaultPalette();
         paletteCache[paletteId] = defaultPal;
         return paletteCache[paletteId];

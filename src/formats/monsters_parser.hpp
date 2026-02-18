@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
 
 #include "../util/ilogger.hpp"
 
@@ -39,19 +39,19 @@ struct MonsterEntry
     int quest = 0; // 0 or 1
     bool canFly = false;
     std::string moveType; // e.g., "Free", "Short", "Med", "Long", "stand"
-    std::string aiType; // e.g., "Aggress", "Normal", "Suicidal", "Wimp"
+    std::string aiType;   // e.g., "Aggress", "Normal", "Suicidal", "Wimp"
     int haste = 0;
     int speed = 0;
     int recovery = 0;
     std::string preferences; // e.g., "AR", "CP", "S", "DR"
-    std::string bonus; // e.g., "Disease1", "BrkArmor", "Afraid", "Insane", "DrainSP", "Uncon", "Agex2", "Cursex2", "Dead", "Errad"
+    std::string bonus; // e.g., "Disease1", "BrkArmor", "Afraid", "Insane", "DrainSP", "Uncon",
+                       // "Agex2", "Cursex2", "Dead", "Errad"
 
     MonsterAttack attack1;
     MonsterAttack attack2; // Second physical attack might be empty
 
     MonsterSpellAttack spellAttack1;
     MonsterSpellAttack spellAttack2; // Second spell attack might be empty
-
 
     // Resistances (percentage values)
     int resistFire = 0;
@@ -70,12 +70,12 @@ struct MonsterEntry
 
 class MonstersParser
 {
-public:
+  public:
     explicit MonstersParser(util::ILogger& logger);
     bool parse(const std::vector<uint8_t>& data);
     const std::vector<MonsterEntry>& getMonsters() const { return monsters; }
 
-private:
+  private:
     util::ILogger& logger;
     std::vector<MonsterEntry> monsters;
     // Will use runeharbor::util::splitString from string_utils.hpp

@@ -1,11 +1,10 @@
-#include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
-#include "quests_parser.hpp"
-
+#include "../util/string_utils.hpp"
 #include <algorithm>
 #include <format>
 #include <sstream> // For std::istringstream and std::getline
 
+#include "quests_parser.hpp"
 
 namespace runeharbor::formats
 {
@@ -36,11 +35,11 @@ bool QuestsParser::parse(const std::vector<uint8_t>& data)
     const std::string expected_header = "Q Bit	Quest Note Text	Notes	Owner";
     if (util::trim(line) != expected_header)
     {
-        logger.error(std::format("Malformed header: Expected '{}', got '{}'", expected_header, util::trim(line)));
+        logger.error(std::format("Malformed header: Expected '{}', got '{}'", expected_header,
+                                 util::trim(line)));
         return false;
     }
     logger.debug(std::format("Skipping header: {}", line));
-
 
     // Process data lines
     while (std::getline(iss, line))
@@ -52,7 +51,8 @@ bool QuestsParser::parse(const std::vector<uint8_t>& data)
         }
 
         QuestEntry entry;
-        std::vector<std::string> fields = util::splitString(line, '	', '"'); // Split by tab, handle quotes
+        std::vector<std::string> fields =
+            util::splitString(line, '	', '"'); // Split by tab, handle quotes
 
         // We expect exactly 4 fields based on quests.md analysis
         if (fields.size() < 4) // Use < 4 for robustness
@@ -66,21 +66,25 @@ bool QuestsParser::parse(const std::vector<uint8_t>& data)
             size_t fieldIndex = 0;
 
             // 1. qBit
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.qBit = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.qBit = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
             // 2. questNoteText
-            if (fieldIndex < fields.size()) entry.questNoteText = util::trim(fields[fieldIndex]);
+            if (fieldIndex < fields.size())
+                entry.questNoteText = util::trim(fields[fieldIndex]);
             fieldIndex++;
 
             // 3. notes
-            if (fieldIndex < fields.size()) entry.notes = util::trim(fields[fieldIndex]);
+            if (fieldIndex < fields.size())
+                entry.notes = util::trim(fields[fieldIndex]);
             fieldIndex++;
 
             // 4. owner
-            if (fieldIndex < fields.size()) entry.owner = util::trim(fields[fieldIndex]);
+            if (fieldIndex < fields.size())
+                entry.owner = util::trim(fields[fieldIndex]);
             fieldIndex++;
-            
+
             quests.push_back(entry);
         }
         catch (const std::exception& e)

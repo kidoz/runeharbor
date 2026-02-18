@@ -19,7 +19,7 @@ enum class VideoFormat
     Bink     // .bik - BIKf/BIKi magic
 };
 
-struct VIDEntry
+struct VidEntry
 {
     std::string name;
     uint32_t offset;
@@ -36,29 +36,29 @@ struct VIDEntry
  *     40 bytes: filename (null-terminated)
  *     4 bytes:  uint32_t offset to video data
  */
-class VIDArchive
+class VidArchive
 {
   public:
-    VIDArchive() = default;
-    ~VIDArchive();
+    VidArchive() = default;
+    ~VidArchive();
 
-    VIDArchive(const VIDArchive&) = delete;
-    VIDArchive& operator=(const VIDArchive&) = delete;
-    VIDArchive(VIDArchive&&) noexcept;
-    VIDArchive& operator=(VIDArchive&&) noexcept;
+    VidArchive(const VidArchive&) = delete;
+    VidArchive& operator=(const VidArchive&) = delete;
+    VidArchive(VidArchive&&) noexcept;
+    VidArchive& operator=(VidArchive&&) noexcept;
 
     bool open(const std::filesystem::path& path);
     void close();
     bool isOpen() const { return file_.is_open(); }
 
     size_t entryCount() const { return entries_.size(); }
-    const std::vector<VIDEntry>& entries() const { return entries_; }
+    const std::vector<VidEntry>& entries() const { return entries_; }
 
     // Find entry by name (case-insensitive)
     std::optional<size_t> findEntry(const std::string& name) const;
 
     // Get entry by index
-    const VIDEntry* getEntry(size_t index) const;
+    const VidEntry* getEntry(size_t index) const;
 
     // Read video data into buffer
     std::vector<uint8_t> readVideoData(size_t index);
@@ -71,7 +71,7 @@ class VIDArchive
   private:
     std::filesystem::path path_;
     std::ifstream file_;
-    std::vector<VIDEntry> entries_;
+    std::vector<VidEntry> entries_;
     uint64_t fileSize_ = 0;
 
     VideoFormat detectFormat(uint32_t offset);

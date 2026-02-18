@@ -19,11 +19,17 @@
 #include "../graphics/palette.hpp"
 #include "../graphics/sdl_renderer.hpp"
 #include "../graphics/world_renderer.hpp"
-#include "../platform/iwindow.hpp"
-#include "../util/ilogger.hpp"
 #include "../media/vid_archive.hpp"
 #include "../media/vid_manifest.hpp"
 #include "../media/video_player.hpp"
+#include "../platform/iwindow.hpp"
+#include "../util/ilogger.hpp"
+#include "states/character_creation_state.hpp"
+#include "states/ingame_state.hpp"
+#include "states/intro_state.hpp"
+#include "states/loading_state.hpp"
+#include "states/state_context.hpp"
+#include "states/title_state.hpp"
 #include "virtual_filesystem.hpp"
 
 namespace runeharbor::engine
@@ -44,13 +50,6 @@ std::string toLower(std::string value)
     return value;
 }
 
-std::string toUpper(std::string value)
-{
-    for (char& c : value)
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    return value;
-}
-
 std::string getLowerExtension(const std::string& filename)
 {
     const std::string lower = toLower(filename);
@@ -62,72 +61,25 @@ std::string getLowerExtension(const std::string& filename)
     return lower.substr(dot);
 }
 
-const char* onOff(bool value)
-{
-    return value ? "ON" : "OFF";
-}
-
-constexpr int kGameWidth = 640;
-constexpr int kGameHeight = 480;
-
-const std::vector<std::string> kTitleMenuItems = {
-    "NEW",
-    "LOAD",
-    "CREDITS",
-    "EXIT",
-};
-
-const std::vector<std::string> kRaceNames = {
-    "Human", "Elf", "Dwarf", "Goblin"
-};
-
-const std::vector<std::string> kGenderNames = {
-    "Male", "Female"
-};
-
-const std::vector<std::string> kClassNames = {
-    "Knight", "Paladin", "Archer", "Cleric", "Sorcerer", "Thief", "Monk", "Ranger", "Druid"
-};
-
-const std::vector<std::string> kStatNames = {
-    "Might", "Intellect", "Personality", "Endurance", "Speed", "Accuracy", "Luck"
-};
-
-// Race base stats: [race][stat] order: Might, Intellect, Personality, Endurance, Speed, Accuracy, Luck
+// Race base stats: [race][stat] order: Might, Intellect, Personality, Endurance, Speed, Accuracy,
+// Luck
 constexpr int kRaceBaseStats[4][7] = {
-    {11, 11, 11,  9, 11, 11, 9}, // Human
-    { 7, 14, 11,  7, 11, 14, 9}, // Elf
-    {14, 11, 11, 14,  7,  7, 9}, // Dwarf
-    {14,  7,  7, 11, 14, 11, 9}, // Goblin
-};
-
-// Race stat maximums
-constexpr int kRaceStatMax[4][7] = {
-    {25, 25, 25, 25, 25, 25, 25}, // Human
-    {15, 30, 25, 15, 25, 30, 20}, // Elf
-    {30, 25, 25, 30, 15, 15, 20}, // Dwarf
-    {30, 15, 15, 25, 30, 25, 20}, // Goblin
+    {11, 11, 11, 9, 11, 11, 9}, // Human
+    {7, 14, 11, 7, 11, 14, 9},  // Elf
+    {14, 11, 11, 14, 7, 7, 9},  // Dwarf
+    {14, 7, 7, 11, 14, 11, 9},  // Goblin
 };
 
 // Face-to-race: 0-7=Human, 8-11=Elf, 12-15=Dwarf, 16-19=Goblin
 Race raceFromFace(int faceId)
 {
-    if (faceId < 8) return Race::Human;
-    if (faceId < 12) return Race::Elf;
-    if (faceId < 16) return Race::Dwarf;
+    if (faceId < 8)
+        return Race::Human;
+    if (faceId < 12)
+        return Race::Elf;
+    if (faceId < 16)
+        return Race::Dwarf;
     return Race::Goblin;
-}
-
-// Face-to-gender: first half of each race group is male, second half female
-Gender genderFromFace(int faceId)
-{
-    int raceStart = 0;
-    int raceCount = 8;
-    if (faceId >= 16) { raceStart = 16; raceCount = 4; }
-    else if (faceId >= 12) { raceStart = 12; raceCount = 4; }
-    else if (faceId >= 8) { raceStart = 8; raceCount = 4; }
-    int offset = faceId - raceStart;
-    return offset < raceCount / 2 ? Gender::Male : Gender::Female;
 }
 
 // Starting skills per class (indexed by CharacterClass enum order)
@@ -197,10 +149,113 @@ bool Application::initialize(const platform::WindowConfig& windowConfig)
 
     logger.info("Press ESC or close window to exit");
 
-    // Skip IntroVideo for now as decoders need more work
-    setGameState(GameState::TitleScreen);
+    initStates();
+
+    setGameState(GameState::IntroVideo);
+    transitionTo(GameStateId::IntroVideo);
     initialized = true;
     return true;
+}
+
+void Application::initStates()
+{
+    // Create shared data
+    sharedData = std::make_unique<SharedGameData>();
+    sharedData->party = &party;
+
+    // Create state context
+    stateCtx = std::make_unique<StateContext>(StateContext{
+        .logger = logger,
+        .window = window,
+        .renderer = renderer.get(),
+        .sdlRenderer = dynamic_cast<graphics::SDLRenderer*>(renderer.get()),
+        .lineRenderer = lineRenderer.get(),
+        .worldRenderer = worldRenderer.get(),
+        .debugText = debugText.get(),
+        .videoPlayer = videoPlayer.get(),
+        .vfs = vfs.get(),
+        .camera = &camera,
+        .shared = sharedData.get(),
+    });
+    updateStateContext();
+
+    // Create state objects
+    introState = std::make_unique<IntroState>(*stateCtx);
+    titleState = std::make_unique<TitleState>(*stateCtx);
+    charCreationState = std::make_unique<CharacterCreationState>(*stateCtx);
+    loadingState = std::make_unique<LoadingState>(*stateCtx);
+    inGameState = std::make_unique<InGameState>(*stateCtx);
+
+    // Wire up loading state callbacks
+    loadingState->setProgress(&loadProgress);
+    loadingState->setCallbacks([this]() { startLoadingTask(); },
+                               [this]() -> bool { return loadingTaskDone.load(); },
+                               [this]() -> bool
+                               {
+                                   finalizeLoadingTask();
+                                   return mapLoaded;
+                               });
+}
+
+void Application::updateStateContext()
+{
+    if (!stateCtx)
+    {
+        return;
+    }
+    stateCtx->viewportWidth = viewportWidth;
+    stateCtx->viewportHeight = viewportHeight;
+    stateCtx->keyState = keyState;
+    stateCtx->previousKeyState = &previousKeyState;
+    stateCtx->keyCount = keyCount;
+
+    if (sharedData)
+    {
+        sharedData->mapScene = mapScene.get();
+    }
+}
+
+void Application::transitionTo(GameStateId id)
+{
+    logger.info(std::format("transitionTo: {}", static_cast<int>(id)));
+
+    if (activeState)
+    {
+        activeState->exit();
+    }
+
+    activeStateId = id;
+
+    switch (id)
+    {
+    case GameStateId::IntroVideo:
+        activeState = introState.get();
+        break;
+    case GameStateId::TitleScreen:
+        activeState = titleState.get();
+        break;
+    case GameStateId::CharacterCreation:
+        activeState = charCreationState.get();
+        break;
+    case GameStateId::Loading:
+        activeState = loadingState.get();
+        break;
+    case GameStateId::InGame:
+        activeState = inGameState.get();
+        break;
+    case GameStateId::Quit:
+    {
+        SDL_Event quitEvent = {};
+        quitEvent.type = SDL_EVENT_QUIT;
+        SDL_PushEvent(&quitEvent);
+        return;
+    }
+    }
+
+    if (activeState)
+    {
+        activeState->enter();
+    }
 }
 
 bool Application::loadGameData(const std::filesystem::path& dataPath)
@@ -339,6 +394,10 @@ bool Application::loadGameData(const std::filesystem::path& dataPath)
 
     gameDataLoaded = true;
     buildIntroPlaylist();
+    if (introState)
+    {
+        introState->setPlaylist(introPlaylist);
+    }
     loadUiAssets();
     if (gameState == GameState::IntroVideo && videoPlayer && !introPlaylist.empty())
     {
@@ -354,11 +413,23 @@ void Application::configureBootFlow(const std::string& mapName, bool preferOutdo
     startupPreferOutdoor = preferOutdoor;
     autoLoadMap = autoLoad;
 
+    // Sync to shared data
+    if (sharedData)
+    {
+        sharedData->startupMapName = mapName;
+        sharedData->startupPreferOutdoor = preferOutdoor;
+        sharedData->autoLoadMap = autoLoad;
+    }
+
     // If map name is specified via CLI, skip menu and go directly to loading
-    if (!mapName.empty() && autoLoad && (gameState == GameState::TitleScreen || gameState == GameState::IntroVideo))
+    if (!mapName.empty() && autoLoad &&
+        (gameState == GameState::TitleScreen || gameState == GameState::IntroVideo))
     {
         quickStartReady = true;
+        if (sharedData)
+            sharedData->quickStartReady = true;
         setGameState(GameState::Loading);
+        transitionTo(GameStateId::Loading);
     }
 }
 
@@ -420,6 +491,7 @@ bool Application::loadMap(const std::string& mapName)
 
     mapLoaded = true;
     configureCameraForMap();
+    wireUpMapTextures();
 
     logger.info(std::format("Loaded BLV map: {}", resolvedName));
     logger.info("Camera controls: Arrow keys orbit, Q/E zoom, Shift to speed up");
@@ -655,29 +727,10 @@ void Application::renderFrame()
 
     renderer->clear(20, 30, 60, 255);
 
-    switch (gameState)
+    if (activeState)
     {
-    case GameState::IntroVideo:
-        renderIntroVideo();
-        break;
-    case GameState::TitleScreen:
-        renderTitleScreen();
-        break;
-    case GameState::CharacterCreation:
-        renderCharacterCreation();
-        break;
-    case GameState::Loading:
-        renderLoadingScreen();
-        break;
-    case GameState::InGame:
-        if (mapLoaded && mapScene && worldRenderer)
-        {
-            worldRenderer->render(*mapScene, camera);
-        }
-        break;
+        activeState->render();
     }
-
-    renderOverlay();
 
     renderer->present();
 }
@@ -704,12 +757,6 @@ void Application::updateViewport()
         viewportHeight = h;
         lineRenderer->setViewport(w, h);
         camera.setAspectRatio(static_cast<float>(w) / static_cast<float>(h));
-
-        // Re-layout menu buttons on viewport change
-        if (!titleMenuUI.buttons.empty())
-        {
-            layoutTitleMenuButtons();
-        }
     }
 }
 
@@ -730,85 +777,103 @@ void Application::configureCameraForMap()
     camera.lookAt(bounds.center(), distance);
 }
 
-void Application::updateCameraInput()
+void Application::wireUpMapTextures()
 {
-    if (!mapLoaded || gameState != GameState::InGame)
+    if (!worldRenderer || !vfs || !renderer)
     {
         return;
     }
 
-    float orbitSpeed = 0.015f;
-    float zoomSpeed = 50.0f;
-    float panSpeed = 8.0f;
+    clearMapTextureCache();
 
-    if (isKeyDown(SDL_SCANCODE_LSHIFT) || isKeyDown(SDL_SCANCODE_RSHIFT))
-    {
-        orbitSpeed *= 2.0f;
-        zoomSpeed *= 2.0f;
-        panSpeed *= 2.0f;
-    }
+    worldRenderer->setTextureLookup(
+        [this](const std::string& name) -> SDL_Texture*
+        {
+            // Check cache first
+            auto it = mapTextureCache.find(name);
+            if (it != mapTextureCache.end())
+            {
+                return static_cast<SDL_Texture*>(it->second);
+            }
 
-    if (isKeyDown(SDL_SCANCODE_LEFT))
-    {
-        camera.orbit(-orbitSpeed, 0.0f);
-    }
-    if (isKeyDown(SDL_SCANCODE_RIGHT))
-    {
-        camera.orbit(orbitSpeed, 0.0f);
-    }
-    if (isKeyDown(SDL_SCANCODE_UP))
-    {
-        camera.orbit(0.0f, orbitSpeed);
-    }
-    if (isKeyDown(SDL_SCANCODE_DOWN))
-    {
-        camera.orbit(0.0f, -orbitSpeed);
-    }
+            // Get image info (dimensions, palette ID)
+            auto info = vfs->getImageInfo(name);
+            if (!info)
+            {
+                return nullptr;
+            }
 
-    if (isKeyDown(SDL_SCANCODE_Q))
-    {
-        camera.zoom(zoomSpeed);
-    }
-    if (isKeyDown(SDL_SCANCODE_E))
-    {
-        camera.zoom(-zoomSpeed);
-    }
+            // Get raw indexed pixel data
+            auto data = vfs->readFile(name);
+            if (!data)
+            {
+                return nullptr;
+            }
 
-    if (isKeyDown(SDL_SCANCODE_A))
+            // Load palette
+            graphics::Palette palette;
+            int palId = info->paletteId;
+            if (palId == 0)
+            {
+                palId = 1; // PAL000 doesn't exist; use PAL001 as fallback
+            }
+            std::string palName = std::format("pal{:03d}", palId);
+            auto palData = vfs->readFile(palName);
+            if (palData && palData->size() >= 768)
+            {
+                std::vector<uint8_t> rgb;
+                if (palData->size() > 768)
+                {
+                    rgb.assign(palData->end() - 768, palData->end());
+                }
+                else
+                {
+                    rgb = *palData;
+                }
+                palette = graphics::Palette::fromRGBData(rgb);
+            }
+            else
+            {
+                palette = graphics::Palette::createDefaultPalette();
+            }
+
+            // Convert indexed data to RGBA image
+            auto image =
+                graphics::Image::fromPalettedData(*data, info->width, info->height, palette);
+            if (!image)
+            {
+                return nullptr;
+            }
+
+            // Create GPU texture
+            void* tex = renderer->createTexture(*image);
+            if (tex)
+            {
+                mapTextureCache[name] = tex;
+            }
+            return static_cast<SDL_Texture*>(tex);
+        });
+}
+
+void Application::clearMapTextureCache()
+{
+    if (renderer)
     {
-        camera.pan(-panSpeed, 0.0f);
+        for (auto& [name, tex] : mapTextureCache)
+        {
+            renderer->destroyTexture(tex);
+        }
     }
-    if (isKeyDown(SDL_SCANCODE_D))
-    {
-        camera.pan(panSpeed, 0.0f);
-    }
-    if (isKeyDown(SDL_SCANCODE_W))
-    {
-        camera.pan(0.0f, panSpeed);
-    }
-    if (isKeyDown(SDL_SCANCODE_S))
-    {
-        camera.pan(0.0f, -panSpeed);
-    }
+    mapTextureCache.clear();
 }
 
 void Application::setGameState(GameState state)
 {
     gameState = state;
-    stateStartTicks = SDL_GetTicks();
-    loadingStarted = false;
     if (state == GameState::TitleScreen)
     {
-        titleMenuIndex = 0;
-        stateMessage.clear();
         startupMapName.clear();
         startupPreferOutdoor = false;
-        titleMenuUI.buttons.clear(); // Re-layout on next frame
-    }
-    else if (state == GameState::CharacterCreation)
-    {
-        characterMenuIndex = 0;
-        stateMessage.clear();
     }
     else if (state == GameState::Loading)
     {
@@ -819,713 +884,31 @@ void Application::setGameState(GameState state)
     {
         loadProgressActive.store(false);
     }
-
-    if (gameState == GameState::IntroVideo && videoPlayer && !introPlaylist.empty())
-    {
-        videoPlayer->setPlaylist(introPlaylist);
-        videoPlayer->start(stateStartTicks);
-    }
 }
 
 void Application::updateStateMachine()
 {
     pollKeyboardState();
+    updateStateContext();
 
-    const uint64_t now = SDL_GetTicks();
-    switch (gameState)
+    if (activeState)
     {
-    case GameState::IntroVideo:
-        if (videoPlayer)
+        auto next = activeState->update();
+        if (next.has_value())
         {
-            videoPlayer->update(now);
-            if (videoPlayer->isFinished())
+            // Sync shared data back to Application fields
+            if (sharedData)
             {
-                setGameState(GameState::TitleScreen);
-                break;
+                startupMapName = sharedData->startupMapName;
+                startupPreferOutdoor = sharedData->startupPreferOutdoor;
+                quickStartReady = sharedData->quickStartReady;
+                autoLoadMap = sharedData->autoLoadMap;
             }
+            transitionTo(*next);
         }
-
-        if (isKeyPressed(SDL_SCANCODE_RETURN) || isKeyPressed(SDL_SCANCODE_SPACE))
-        {
-            setGameState(GameState::TitleScreen);
-        }
-        break;
-    case GameState::TitleScreen:
-        // Ensure buttons are laid out
-        if (titleMenuUI.buttons.empty())
-        {
-            layoutTitleMenuButtons();
-        }
-
-        // Update hover state from mouse position
-        updateTitleMenuHover();
-
-        // Keyboard navigation
-        if (isKeyPressed(SDL_SCANCODE_UP))
-        {
-            titleMenuIndex = (titleMenuIndex + static_cast<int>(kTitleMenuItems.size()) - 1) %
-                             static_cast<int>(kTitleMenuItems.size());
-            titleMenuUI.selectedIndex = titleMenuIndex;
-        }
-        if (isKeyPressed(SDL_SCANCODE_DOWN))
-        {
-            titleMenuIndex = (titleMenuIndex + 1) % static_cast<int>(kTitleMenuItems.size());
-            titleMenuUI.selectedIndex = titleMenuIndex;
-        }
-
-        // Handle selection (keyboard Enter or mouse click)
-        {
-            bool activated = isKeyPressed(SDL_SCANCODE_RETURN);
-
-            // Check for mouse click on any button
-            if (!activated && window.wasMousePressed(platform::MouseButton::Left))
-            {
-                for (size_t i = 0; i < titleMenuUI.buttons.size(); i++)
-                {
-                    if (titleMenuUI.buttons[i].isHovered)
-                    {
-                        titleMenuIndex = static_cast<int>(i);
-                        titleMenuUI.selectedIndex = titleMenuIndex;
-                        activated = true;
-                        break;
-                    }
-                }
-            }
-
-            if (activated)
-            {
-                if (titleMenuIndex == 0)
-                {
-                    // NEW GAME
-                    quickStartReady = false;
-                    setGameState(GameState::CharacterCreation);
-                }
-                else if (titleMenuIndex == 1)
-                {
-                    // LOAD GAME
-                    stateMessage = "Load game not implemented yet";
-                }
-                else if (titleMenuIndex == 2)
-                {
-                    // CREDITS
-                    stateMessage = "Credits not implemented yet";
-                }
-                else if (titleMenuIndex == 3)
-                {
-                    // EXIT GAME
-                    SDL_Event quitEvent = {};
-                    quitEvent.type = SDL_EVENT_QUIT;
-                    SDL_PushEvent(&quitEvent);
-                }
-            }
-        }
-
-        // Keyboard shortcuts
-        if (isKeyPressed(SDL_SCANCODE_N))
-        {
-            quickStartReady = false;
-            setGameState(GameState::CharacterCreation);
-        }
-        else if (isKeyPressed(SDL_SCANCODE_L))
-        {
-            stateMessage = "Load game not implemented yet";
-        }
-        else if (isKeyPressed(SDL_SCANCODE_C))
-        {
-            stateMessage = "Credits not implemented yet";
-        }
-        else if (isKeyPressed(SDL_SCANCODE_Q) || isKeyPressed(SDL_SCANCODE_E))
-        {
-            SDL_Event quitEvent = {};
-            quitEvent.type = SDL_EVENT_QUIT;
-            SDL_PushEvent(&quitEvent);
-        }
-        break;
-    case GameState::CharacterCreation:
-        {
-            // Select active character with 1-4
-            if (isKeyPressed(SDL_SCANCODE_1)) activeCharacterIndex = 0;
-            if (isKeyPressed(SDL_SCANCODE_2)) activeCharacterIndex = 1;
-            if (isKeyPressed(SDL_SCANCODE_3)) activeCharacterIndex = 2;
-            if (isKeyPressed(SDL_SCANCODE_4)) activeCharacterIndex = 3;
-
-            // Mouse click: column selection + bottom buttons
-            if (window.wasMousePressed(platform::MouseButton::Left))
-            {
-                auto mouseState = window.getMouseState();
-                int gameX = unscaleX(mouseState.x);
-                int gameY = unscaleY(mouseState.y);
-
-                // Column click detection (4 columns)
-                constexpr int colX[] = {10, 168, 326, 484};
-                constexpr int colWidth = 155;
-                for (int i = 0; i < 4; i++)
-                {
-                    if (gameX >= colX[i] && gameX < colX[i] + colWidth &&
-                        gameY >= 30 && gameY < 420)
-                    {
-                        activeCharacterIndex = i;
-                        break;
-                    }
-                }
-
-                // OK button (game coords ~560-610, 440-460)
-                if (gameX >= 560 && gameX <= 620 && gameY >= 440 && gameY <= 465)
-                {
-                    quickStartReady = true;
-                    startupMapName = "out01.odm";
-                    startupPreferOutdoor = true;
-                    setGameState(GameState::Loading);
-                }
-                // CLEAR button (game coords ~490-550, 440-460)
-                else if (gameX >= 490 && gameX <= 555 && gameY >= 440 && gameY <= 465)
-                {
-                    Character& ch = party[activeCharacterIndex];
-                    ch.stats = ch.baseStats;
-                }
-            }
-
-            Character& activeChar = party[activeCharacterIndex];
-
-            // Naming mode: capture text input
-            if (isNaming)
-            {
-                if (isKeyPressed(SDL_SCANCODE_BACKSPACE) && !activeChar.name.empty())
-                {
-                    activeChar.name.pop_back();
-                }
-                else if (isKeyPressed(SDL_SCANCODE_RETURN) || isKeyPressed(SDL_SCANCODE_ESCAPE))
-                {
-                    isNaming = false;
-                }
-                for (int i = SDL_SCANCODE_A; i <= SDL_SCANCODE_Z; i++)
-                {
-                    if (isKeyPressed(static_cast<SDL_Scancode>(i)))
-                    {
-                        if (activeChar.name.size() < 15)
-                        {
-                            char c = 'A' + (i - SDL_SCANCODE_A);
-                            activeChar.name += c;
-                        }
-                    }
-                }
-                break;
-            }
-
-            // Row navigation: UP/DOWN through 10 rows (NAME, FACE, CLASS, 7 stats)
-            if (isKeyPressed(SDL_SCANCODE_UP))
-            {
-                characterMenuIndex =
-                    (characterMenuIndex + kCharCreationRowCount - 1) % kCharCreationRowCount;
-            }
-            if (isKeyPressed(SDL_SCANCODE_DOWN))
-            {
-                characterMenuIndex =
-                    (characterMenuIndex + 1) % kCharCreationRowCount;
-            }
-
-            // Horizontal navigation
-            int hDelta = 0;
-            if (isKeyPressed(SDL_SCANCODE_LEFT)) hDelta = -1;
-            if (isKeyPressed(SDL_SCANCODE_RIGHT)) hDelta = 1;
-
-            if (hDelta != 0)
-            {
-                if (characterMenuIndex == 1) // FACE
-                {
-                    int oldRace = static_cast<int>(raceFromFace(activeChar.faceId));
-                    activeChar.faceId = (activeChar.faceId + hDelta + 20) % 20;
-                    int newRace = static_cast<int>(raceFromFace(activeChar.faceId));
-                    if (oldRace != newRace)
-                    {
-                        updateCharacterForFace(activeChar);
-                    }
-                }
-                else if (characterMenuIndex == 2) // CLASS
-                {
-                    int c = static_cast<int>(activeChar.charClass);
-                    c = (c + hDelta + static_cast<int>(kClassNames.size())) %
-                        static_cast<int>(kClassNames.size());
-                    activeChar.charClass = static_cast<CharacterClass>(c);
-                    updateSkillsForClass(activeChar);
-                }
-                else if (characterMenuIndex >= 3 && characterMenuIndex <= 9) // STATS
-                {
-                    int statIdx = characterMenuIndex - 3;
-                    Race race = raceFromFace(activeChar.faceId);
-                    int raceIdx = static_cast<int>(race);
-                    int minVal = activeChar.baseStats.byIndex(statIdx) - 2;
-                    int maxVal = kRaceStatMax[raceIdx][statIdx];
-
-                    if (hDelta > 0 && calculateBonusPointsRemaining() <= 0)
-                    {
-                        // No bonus points left
-                    }
-                    else
-                    {
-                        int& stat = activeChar.stats.byIndex(statIdx);
-                        stat = std::clamp(stat + hDelta, minVal, maxVal);
-                    }
-                }
-            }
-
-            // Enter key actions
-            if (isKeyPressed(SDL_SCANCODE_RETURN))
-            {
-                if (characterMenuIndex == 0) // NAME
-                {
-                    isNaming = true;
-                }
-            }
-
-            // ESC to go back
-            if (isKeyPressed(SDL_SCANCODE_ESCAPE))
-            {
-                setGameState(GameState::TitleScreen);
-            }
-        }
-        break;
-    case GameState::Loading:
-        if (!autoLoadMap && !loadingStarted)
-        {
-            if (isKeyPressed(SDL_SCANCODE_RETURN))
-            {
-                loadingStarted = true;
-            }
-            else
-            {
-                break;
-            }
-        }
-
-        if (!loadingStarted)
-        {
-            loadingStarted = true;
-        }
-
-        if (loadingStarted)
-        {
-            if (!loadingTaskActive.load())
-            {
-                startLoadingTask();
-            }
-            else if (loadingTaskDone.load())
-            {
-                finalizeLoadingTask();
-            }
-        }
-        break;
-    case GameState::InGame:
-        updateCameraInput();
-        if (isKeyPressed(SDL_SCANCODE_F))
-        {
-            mapRenderOptions.showFloors = !mapRenderOptions.showFloors;
-        }
-        if (isKeyPressed(SDL_SCANCODE_V))
-        {
-            mapRenderOptions.showWalls = !mapRenderOptions.showWalls;
-        }
-        if (isKeyPressed(SDL_SCANCODE_C))
-        {
-            mapRenderOptions.showCeilings = !mapRenderOptions.showCeilings;
-        }
-        if (isKeyPressed(SDL_SCANCODE_P))
-        {
-            mapRenderOptions.showPortals = !mapRenderOptions.showPortals;
-        }
-        if (isKeyPressed(SDL_SCANCODE_L))
-        {
-            mapRenderOptions.showLights = !mapRenderOptions.showLights;
-        }
-        if (isKeyPressed(SDL_SCANCODE_G))
-        {
-            showGrid = !showGrid;
-        }
-        if (isKeyPressed(SDL_SCANCODE_X))
-        {
-            showAxes = !showAxes;
-        }
-        if (isKeyPressed(SDL_SCANCODE_H))
-        {
-            showHelpOverlay = !showHelpOverlay;
-        }
-        if (isKeyPressed(SDL_SCANCODE_R))
-        {
-            configureCameraForMap();
-        }
-        break;
     }
 
     commitKeyboardState();
-}
-
-void Application::renderIntroVideo()
-{
-    if (!videoPlayer || !renderer)
-    {
-        return;
-    }
-
-    SDL_Renderer* sdlRenderer = renderer->getSDLRenderer();
-    if (!sdlRenderer)
-    {
-        return;
-    }
-
-    if (viewportWidth <= 0 || viewportHeight <= 0)
-    {
-        return;
-    }
-
-    videoPlayer->render(sdlRenderer, debugText.get(), viewportWidth, viewportHeight);
-}
-
-
-
-void Application::renderTitleScreen()
-{
-    if (!renderer)
-    {
-        return;
-    }
-
-    if (titleBackground)
-    {
-        renderFullscreenTexture(titleBackground, titleBackgroundWidth, titleBackgroundHeight);
-    }
-
-    if (!debugText || !renderer->getSDLRenderer())
-    {
-        return;
-    }
-
-    // Render hover textures for buttons
-    for (const auto& button : titleMenuUI.buttons)
-    {
-        if (button.isHovered && button.hoverTexture)
-        {
-            renderer->renderTexture(button.hoverTexture, button.bounds.x, button.bounds.y,
-                                    button.bounds.width, button.bounds.height);
-        }
-    }
-
-    // Render any state message
-    if (!stateMessage.empty())
-    {
-        int scale = 2;
-        int x = 40;
-        int y = viewportHeight > 0 ? viewportHeight - 60 : 520;
-        debugText->drawText(renderer->getSDLRenderer(), x, y, scale, 255, 220, 80, stateMessage);
-    }
-}
-
-void Application::renderCharacterCreation()
-{
-    if (!renderer)
-    {
-        return;
-    }
-
-    if (createBackground)
-    {
-        renderFullscreenTexture(createBackground, createBackgroundWidth, createBackgroundHeight);
-    }
-    else if (titleBackground)
-    {
-        renderFullscreenTexture(titleBackground, titleBackgroundWidth, titleBackgroundHeight);
-    }
-
-    if (!debugText || !renderer->getSDLRenderer())
-    {
-        return;
-    }
-
-    SDL_Renderer* sdlRenderer = renderer->getSDLRenderer();
-    SDL_SetRenderDrawBlendMode(sdlRenderer, SDL_BLENDMODE_BLEND);
-
-    // Compute text scale from viewport
-    float gameScale = std::min(
-        static_cast<float>(viewportWidth) / static_cast<float>(kGameWidth),
-        static_cast<float>(viewportHeight) / static_cast<float>(kGameHeight));
-    int textScale = std::max(1, static_cast<int>(gameScale));
-
-    // 4-column layout (game coords)
-    constexpr int colX[] = {10, 168, 326, 484};
-    constexpr int colWidth = 155;
-
-    for (int c = 0; c < 4; c++)
-    {
-        const Character& ch = party[c];
-        bool isActive = (c == activeCharacterIndex);
-
-        int sx = scaleX(colX[c]);
-
-        // Highlight active column
-        if (isActive)
-        {
-            SDL_FRect highlight = {
-                static_cast<float>(sx),
-                static_cast<float>(scaleY(30)),
-                static_cast<float>(scaleW(colWidth)),
-                static_cast<float>(scaleH(420)),
-            };
-            SDL_SetRenderDrawColor(sdlRenderer, 255, 255, 100, 30);
-            SDL_RenderFillRect(sdlRenderer, &highlight);
-        }
-
-        // Portrait
-        int portraitY = scaleY(35);
-        if (ch.faceId >= 0 && ch.faceId < kPortraitCount && portraitTextures[ch.faceId])
-        {
-            int pw = scaleW(std::min(portraitWidths[ch.faceId], colWidth - 10));
-            int ph = scaleH(portraitHeights[ch.faceId]);
-            int px = sx + scaleW(colWidth / 2) - pw / 2;
-            renderer->renderTexture(portraitTextures[ch.faceId], px, portraitY, pw, ph);
-        }
-        else
-        {
-            debugText->drawText(sdlRenderer, sx + scaleW(20), portraitY + scaleH(30),
-                                textScale, 100, 100, 100,
-                                std::format("[Face {}]", ch.faceId + 1));
-        }
-
-        // Face navigation arrows (active character, FACE row selected)
-        if (isActive && characterMenuIndex == 1)
-        {
-            debugText->drawText(sdlRenderer, sx, portraitY, textScale, 255, 255, 0, "<");
-            debugText->drawText(sdlRenderer, sx + scaleW(colWidth - 12), portraitY,
-                                textScale, 255, 255, 0, ">");
-        }
-
-        // Name
-        int nameY = scaleY(130);
-        uint8_t nr = 200, ng = 200, nb = 200;
-        if (isActive && characterMenuIndex == 0)
-        {
-            nr = 255; ng = 255; nb = 0;
-        }
-        std::string nameStr = ch.name;
-        if (isActive && isNaming) nameStr += "_";
-        debugText->drawText(sdlRenderer, sx, nameY, textScale, nr, ng, nb, nameStr);
-
-        // Race + Gender
-        Race race = raceFromFace(ch.faceId);
-        Gender gender = genderFromFace(ch.faceId);
-        std::string raceGender = kRaceNames[static_cast<int>(race)] + " " +
-                                 kGenderNames[static_cast<int>(gender)];
-        debugText->drawText(sdlRenderer, sx, scaleY(148), textScale, 180, 180, 180, raceGender);
-
-        // Class
-        uint8_t cr = 200, cg = 200, cb = 200;
-        if (isActive && characterMenuIndex == 2)
-        {
-            cr = 255; cg = 255; cb = 0;
-        }
-        std::string classStr = kClassNames[static_cast<int>(ch.charClass)];
-        if (isActive && characterMenuIndex == 2) classStr = "< " + classStr + " >";
-        debugText->drawText(sdlRenderer, sx, scaleY(166), textScale, cr, cg, cb, classStr);
-
-        // Stats
-        for (int s = 0; s < 7; s++)
-        {
-            int statY = scaleY(195 + s * 18);
-            uint8_t sr = 180, sg = 180, sb = 180;
-            if (isActive && characterMenuIndex == 3 + s)
-            {
-                sr = 255; sg = 255; sb = 0;
-            }
-
-            std::string marker = (isActive && characterMenuIndex == 3 + s) ? "> " : "  ";
-            std::string statLine = std::format("{}{}:{}", marker, kStatNames[s].substr(0, 3),
-                                               ch.stats.byIndex(s));
-            debugText->drawText(sdlRenderer, sx, statY, textScale, sr, sg, sb, statLine);
-        }
-
-        // Skills
-        int skillY = scaleY(325);
-        for (const auto& skill : ch.skills)
-        {
-            debugText->drawText(sdlRenderer, sx, skillY, textScale, 150, 200, 150, skill);
-            skillY += debugText->lineHeight(textScale);
-        }
-    }
-
-    // Bottom controls
-    int bonusPoints = calculateBonusPointsRemaining();
-    uint8_t bonusR = bonusPoints > 0 ? 255 : 100;
-    uint8_t bonusG = bonusPoints > 0 ? 230 : 255;
-    uint8_t bonusB = 150;
-    debugText->drawText(sdlRenderer, scaleX(20), scaleY(440), textScale,
-                        bonusR, bonusG, bonusB,
-                        std::format("BONUS: {}", bonusPoints));
-
-    debugText->drawText(sdlRenderer, scaleX(560), scaleY(440), textScale,
-                        200, 255, 200, "OK");
-
-    debugText->drawText(sdlRenderer, scaleX(490), scaleY(440), textScale,
-                        255, 200, 200, "CLEAR");
-
-    // Help text
-    debugText->drawText(sdlRenderer, scaleX(20), scaleY(460),
-                        std::max(1, textScale - 1), 150, 150, 150,
-                        "1-4:Select  Arrows:Navigate  Enter:Edit name  ESC:Back");
-}
-
-void Application::renderLoadingScreen()
-{
-    if (!renderer)
-    {
-        return;
-    }
-
-    if (!loadingFrames.empty())
-    {
-        size_t frameIndex = 0;
-        if (loadProgressActive.load() && loadingFrames.size() > 1)
-        {
-            float progress = std::clamp(loadProgress.load(), 0.0f, 1.0f);
-            frameIndex =
-                static_cast<size_t>(progress * static_cast<float>(loadingFrames.size() - 1));
-        }
-        else if (loadingFrameDurationMs > 0)
-        {
-            uint64_t now = SDL_GetTicks();
-            frameIndex = static_cast<size_t>((now - stateStartTicks) / loadingFrameDurationMs) %
-                         loadingFrames.size();
-        }
-        renderFullscreenTexture(loadingFrames[frameIndex], loadingFrameWidths[frameIndex],
-                                loadingFrameHeights[frameIndex]);
-    }
-    else if (loadingBackground)
-    {
-        renderFullscreenTexture(loadingBackground, loadingBackgroundWidth, loadingBackgroundHeight);
-    }
-    else if (titleBackground)
-    {
-        renderFullscreenTexture(titleBackground, titleBackgroundWidth, titleBackgroundHeight);
-    }
-
-    if (!debugText || !renderer->getSDLRenderer())
-    {
-        return;
-    }
-
-    SDL_Renderer* sdlRenderer = renderer->getSDLRenderer();
-    SDL_SetRenderDrawBlendMode(sdlRenderer, SDL_BLENDMODE_BLEND);
-
-    std::string line = "LOADING...";
-    if (!startupMapName.empty())
-    {
-        line = "LOADING " + toUpper(startupMapName);
-    }
-    int percent = static_cast<int>(std::clamp(loadProgress.load(), 0.0f, 1.0f) * 100.0f + 0.5f);
-    line += " " + std::to_string(percent) + "%";
-
-    int scale = 2;
-    int x = 40;
-    int y = viewportHeight > 0 ? viewportHeight - 60 : 520;
-    debugText->drawText(sdlRenderer, x, y, scale, 255, 255, 255, line);
-
-    int barWidth = 240;
-    int barHeight = 10;
-    int barY = y + debugText->lineHeight(scale) + 6;
-    SDL_FRect bg = {static_cast<float>(x), static_cast<float>(barY), static_cast<float>(barWidth),
-                    static_cast<float>(barHeight)};
-    SDL_SetRenderDrawColor(sdlRenderer, 20, 20, 20, 200);
-    SDL_RenderFillRect(sdlRenderer, &bg);
-
-    float fill = std::clamp(loadProgress.load(), 0.0f, 1.0f);
-    SDL_FRect fg = {static_cast<float>(x) + 1.0f, static_cast<float>(barY) + 1.0f,
-                    static_cast<float>((barWidth - 2) * fill), static_cast<float>(barHeight - 2)};
-    SDL_SetRenderDrawColor(sdlRenderer, 230, 200, 120, 220);
-    SDL_RenderFillRect(sdlRenderer, &fg);
-}
-
-void Application::renderOverlay()
-{
-    if (!debugText || !renderer || !renderer->getSDLRenderer())
-    {
-        return;
-    }
-
-    SDL_Renderer* sdlRenderer = renderer->getSDLRenderer();
-    SDL_SetRenderDrawBlendMode(sdlRenderer, SDL_BLENDMODE_BLEND);
-
-    std::vector<std::string> lines;
-
-    switch (gameState)
-    {
-    case GameState::InGame:
-        if (!showHelpOverlay)
-        {
-            return;
-        }
-        if (mapScene && mapScene->isLoaded())
-        {
-            if (mapScene->getODMData().heightmap.empty())
-            {
-                const auto& data = mapScene->getBLVData();
-                lines.push_back("MAP: " + toUpper(mapScene->getName()));
-                lines.push_back(std::format("VERTS: {}  FACES: {}  LIGHTS: {}",
-                                            data.vertices.size(), data.faces.size(),
-                                            data.lights.size()));
-            }
-            else
-            {
-                const auto& data = mapScene->getODMData();
-                lines.push_back("MAP: " + toUpper(mapScene->getName()));
-                lines.push_back(
-                    std::format("TERRAIN: {}x{}  BUILDINGS: {}",
-                                data.heightmap.size() > 0 ? formats::ODMMapData::TERRAIN_SIZE : 0,
-                                data.heightmap.size() > 0 ? formats::ODMMapData::TERRAIN_SIZE : 0,
-                                data.buildings.size()));
-            }
-        }
-        else
-        {
-            lines.push_back("MAP: (NONE)");
-        }
-
-        lines.push_back("ARROWS ORBIT  Q/E ZOOM  WASD PAN  R RESET");
-        lines.push_back(
-            std::format("F FLOORS:{}  V WALLS:{}  C CEIL:{}  P PORTAL:{}",
-                        onOff(mapRenderOptions.showFloors), onOff(mapRenderOptions.showWalls),
-                        onOff(mapRenderOptions.showCeilings), onOff(mapRenderOptions.showPortals)));
-        lines.push_back(std::format("L LIGHTS:{}  G GRID:{}  X AXES:{}  H HELP:{}",
-                                    onOff(mapRenderOptions.showLights), onOff(showGrid),
-                                    onOff(showAxes), onOff(showHelpOverlay)));
-        break;
-    default:
-        return;
-    }
-
-    if (lines.empty())
-    {
-        return;
-    }
-
-    const int scale = 2;
-    int maxLen = 0;
-    for (const auto& line : lines)
-    {
-        maxLen = std::max(maxLen, static_cast<int>(line.size()));
-    }
-
-    const int padding = 8;
-    int boxWidth = debugText->charWidth(scale) * maxLen + padding * 2;
-    int boxHeight = debugText->lineHeight(scale) * static_cast<int>(lines.size()) + padding * 2;
-
-    SDL_FRect panel = {10.0f, 10.0f, static_cast<float>(boxWidth), static_cast<float>(boxHeight)};
-    SDL_SetRenderDrawColor(sdlRenderer, 0, 0, 0, 180);
-    SDL_RenderFillRect(sdlRenderer, &panel);
-
-    int cursorY = static_cast<int>(panel.y) + padding;
-    for (const auto& line : lines)
-    {
-        debugText->drawText(sdlRenderer, static_cast<int>(panel.x) + padding, cursorY, scale, 230,
-                            230, 230, line);
-        cursorY += debugText->lineHeight(scale);
-    }
 }
 
 void Application::buildIntroPlaylist()
@@ -1682,8 +1065,39 @@ bool Application::loadUiAssets()
             "pc" + num + "01",
             "pc" + num + "-01",
         };
-        loadPcxTexture(portraitCandidates, std::format("Portrait {}", i + 1),
-                       portraitTextures[i], portraitWidths[i], portraitHeights[i]);
+        loadPcxTexture(portraitCandidates, std::format("Portrait {}", i + 1), portraitTextures[i],
+                       portraitWidths[i], portraitHeights[i]);
+    }
+
+    // Wire textures to state objects
+    if (titleState)
+    {
+        titleState->setBackground(titleBackground, titleBackgroundWidth, titleBackgroundHeight);
+        for (int i = 0; i < kTitleButtonCount; i++)
+        {
+            titleState->setButtonTextures(i, titleButtonHoverTextures[i], titleButtonHoverWidths[i],
+                                          titleButtonHoverHeights[i]);
+        }
+    }
+    if (charCreationState)
+    {
+        charCreationState->setBackground(createBackground, createBackgroundWidth,
+                                         createBackgroundHeight);
+        charCreationState->setFallbackBackground(titleBackground, titleBackgroundWidth,
+                                                 titleBackgroundHeight);
+        for (int i = 0; i < kPortraitCount; i++)
+        {
+            charCreationState->setPortraitTexture(i, portraitTextures[i], portraitWidths[i],
+                                                  portraitHeights[i]);
+        }
+    }
+    if (loadingState)
+    {
+        loadingState->setBackground(loadingBackground, loadingBackgroundWidth,
+                                    loadingBackgroundHeight);
+        loadingState->setFallbackBackground(titleBackground, titleBackgroundWidth,
+                                            titleBackgroundHeight);
+        loadingState->setAnimationFrames(&loadingFrames, &loadingFrameWidths, &loadingFrameHeights);
     }
 
     uiAssetsLoaded = true;
@@ -1780,16 +1194,15 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
                         textureHandle = tex;
                         width = static_cast<int>(pcx->width);
                         height = static_cast<int>(pcx->height);
-                        logger.info(std::format("Loaded UI texture '{}': {} ({}x{})", label,
-                                                name, width, height));
+                        logger.info(std::format("Loaded UI texture '{}': {} ({}x{})", label, name,
+                                                width, height));
                         return true;
                     }
                 }
             }
             catch (const std::exception& ex)
             {
-                logger.warning(
-                    std::format("Failed to convert PCX '{}': {}", name, ex.what()));
+                logger.warning(std::format("Failed to convert PCX '{}': {}", name, ex.what()));
             }
             continue;
         }
@@ -1808,7 +1221,8 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
         auto& frame = sprite.frames[0];
         try
         {
-            auto image = graphics::Image::fromPalettedData(frame.data, frame.width, frame.height, sprite.palette);
+            auto image = graphics::Image::fromPalettedData(frame.data, frame.width, frame.height,
+                                                           sprite.palette);
             if (image)
             {
                 void* tex = renderer->createTexture(*image);
@@ -1865,8 +1279,8 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
         }
         if (!palData.has_value())
         {
-            logger.warning(std::format("No palette found for '{}' (paletteId={})", name,
-                                        imgInfo->paletteId));
+            logger.warning(
+                std::format("No palette found for '{}' (paletteId={})", name, imgInfo->paletteId));
             continue;
         }
 
@@ -1876,8 +1290,8 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
             // Index 0 is transparent
             palette.setColor(0, graphics::Palette::Color(0, 0, 0, 0));
 
-            auto image = graphics::Image::fromPalettedData(
-                *pixelData, imgInfo->width, imgInfo->height, palette);
+            auto image = graphics::Image::fromPalettedData(*pixelData, imgInfo->width,
+                                                           imgInfo->height, palette);
             if (image)
             {
                 void* tex = renderer->createTexture(*image);
@@ -1887,8 +1301,8 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
                     textureHandle = tex;
                     width = static_cast<int>(imgInfo->width);
                     height = static_cast<int>(imgInfo->height);
-                    logger.info(std::format("Loaded UI texture '{}' as paletted: {} ({}x{})",
-                                            label, name, width, height));
+                    logger.info(std::format("Loaded UI texture '{}' as paletted: {} ({}x{})", label,
+                                            name, width, height));
                     return true;
                 }
             }
@@ -2038,64 +1452,6 @@ bool Application::loadPcxSequence(const std::string& prefix, std::vector<void*>&
     return !textures.empty();
 }
 
-void Application::renderFullscreenTexture(void* textureHandle, int texWidth, int texHeight)
-{
-    if (!renderer || !textureHandle || texWidth <= 0 || texHeight <= 0 || viewportWidth <= 0 ||
-        viewportHeight <= 0)
-    {
-        return;
-    }
-
-    float scaleX = static_cast<float>(viewportWidth) / static_cast<float>(texWidth);
-    float scaleY = static_cast<float>(viewportHeight) / static_cast<float>(texHeight);
-    float scale = std::min(scaleX, scaleY);
-
-    int drawWidth = static_cast<int>(texWidth * scale);
-    int drawHeight = static_cast<int>(texHeight * scale);
-    int drawX = (viewportWidth - drawWidth) / 2;
-    int drawY = (viewportHeight - drawHeight) / 2;
-
-    renderer->renderTexture(textureHandle, drawX, drawY, drawWidth, drawHeight);
-}
-
-void Application::renderMenu(const std::vector<std::string>& items, int selectedIndex, int x, int y,
-                             int scale)
-{
-    if (!debugText || !renderer || !renderer->getSDLRenderer())
-    {
-        return;
-    }
-
-    SDL_Renderer* sdlRenderer = renderer->getSDLRenderer();
-    int cursorY = y;
-    int panelPadding = 6;
-    int panelWidth = 0;
-    int panelHeight = 0;
-
-    for (const auto& item : items)
-    {
-        panelWidth =
-            std::max(panelWidth, debugText->charWidth(scale) * static_cast<int>(item.size()));
-    }
-    panelHeight = debugText->lineHeight(scale) * static_cast<int>(items.size());
-
-    SDL_FRect panel = {static_cast<float>(x - panelPadding), static_cast<float>(y - panelPadding),
-                       static_cast<float>(panelWidth + panelPadding * 2),
-                       static_cast<float>(panelHeight + panelPadding * 2)};
-    SDL_SetRenderDrawColor(sdlRenderer, 10, 10, 10, 180);
-    SDL_RenderFillRect(sdlRenderer, &panel);
-
-    for (size_t i = 0; i < items.size(); i++)
-    {
-        bool selected = static_cast<int>(i) == selectedIndex;
-        uint8_t r = selected ? 255 : 210;
-        uint8_t g = selected ? 220 : 210;
-        uint8_t b = selected ? 130 : 210;
-        debugText->drawText(sdlRenderer, x, cursorY, scale, r, g, b, items[i]);
-        cursorY += debugText->lineHeight(scale);
-    }
-}
-
 void Application::updateLoadProgress(float value)
 {
     value = std::clamp(value, 0.0f, 1.0f);
@@ -2108,8 +1464,12 @@ void Application::updateLoadProgress(float value)
 
 void Application::startLoadingTask()
 {
+    logger.info(std::format("startLoadingTask: map='{}', preferOutdoor={}", startupMapName,
+                            startupPreferOutdoor));
+
     if (loadingTaskActive.load())
     {
+        logger.warning("startLoadingTask: already active, skipping");
         return;
     }
 
@@ -2165,20 +1525,26 @@ void Application::finalizeLoadingTask()
 
     if (success && loadedScene)
     {
+        logger.info("finalizeLoadingTask: success, transitioning to InGame");
         mapScene = std::move(loadedScene);
         mapLoaded = true;
         configureCameraForMap();
+        wireUpMapTextures();
         setGameState(GameState::InGame);
     }
     else
     {
-        stateMessage = error.empty() ? "Failed to load map" : error;
+        logger.error(std::format("finalizeLoadingTask: failed, error='{}', hasScene={}",
+                                 error, loadedScene != nullptr));
         setGameState(GameState::TitleScreen);
     }
 }
 
 void Application::runLoadingTask(LoadRequest request)
 {
+    logger.info(std::format("runLoadingTask: map='{}', preferOutdoor={}", request.mapName,
+                            request.preferOutdoor));
+
     std::unique_ptr<MapScene> scene;
     std::string error;
     bool loaded = false;
@@ -2243,6 +1609,8 @@ void Application::runLoadingTask(LoadRequest request)
     {
         updateLoadProgress(1.0f);
     }
+
+    logger.info(std::format("runLoadingTask: finished, loaded={}, error='{}'", loaded, error));
 
     {
         std::lock_guard<std::mutex> lock(loadingTaskMutex);
@@ -2387,110 +1755,6 @@ void Application::commitKeyboardState()
     }
 }
 
-bool Application::isKeyDown(SDL_Scancode code) const
-{
-    if (!keyState || code >= keyCount)
-    {
-        return false;
-    }
-    return keyState[code];
-}
-
-bool Application::isKeyPressed(SDL_Scancode code) const
-{
-    if (!keyState || code >= keyCount)
-    {
-        return false;
-    }
-    bool now = keyState[code];
-    bool before =
-        previousKeyState.empty() ? false : previousKeyState[static_cast<size_t>(code)] != 0;
-    return now && !before;
-}
-
-bool Application::isMouseOver(const graphics::Rect& rect) const
-{
-    auto mouseState = window.getMouseState();
-    return rect.contains(mouseState.x, mouseState.y);
-}
-
-bool Application::wasMouseClickedIn(const graphics::Rect& rect) const
-{
-    if (!window.wasMousePressed(platform::MouseButton::Left))
-    {
-        return false;
-    }
-
-    return isMouseOver(rect);
-}
-
-int Application::scaleX(int gameX) const
-{
-    float s = std::min(
-        static_cast<float>(viewportWidth) / static_cast<float>(kGameWidth),
-        static_cast<float>(viewportHeight) / static_cast<float>(kGameHeight));
-    float offsetX = (viewportWidth - kGameWidth * s) / 2.0f;
-    return static_cast<int>(offsetX + gameX * s);
-}
-
-int Application::scaleY(int gameY) const
-{
-    float s = std::min(
-        static_cast<float>(viewportWidth) / static_cast<float>(kGameWidth),
-        static_cast<float>(viewportHeight) / static_cast<float>(kGameHeight));
-    float offsetY = (viewportHeight - kGameHeight * s) / 2.0f;
-    return static_cast<int>(offsetY + gameY * s);
-}
-
-int Application::scaleW(int gameW) const
-{
-    float s = std::min(
-        static_cast<float>(viewportWidth) / static_cast<float>(kGameWidth),
-        static_cast<float>(viewportHeight) / static_cast<float>(kGameHeight));
-    return static_cast<int>(gameW * s);
-}
-
-int Application::scaleH(int gameH) const
-{
-    float s = std::min(
-        static_cast<float>(viewportWidth) / static_cast<float>(kGameWidth),
-        static_cast<float>(viewportHeight) / static_cast<float>(kGameHeight));
-    return static_cast<int>(gameH * s);
-}
-
-int Application::unscaleX(int screenX) const
-{
-    float s = std::min(
-        static_cast<float>(viewportWidth) / static_cast<float>(kGameWidth),
-        static_cast<float>(viewportHeight) / static_cast<float>(kGameHeight));
-    if (s <= 0.0f) return 0;
-    float offsetX = (viewportWidth - kGameWidth * s) / 2.0f;
-    return static_cast<int>((screenX - offsetX) / s);
-}
-
-int Application::unscaleY(int screenY) const
-{
-    float s = std::min(
-        static_cast<float>(viewportWidth) / static_cast<float>(kGameWidth),
-        static_cast<float>(viewportHeight) / static_cast<float>(kGameHeight));
-    if (s <= 0.0f) return 0;
-    float offsetY = (viewportHeight - kGameHeight * s) / 2.0f;
-    return static_cast<int>((screenY - offsetY) / s);
-}
-
-int Application::calculateBonusPointsRemaining() const
-{
-    int totalSpent = 0;
-    for (const auto& ch : party)
-    {
-        for (int i = 0; i < 7; i++)
-        {
-            totalSpent += ch.stats.byIndex(i) - ch.baseStats.byIndex(i);
-        }
-    }
-    return 50 - totalSpent;
-}
-
 void Application::initDefaultParty()
 {
     party.resize(4);
@@ -2539,54 +1803,6 @@ void Application::updateSkillsForClass(Character& ch)
     ch.skills.push_back(kClassStartingSkills[classIdx].skill2);
 }
 
-void Application::layoutTitleMenuButtons()
-{
-    if (viewportWidth == 0 || viewportHeight == 0)
-    {
-        return;
-    }
-    titleMenuUI.buttons.clear();
-
-    // MM7-accurate button positions (640x480 game coords)
-    constexpr int kButtonGameX = 495;
-    constexpr int kButtonGameY[] = {172, 227, 282, 337};
-
-    for (int i = 0; i < kTitleButtonCount; ++i)
-    {
-        // Use actual texture dimensions for hit area, with sensible defaults
-        int btnW = titleButtonHoverWidths[i] > 0 ? titleButtonHoverWidths[i] : 85;
-        int btnH = titleButtonHoverHeights[i] > 0 ? titleButtonHoverHeights[i] : 30;
-
-        MenuButton button;
-        button.id = kTitleMenuItems[static_cast<size_t>(i)];
-        button.bounds = {
-            scaleX(kButtonGameX),
-            scaleY(kButtonGameY[i]),
-            scaleW(btnW),
-            scaleH(btnH),
-        };
-        button.hoverTexture = titleButtonHoverTextures[i];
-        button.textureWidth = titleButtonHoverWidths[i];
-        button.textureHeight = titleButtonHoverHeights[i];
-        titleMenuUI.buttons.push_back(button);
-    }
-}
-
-void Application::updateTitleMenuHover()
-{
-    for (size_t i = 0; i < titleMenuUI.buttons.size(); ++i)
-    {
-        auto& button = titleMenuUI.buttons[i];
-        const bool mouseOver = isMouseOver(button.bounds);
-        if (mouseOver)
-        {
-            titleMenuIndex = static_cast<int>(i);
-            titleMenuUI.selectedIndex = titleMenuIndex;
-        }
-        button.isHovered = (mouseOver || (static_cast<int>(i) == titleMenuIndex));
-    }
-}
-
 void Application::shutdown()
 {
     logger.info("Shutting down...");
@@ -2596,6 +1812,7 @@ void Application::shutdown()
         loadingThread.join();
     }
 
+    clearMapTextureCache();
     unloadUiAssets();
     vfs->unmountAll();
     renderer.reset();

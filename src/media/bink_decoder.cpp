@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstring>
+
 #include "../util/fft.hpp"
 
 namespace runeharbor::media
@@ -82,8 +83,7 @@ static const uint64_t binkPatterns[64] = {
     0x07E007E007E007E0ULL, 0xE007E007E007E007ULL, 0x0707E0E00707E0E0ULL, 0xE0E00707E0E00707ULL,
     0x07E0E00707E0E007ULL, 0xE00707E0E00707E0ULL, 0x0F0F0F0F0F0F0F0FULL, 0xF0F0F0F0F0F0F0F0ULL,
     0x0F0F0F0F0F0F0F0FULL, 0xF0F0F0F0F0F0F0F0ULL, 0x0F0F0F0F0F0F0F0FULL, 0xF0F0F0F0F0F0F0F0ULL,
-    0x0F0F0F0F0F0F0F0FULL, 0xF0F0F0F0F0F0F0F0ULL, 0x0F0F0F0F0F0F0F0FULL, 0xF0F0F0F0F0F0F0F0ULL
-};
+    0x0F0F0F0F0F0F0F0FULL, 0xF0F0F0F0F0F0F0F0ULL, 0x0F0F0F0F0F0F0F0FULL, 0xF0F0F0F0F0F0F0F0ULL};
 
 // ============================================================================
 // BinkBitReader Implementation
@@ -124,14 +124,18 @@ bool BinkBitReader::peekBit(int offset)
 
 uint32_t BinkBitReader::readBits(int count)
 {
-    if (count <= 0) return 0;
-    if (bitPos_ + count > maxBits_) count = static_cast<int>(maxBits_ - bitPos_);
+    if (count <= 0)
+        return 0;
+    if (bitPos_ + count > maxBits_)
+        count = static_cast<int>(maxBits_ - bitPos_);
 
     uint32_t result = 0;
-    
+
     // Optimization: if we are byte aligned and reading multiple of 8 bits
-    if ((bitPos_ & 7) == 0 && (count & 7) == 0 && count <= 32) {
-        for (int i = 0; i < count; i += 8) {
+    if ((bitPos_ & 7) == 0 && (count & 7) == 0 && count <= 32)
+    {
+        for (int i = 0; i < count; i += 8)
+        {
             result |= (static_cast<uint32_t>(data_[bitPos_ / 8]) << i);
             bitPos_ += 8;
         }
@@ -184,7 +188,8 @@ bool BinkTree::build(BinkBitReader& bits, int /*maxDepth*/)
 {
     // Read tree index (4 bits)
     int treeIdx = static_cast<int>(bits.readBits(4));
-    if (treeIdx >= 16) return false;
+    if (treeIdx >= 16)
+        return false;
 
     // Initialize symbols in order
     uint8_t lens[MAX_SYMBOLS];
@@ -254,10 +259,11 @@ bool BinkTree::build(BinkBitReader& bits, int /*maxDepth*/)
     for (int i = 0; i < 256; i++)
     {
         lookup_[i].len = 0; // Not found
-        
+
         // Reverse bits of i to get Huffman-style code (MSB-first for canonical matching)
         uint16_t code = 0;
-        for (int b = 0; b < 8; b++) {
+        for (int b = 0; b < 8; b++)
+        {
             code = (code << 1) | ((i >> b) & 1);
         }
 
@@ -265,11 +271,14 @@ bool BinkTree::build(BinkBitReader& bits, int /*maxDepth*/)
         for (int l = 1; l <= 8; l++)
         {
             uint16_t currentCode = code >> (8 - l);
-            if (l < 16) {
+            if (l < 16)
+            {
                 uint16_t nextFirst = firstCode_[l + 1];
-                if (currentCode < nextFirst) {
+                if (currentCode < nextFirst)
+                {
                     int idx = firstSymbolIdx_[l] + (currentCode - firstCode_[l]);
-                    if (idx >= 0 && idx < MAX_SYMBOLS) {
+                    if (idx >= 0 && idx < MAX_SYMBOLS)
+                    {
                         lookup_[i].symbol = sortedSymbols_[idx];
                         lookup_[i].len = static_cast<uint8_t>(l);
                         break;
@@ -292,15 +301,20 @@ int BinkTree::decode(BinkBitReader& bits) const
     // Try 8-bit lookup first
     uint16_t peeked = 0;
     int peekLen = 0;
-    for (int i = 0; i < 8; i++) {
-        if (bits.peekBit(i)) peeked |= (1 << i);
+    for (int i = 0; i < 8; i++)
+    {
+        if (bits.peekBit(i))
+            peeked |= (1 << i);
         peekLen++;
-        if (bits.bitsRemaining() <= static_cast<size_t>(i + 1)) break;
+        if (bits.bitsRemaining() <= static_cast<size_t>(i + 1))
+            break;
     }
 
-    if (peekLen >= 8) {
+    if (peekLen >= 8)
+    {
         uint8_t byte = static_cast<uint8_t>(peeked & 0xFF);
-        if (lookup_[byte].len > 0 && lookup_[byte].len <= 8) {
+        if (lookup_[byte].len > 0 && lookup_[byte].len <= 8)
+        {
             bits.skipBits(lookup_[byte].len);
             return lookup_[byte].symbol;
         }
@@ -310,9 +324,10 @@ int BinkTree::decode(BinkBitReader& bits) const
     uint16_t code = 0;
     for (int len = 1; len <= 16; len++)
     {
-        if (bits.atEnd()) return 0;
+        if (bits.atEnd())
+            return 0;
         code = (code << 1) | (bits.readBit() ? 1 : 0);
-        
+
         if (len < 16)
         {
             uint16_t nextFirst = firstCode_[len + 1];
@@ -489,43 +504,45 @@ bool BinkDecoder::parseFrameIndex()
     size_t offset = headerSize;
 
     // Parse audio track info (if present)
-                // Bink audio track info: 12 bytes per track
-                //   - 4 bytes: max decoded size (unused)
-                //   - 4 bytes: sample rate (low 16) + flags (high 16)
-                //   - 4 bytes: unknown/reserved (skipped)
-                //
-                // Flags: 0x8000 = has audio, 0x2000 = stereo, 0x1000 = DCT, 0x4000 = 16-bit
-    
-                audioTracks_.resize(header_.audioTrackCount);
-    
-                if (header_.audioTrackCount > 0)
-                {
-                    size_t audioInfoSize = header_.audioTrackCount * 12; // Corrected to 12 bytes per track
-                    if (offset + audioInfoSize > data_.size())
-                    {
-                        return false;
-                    }
-    
-                    for (uint32_t t = 0; t < header_.audioTrackCount; t++)
-                    {
-                        // Skip max decoded size (4 bytes)
-                        offset += 4;
-    
-                        // Read 32-bit sample rate + embedded flags (4 bytes)
-                        uint32_t val;
-                        std::memcpy(&val, data_.data() + offset, 4);
-                        offset += 4;
-    
-                        // Skip additional 4 bytes (unknown/reserved)
-                        offset += 4;
-    
-                        uint32_t sampleRate = val; // Full 32-bit value is the sample rate
-                        // Flags are embedded in the higher bits of the 32-bit 'val'
-                        audioTracks_[t].sampleRate = sampleRate;
-                        audioTracks_[t].isDCT = (val & (0x1000 << 16)) != 0; // Check flag in higher 16 bits of val
-                        audioTracks_[t].channels = ((val & (0x2000 << 16)) ? 2 : 1); // Check flag in higher 16 bits of val
-                        audioTracks_[t].trackId = t;
-                    }
+    // Bink audio track info: 12 bytes per track
+    //   - 4 bytes: max decoded size (unused)
+    //   - 4 bytes: sample rate (low 16) + flags (high 16)
+    //   - 4 bytes: unknown/reserved (skipped)
+    //
+    // Flags: 0x8000 = has audio, 0x2000 = stereo, 0x1000 = DCT, 0x4000 = 16-bit
+
+    audioTracks_.resize(header_.audioTrackCount);
+
+    if (header_.audioTrackCount > 0)
+    {
+        size_t audioInfoSize = header_.audioTrackCount * 12; // Corrected to 12 bytes per track
+        if (offset + audioInfoSize > data_.size())
+        {
+            return false;
+        }
+
+        for (uint32_t t = 0; t < header_.audioTrackCount; t++)
+        {
+            // Skip max decoded size (4 bytes)
+            offset += 4;
+
+            // Read 32-bit sample rate + embedded flags (4 bytes)
+            uint32_t val;
+            std::memcpy(&val, data_.data() + offset, 4);
+            offset += 4;
+
+            // Skip additional 4 bytes (unknown/reserved)
+            offset += 4;
+
+            uint32_t sampleRate = val; // Full 32-bit value is the sample rate
+            // Flags are embedded in the higher bits of the 32-bit 'val'
+            audioTracks_[t].sampleRate = sampleRate;
+            audioTracks_[t].isDCT =
+                (val & (0x1000 << 16)) != 0; // Check flag in higher 16 bits of val
+            audioTracks_[t].channels =
+                ((val & (0x2000 << 16)) ? 2 : 1); // Check flag in higher 16 bits of val
+            audioTracks_[t].trackId = t;
+        }
         // Initialize audio frame size based on sample rate
         if (!audioTracks_.empty() && audioTracks_[0].sampleRate > 0)
         {
@@ -740,23 +757,20 @@ bool BinkDecoder::decodePlane(BinkBitReader& bits, uint8_t* plane, uint8_t* prev
         }
     }
 
-        int stride = static_cast<int>(width);
+    int stride = static_cast<int>(width);
 
-    
+    // Process 8x8 blocks
 
-        // Process 8x8 blocks
+    for (uint32_t by = 0; by < height; by += 8)
 
-        for (uint32_t by = 0; by < height; by += 8)
+    {
+
+        for (uint32_t bx = 0; bx < width; bx += 8)
 
         {
 
-            for (uint32_t bx = 0; bx < width; bx += 8)
+            uint8_t* dst = plane + by * width + bx;
 
-            {
-
-                uint8_t* dst = plane + by * width + bx;
-
-    
             const uint8_t* prevPtr = prev + by * width + bx;
 
             int blockType = bundles_[static_cast<int>(BinkBundleType::BlockTypes)].getValue();
@@ -885,7 +899,8 @@ void BinkDecoder::decodeBlockRun(uint8_t* dst, int stride, BinkBitReader& /*bits
     {
         int color = bundles_[static_cast<int>(BinkBundleType::Colors)].getValue();
         int run = bundles_[static_cast<int>(BinkBundleType::Run)].getValue();
-        if (run < 1) run = 1; // Safety against infinite loop
+        if (run < 1)
+            run = 1; // Safety against infinite loop
 
         // Apply run
         for (int i = 0; i < run && pos < 64; i++, pos++)
@@ -1056,7 +1071,8 @@ void BinkDecoder::decodeBlockResidue(uint8_t* dst, const uint8_t* prev, int stri
     for (int i = 0; i < 64; i++)
     {
         int residue = bundles_[static_cast<int>(BinkBundleType::Colors)].getValue();
-        if (residue >= 128) residue -= 256;
+        if (residue >= 128)
+            residue -= 256;
         int x = binkPatternScan[i] % 8;
         int y = binkPatternScan[i] / 8;
         int val = dst[y * stride + x] + residue;
@@ -1081,32 +1097,32 @@ void BinkDecoder::idct8x8(int* block)
 {
     // A more accurate integer-based IDCT implementation (approximate fixed-point)
     // Based on standard IDCT algorithms.
-    
+
     // Horizontal pass
     for (int i = 0; i < 8; i++)
     {
         int* b = block + i * 8;
-        
+
         int a0 = (b[0] + b[4]) << 11;
         int a1 = (b[0] - b[4]) << 11;
         int a2 = (b[2] * 15137 - b[6] * 6270);
         int a3 = (b[2] * 6270 + b[6] * 15137);
-        
+
         int t0 = a0 + a3;
         int t1 = a1 + a2;
         int t2 = a1 - a2;
         int t3 = a0 - a3;
-        
+
         int a4 = (b[1] * 21407 + b[7] * 4242);
         int a5 = (b[3] * 17523 + b[5] * 11585);
         int a6 = (b[3] * 11585 - b[5] * 17523);
         int a7 = (b[1] * 4242 - b[7] * 21407);
-        
+
         int t4 = a4 + a5;
         int t5 = a6 + a7;
         int t6 = a4 - a5;
         int t7 = a7 - a6;
-        
+
         b[0] = (t0 + t4) >> 11;
         b[1] = (t1 + t5) >> 11;
         b[2] = (t2 + t6) >> 11;
@@ -1116,7 +1132,7 @@ void BinkDecoder::idct8x8(int* block)
         b[6] = (t1 - t5) >> 11;
         b[7] = (t0 - t4) >> 11;
     }
-    
+
     // Vertical pass
     for (int i = 0; i < 8; i++)
     {
@@ -1124,22 +1140,22 @@ void BinkDecoder::idct8x8(int* block)
         int a1 = (block[i + 0] - block[i + 32]) << 11;
         int a2 = (block[i + 16] * 15137 - block[i + 48] * 6270);
         int a3 = (block[i + 16] * 6270 + block[i + 48] * 15137);
-        
+
         int t0 = a0 + a3;
         int t1 = a1 + a2;
         int t2 = a1 - a2;
         int t3 = a0 - a3;
-        
+
         int a4 = (block[i + 8] * 21407 + block[i + 56] * 4242);
         int a5 = (block[i + 24] * 17523 + block[i + 40] * 11585);
         int a6 = (block[i + 24] * 11585 - block[i + 40] * 17523);
         int a7 = (block[i + 8] * 4242 - block[i + 56] * 21407);
-        
+
         int t4 = a4 + a5;
         int t5 = a6 + a7;
         int t6 = a4 - a5;
         int t7 = a7 - a6;
-        
+
         block[i + 0] = (t0 + t4) >> 15;
         block[i + 8] = (t1 + t5) >> 15;
         block[i + 16] = (t2 + t6) >> 15;
@@ -1332,6 +1348,22 @@ static const uint16_t binkAudioBands[26] = {0,    100,  200,  300,  400,  510,  
                                             1080, 1270, 1480, 1720, 2000, 2320,  2700,  3150, 3700,
                                             4400, 5300, 6400, 7700, 9500, 12000, 15500, 24000};
 
+// Bink quantization table (96 entries, matching FFmpeg/RAD spec)
+// Formula: bink_quant[i] = exp(i * 0.15289164788) * 0.066399999708
+static float binkQuantTable[96] = {};
+static bool binkQuantInit = false;
+
+static void initBinkQuantTable()
+{
+    if (binkQuantInit)
+        return;
+    for (int i = 0; i < 96; i++)
+    {
+        binkQuantTable[i] = std::exp(static_cast<float>(i) * 0.15289164788f) * 0.066399999708f;
+    }
+    binkQuantInit = true;
+}
+
 // Window coefficients for overlap-add (generated from sine window)
 static float getWindow(size_t i, size_t n)
 {
@@ -1345,6 +1377,8 @@ bool BinkDecoder::decodeAudioTrack(BinkBitReader& bits, uint32_t track, BinkAudi
     {
         return false;
     }
+
+    initBinkQuantTable();
 
     const auto& trackInfo = audioTracks_[track];
     outAudio.sampleRate = trackInfo.sampleRate;
@@ -1379,14 +1413,21 @@ bool BinkDecoder::decodeAudioTrack(BinkBitReader& bits, uint32_t track, BinkAudi
         audioOverlap_.resize(overlapSize, 0.0f);
     }
 
-    // Calculate number of bands for this sample rate
-    size_t numBands = 1;
+    // Calculate band boundaries scaled to this sample rate
+    std::vector<size_t> bandBins;
+    bandBins.push_back(0);
     for (size_t i = 1; i < 26; i++)
     {
-        if (binkAudioBands[i] * halfFrameLen / 22050 >= halfFrameLen)
+        size_t bin = static_cast<size_t>(binkAudioBands[i]) * halfFrameLen / 22050;
+        if (bin >= halfFrameLen)
+        {
+            bin = halfFrameLen;
+            bandBins.push_back(bin);
             break;
-        numBands = i;
+        }
+        bandBins.push_back(bin);
     }
+    size_t numBands = bandBins.size() - 1;
 
     // Allocate output and working buffers
     outAudio.samples.resize(sampleCount * trackInfo.channels);
@@ -1412,72 +1453,64 @@ bool BinkDecoder::decodeAudioTrack(BinkBitReader& bits, uint32_t track, BinkAudi
             // Clear coefficients
             std::fill(coeffs.begin(), coeffs.end(), 0.0f);
 
-            // Read quantizers for each band
-            std::vector<float> quant(numBands);
-            for (size_t i = 0; i < numBands; i++)
+            // Read coded flag: 1 bit indicating if this block has coded audio
+            bool coded = bits.readBit();
+            if (!coded)
             {
-                // Read 8-bit quantizer value
-                uint32_t q = bits.readBits(8);
-                // Convert to floating point scale factor
-                // Quantizer is stored as power-of-2 exponent
-                if (q > 0)
+                // All-zero block, skip to overlap-add with zeros
+                goto apply_transform;
+            }
+
+            {
+                // Read quantizer for each band (8-bit index into quant table)
+                std::vector<float> quant(numBands);
+                for (size_t i = 0; i < numBands; i++)
                 {
-                    quant[i] = std::pow(2.0f, static_cast<float>(q) - 127.0f);
+                    uint32_t q = bits.readBits(8);
+                    if (q < 96)
+                    {
+                        quant[i] = binkQuantTable[q];
+                    }
+                    else
+                    {
+                        // Clamp to max table entry
+                        quant[i] = binkQuantTable[95];
+                    }
                 }
-                else
+
+                // Read coefficients per-bin for each band
+                for (size_t band = 0; band < numBands; band++)
                 {
-                    quant[i] = 0.0f;
+                    size_t startBin = bandBins[band];
+                    size_t endBin = bandBins[band + 1];
+
+                    for (size_t bin = startBin; bin < endBin; bin++)
+                    {
+                        if (bits.atEnd())
+                            break;
+
+                        if (quant[band] == 0.0f)
+                        {
+                            coeffs[bin] = 0.0f;
+                            continue;
+                        }
+
+                        // Read 1 bit: non-zero flag
+                        if (bits.readBit())
+                        {
+                            // Non-zero coefficient: read sign bit
+                            bool negative = bits.readBit();
+                            coeffs[bin] = negative ? -quant[band] : quant[band];
+                        }
+                        else
+                        {
+                            coeffs[bin] = 0.0f;
+                        }
+                    }
                 }
             }
 
-            // Read coefficients for each band
-            for (size_t band = 0; band < numBands; band++)
-            {
-                size_t startBin = binkAudioBands[band] * halfFrameLen / 22050;
-                size_t endBin = binkAudioBands[band + 1] * halfFrameLen / 22050;
-
-                if (startBin >= halfFrameLen)
-                    break;
-                if (endBin > halfFrameLen)
-                    endBin = halfFrameLen;
-
-                for (size_t bin = startBin; bin < endBin; bin++)
-                {
-                    if (bits.atEnd())
-                        break;
-
-                    // Read coefficient: 1 bit sign, variable bits value
-                    if (quant[band] == 0.0f)
-                    {
-                        coeffs[bin] = 0.0f;
-                        continue;
-                    }
-
-                    // Simple coefficient reading
-                    // Read run of zeros first
-                    uint32_t zeros = 0;
-                    while (!bits.atEnd() && !bits.readBit())
-                    {
-                        zeros++;
-                        if (zeros > 100)
-                            break;
-                    }
-
-                    if (zeros > 0)
-                    {
-                        // Skip zero coefficients
-                        bin += zeros - 1;
-                        if (bin >= endBin)
-                            break;
-                    }
-
-                    // Read coefficient value
-                    int sign = bits.readBit() ? -1 : 1;
-                    float value = quant[band] * static_cast<float>(sign);
-                    coeffs[bin] = value;
-                }
-            }
-
+        apply_transform:
             // Apply inverse transform
             if (trackInfo.isDCT)
             {
@@ -1502,10 +1535,7 @@ bool BinkDecoder::decodeAudioTrack(BinkBitReader& bits, uint32_t track, BinkAudi
 
                 // Store output (convert to 16-bit)
                 float scaled = sample * 32767.0f;
-                if (scaled > 32767.0f)
-                    scaled = 32767.0f;
-                if (scaled < -32768.0f)
-                    scaled = -32768.0f;
+                scaled = std::clamp(scaled, -32768.0f, 32767.0f);
 
                 size_t idx = outPos + i * trackInfo.channels + ch;
                 if (idx < outAudio.samples.size())

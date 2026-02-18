@@ -1,11 +1,10 @@
-#include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
-#include "autonote_parser.hpp"
-
+#include "../util/string_utils.hpp"
 #include <algorithm>
 #include <format>
 #include <sstream> // For std::istringstream and std::getline
 
+#include "autonote_parser.hpp"
 
 namespace runeharbor::formats
 {
@@ -36,11 +35,11 @@ bool AutonoteParser::parse(const std::vector<uint8_t>& data)
     const std::string expected_header = "Note bit	Autonote Text	Category";
     if (util::trim(line) != expected_header)
     {
-        logger.error(std::format("Malformed header: Expected '{}', got '{}'", expected_header, util::trim(line)));
+        logger.error(std::format("Malformed header: Expected '{}', got '{}'", expected_header,
+                                 util::trim(line)));
         return false;
     }
     logger.debug(std::format("Skipping header: {}", line));
-
 
     // Process data lines
     while (std::getline(iss, line))
@@ -52,12 +51,14 @@ bool AutonoteParser::parse(const std::vector<uint8_t>& data)
         }
 
         AutonoteEntry entry;
-        std::vector<std::string> fields = util::splitString(line, '	', '"'); // Split by tab, handle quotes
+        std::vector<std::string> fields =
+            util::splitString(line, '	', '"'); // Split by tab, handle quotes
 
         // We expect at least 3 fields. More fields will be ignored.
         if (fields.size() < 3)
         {
-            logger.warning(std::format("Skipping malformed Autonote line (too few fields): {}", line));
+            logger.warning(
+                std::format("Skipping malformed Autonote line (too few fields): {}", line));
             continue;
         }
 
@@ -66,17 +67,20 @@ bool AutonoteParser::parse(const std::vector<uint8_t>& data)
             size_t fieldIndex = 0;
 
             // 1. Note bit
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty()) entry.noteBit = std::stoi(util::trim(fields[fieldIndex]));
+            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+                entry.noteBit = std::stoi(util::trim(fields[fieldIndex]));
             fieldIndex++;
 
             // 2. Autonote Text
-            if (fieldIndex < fields.size()) entry.autonoteText = util::trim(fields[fieldIndex]);
+            if (fieldIndex < fields.size())
+                entry.autonoteText = util::trim(fields[fieldIndex]);
             fieldIndex++;
 
             // 3. Category
-            if (fieldIndex < fields.size()) entry.category = util::trim(fields[fieldIndex]);
+            if (fieldIndex < fields.size())
+                entry.category = util::trim(fields[fieldIndex]);
             fieldIndex++;
-            
+
             entries.push_back(entry);
         }
         catch (const std::exception& e)

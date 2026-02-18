@@ -3,7 +3,7 @@
 
 #include "../../src/formats/awards_parser.hpp"
 #include "../../src/util/console_logger.hpp"
-#include "../../src/util/string_utils.hpp" 
+#include "../../src/util/string_utils.hpp"
 
 TEST_CASE("AwardsParser parsing AWARDS.TXT", "[awards_parser]")
 {
@@ -19,7 +19,7 @@ TEST_CASE("AwardsParser parsing AWARDS.TXT", "[awards_parser]")
 80	Retrieved Soul Jars	2	Used on two sides
 103	ArcoMage wins: %lu	1
 )";
-    
+
     std::vector<uint8_t> data(sample_data.begin(), sample_data.end());
 
     SECTION("Parser successfully parses sample data")
@@ -61,7 +61,8 @@ TEST_CASE("AwardsParser parsing AWARDS.TXT", "[awards_parser]")
         std::string malformed_header_data = R"(A Bit	Awards_WRONG	Sort	Notes
 1	Award Text	1	Note
 )";
-        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(), malformed_header_data.end());
+        std::vector<uint8_t> malformed_vec(malformed_header_data.begin(),
+                                           malformed_header_data.end());
         REQUIRE_FALSE(parser.parse(malformed_vec));
         REQUIRE(parser.getAwards().empty());
     }

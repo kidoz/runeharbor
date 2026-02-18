@@ -19,7 +19,7 @@ class DebugText;
 namespace runeharbor::media
 {
 
-class VIDArchive;
+class VidArchive;
 class SmackerDecoder;
 class BinkDecoder;
 struct BinkFrame;
@@ -83,7 +83,7 @@ class VideoPlayer
 
   private:
     // Archives
-    std::vector<std::unique_ptr<VIDArchive>> archives_;
+    std::vector<std::unique_ptr<VidArchive>> archives_;
 
     // Current decoder
     std::unique_ptr<SmackerDecoder> smackerDecoder_;
@@ -128,7 +128,7 @@ class VideoPlayer
     void renderPlaceholder(SDL_Renderer* renderer, graphics::DebugText* debugText, int width,
                            int height);
     void destroyTexture();
-    VIDArchive* findArchiveWithClip(const std::string& name);
+    VidArchive* findArchiveWithClip(const std::string& name);
     void setupAudioStream();
     void closeAudioStream();
     void queueAudioForCurrentFrame();

@@ -46,14 +46,12 @@ test_sources = files(
     'formats/awards_parser_test.cpp',
     'formats/hostile_parser_test.cpp',
     'formats/npctext_parser_test.cpp',
-    'formats/npcnamess_parser_test.cpp',
+    'formats/npcnames_parser_test.cpp',
     'formats/autonote_parser_test.cpp',
     'formats/credits_parser_test.cpp',
     'media/smacker_decoder_test.cpp',
     'media/bink_decoder_test.cpp',
-    # Note: application_test.cpp temporarily disabled due to SIGBUS issue
-    # TODO: Debug and re-enable
-    # 'engine/application_test.cpp',
+    'engine/application_test.cpp',
 )
 
 # Reuse source files from main build (without main.cpp)
@@ -71,6 +69,8 @@ test_formats_sources = files(
     '../src/formats/sound_list.cpp',
     '../src/formats/pcx_image.cpp',
     '../src/formats/sprite_parser.cpp',
+    '../src/formats/sprite_lod_archive.cpp',
+    '../src/formats/face_geometry.cpp',
     '../src/formats/blv_map.cpp',
     '../src/formats/odm_map.cpp',
     '../src/formats/event_file_parser.cpp',
@@ -84,7 +84,7 @@ test_formats_sources = files(
     '../src/formats/awards_parser.cpp',
     '../src/formats/hostile_parser.cpp',
     '../src/formats/npctext_parser.cpp',
-    '../src/formats/npcnamess_parser.cpp',
+    '../src/formats/npcnames_parser.cpp',
     '../src/formats/autonote_parser.cpp',
     '../src/formats/credits_parser.cpp',
 )
@@ -93,11 +93,17 @@ test_graphics_sources = files(
     '../src/graphics/camera.cpp',
     '../src/graphics/debug_text.cpp',
     '../src/graphics/image.cpp',
+    '../src/graphics/image_loader.cpp',
     '../src/graphics/line_renderer.cpp',
     '../src/graphics/palette.cpp',
     '../src/graphics/sdl_renderer.cpp',
+    '../src/graphics/sprite_decoder.cpp',
+    '../src/graphics/sprite_loader.cpp',
+    '../src/graphics/texture_manager.cpp',
     '../src/graphics/world_renderer.cpp',
     '../src/graphics/indoor_renderer.cpp',
+    '../src/graphics/outdoor_renderer.cpp',
+    '../src/graphics/visibility.cpp',
 )
 
 test_media_sources = files(
@@ -108,10 +114,41 @@ test_media_sources = files(
     '../src/media/smacker_decoder.cpp',
 )
 
+test_audio_sources = files(
+    '../src/audio/audio_system.cpp',
+)
+
+test_game_sources = files(
+    '../src/game/character.cpp',
+    '../src/game/party.cpp',
+    '../src/game/game_world.cpp',
+    '../src/game/event_engine.cpp',
+    '../src/game/inventory.cpp',
+    '../src/game/combat.cpp',
+    '../src/game/spells.cpp',
+    '../src/game/quest_log.cpp',
+    '../src/game/save_game.cpp',
+)
+
+test_ui_sources = files(
+    '../src/ui/layout.cpp',
+    '../src/ui/widget.cpp',
+    '../src/ui/widgets.cpp',
+    '../src/ui/ui_manager.cpp',
+    '../src/ui/hud.cpp',
+    '../src/ui/dialogue.cpp',
+)
+
 test_engine_sources = files(
     '../src/engine/application.cpp',
     '../src/engine/virtual_filesystem.cpp',
     '../src/engine/map_scene.cpp',
+    '../src/engine/states/state_context.cpp',
+    '../src/engine/states/intro_state.cpp',
+    '../src/engine/states/title_state.cpp',
+    '../src/engine/states/character_creation_state.cpp',
+    '../src/engine/states/loading_state.cpp',
+    '../src/engine/states/ingame_state.cpp',
 )
 
 # Note: We don't include sdl_window.cpp in tests because it requires SDL
@@ -137,6 +174,9 @@ test_exe = executable(
         test_formats_sources,
         test_graphics_sources,
         test_media_sources,
+        test_audio_sources,
+        test_game_sources,
+        test_ui_sources,
         test_engine_sources,
     ],
     include_directories: inc_dirs,

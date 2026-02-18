@@ -1,6 +1,9 @@
+// SPDX-License-Identifier: MIT
 #include "sprite_loader.hpp"
-#include "sprite_decoder.hpp"
+
 #include <iostream>
+
+#include "sprite_decoder.hpp"
 
 namespace runeharbor::graphics
 {
