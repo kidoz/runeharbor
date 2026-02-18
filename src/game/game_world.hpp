@@ -11,33 +11,33 @@
 namespace runeharbor::game
 {
 
-// MM7 game calendar: 1 game minute = 2 real seconds at default speed
-// Time stored as total minutes since game start
+// MM7 game calendar: time stored as totalTicks (128 ticks per second)
 struct GameCalendar
 {
-    uint64_t totalMinutes = 0;
+    int64_t totalTicks = 0;
 
     // Starting date: 1st of January, year 1168 (MM7 default)
     static constexpr int kStartYear = 1168;
-    static constexpr int kMinutesPerHour = 60;
-    static constexpr int kHoursPerDay = 24;
+    static constexpr int64_t kTicksPerSecond = 128;
+    static constexpr int64_t kTicksPerMinute = 128 * 60;     // 7,680
+    static constexpr int64_t kTicksPerHour = 128 * 3600;     // 460,800
+    static constexpr int64_t kTicksPerDay = 128 * 86400;     // 11,059,200
     static constexpr int kDaysPerMonth = 28;
     static constexpr int kMonthsPerYear = 12;
-    static constexpr int kMinutesPerDay = kMinutesPerHour * kHoursPerDay;
-    static constexpr int kMinutesPerMonth = kMinutesPerDay * kDaysPerMonth;
-    static constexpr int kMinutesPerYear = kMinutesPerMonth * kMonthsPerYear;
+    static constexpr int64_t kTicksPerMonth = kTicksPerDay * kDaysPerMonth;
+    static constexpr int64_t kTicksPerYear = kTicksPerMonth * kMonthsPerYear;
 
-    int minute() const { return static_cast<int>(totalMinutes % kMinutesPerHour); }
-    int hour() const { return static_cast<int>((totalMinutes / kMinutesPerHour) % kHoursPerDay); }
+    int minute() const { return static_cast<int>((totalTicks / kTicksPerMinute) % 60); }
+    int hour() const { return static_cast<int>((totalTicks / kTicksPerHour) % 24); }
     int day() const
     {
-        return static_cast<int>((totalMinutes / kMinutesPerDay) % kDaysPerMonth) + 1;
+        return static_cast<int>((totalTicks / kTicksPerDay) % kDaysPerMonth) + 1;
     }
     int month() const
     {
-        return static_cast<int>((totalMinutes / kMinutesPerMonth) % kMonthsPerYear) + 1;
+        return static_cast<int>((totalTicks / kTicksPerMonth) % kMonthsPerYear) + 1;
     }
-    int year() const { return kStartYear + static_cast<int>(totalMinutes / kMinutesPerYear); }
+    int year() const { return kStartYear + static_cast<int>(totalTicks / kTicksPerYear); }
 
     // Time of day queries
     bool isNight() const
@@ -47,7 +47,8 @@ struct GameCalendar
     }
     bool isDay() const { return !isNight(); }
 
-    void advance(uint64_t minutes) { totalMinutes += minutes; }
+    void advanceTicks(int64_t ticks) { totalTicks += ticks; }
+    void advanceMinutes(int64_t minutes) { totalTicks += minutes * kTicksPerMinute; }
 };
 
 // Map transition: where to go when stepping on a trigger
@@ -76,7 +77,7 @@ class GameWorld
     // Calendar
     GameCalendar& calendar() { return calendar_; }
     const GameCalendar& calendar() const { return calendar_; }
-    void advanceTime(uint64_t minutes);
+    void advanceTime(int64_t minutes);
 
     // Current map
     const std::string& currentMap() const { return currentMap_; }

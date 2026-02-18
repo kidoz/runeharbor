@@ -17,25 +17,34 @@ namespace runeharbor::game
 class GameWorld;
 struct MonsterInstance;
 
-// MM7 spell schools (map to skill IDs)
+// MM7 spell schools (matches binary values, gap at 4-5)
 enum class SpellSchool : uint8_t
 {
     Fire = 0,
-    Air,
-    Water,
-    Earth,
-    Spirit,
-    Mind,
-    Body,
-    Light,
-    Dark,
-    Count
+    Air = 1,
+    Water = 2,
+    Earth = 3,
+    Default = 4, // unused/special
+    Magic = 5,   // unused/special
+    Spirit = 6,
+    Mind = 7,
+    Body = 8,
+    Light = 9,
+    Dark = 10,
+    Count = 11
 };
 
 // Maps spell school to the corresponding SkillId
 inline SkillId schoolToSkill(SpellSchool school)
 {
-    return static_cast<SkillId>(static_cast<int>(SkillId::Fire) + static_cast<int>(school));
+    // Schools 0-3 map directly to SkillId::Fire+offset
+    // Schools 6-10 map to Spirit/Mind/Body/Light/Dark skills
+    int s = static_cast<int>(school);
+    if (s <= 3)
+        return static_cast<SkillId>(static_cast<int>(SkillId::Fire) + s);
+    if (s >= 6 && s <= 10)
+        return static_cast<SkillId>(static_cast<int>(SkillId::Spirit) + (s - 6));
+    return SkillId::Fire; // fallback for Default/Magic
 }
 
 // Spell target type

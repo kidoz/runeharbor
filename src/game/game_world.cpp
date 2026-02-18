@@ -8,9 +8,9 @@ namespace runeharbor::game
 
 GameWorld::GameWorld() = default;
 
-void GameWorld::advanceTime(uint64_t minutes)
+void GameWorld::advanceTime(int64_t minutes)
 {
-    calendar_.advance(minutes);
+    calendar_.advanceMinutes(minutes);
 }
 
 void GameWorld::setCurrentMap(const std::string& name)

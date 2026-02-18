@@ -71,8 +71,8 @@ enum class GameState
 // Character types from game:: namespace, re-exported into engine:: for backward compatibility
 using game::CharacterClass;
 using game::Gender;
-using game::Race;
 using game::Stats;
+using game::baseClassIndex;
 using Character = game::Character;
 
 class Application

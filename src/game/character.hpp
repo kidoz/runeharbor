@@ -9,16 +9,6 @@
 namespace runeharbor::game
 {
 
-// MM7 character races
-enum class Race : uint8_t
-{
-    Human = 0,
-    Elf,
-    Dwarf,
-    Goblin,
-    Count
-};
-
 enum class Gender : uint8_t
 {
     Male = 0,
@@ -26,21 +16,53 @@ enum class Gender : uint8_t
     Count
 };
 
-// MM7 base character classes (9 base classes, index 0-8)
-// Promoted classes (Cavalier, Champion, etc.) will be added when class promotion is implemented.
+// MM7 character classes: 36-ID scheme (4 per base class: base, tier1, tier2a, tier2b)
 enum class CharacterClass : uint8_t
 {
     Knight = 0,
-    Paladin,
-    Archer,
-    Cleric,
-    Sorcerer,
-    Thief,
-    Monk,
-    Ranger,
-    Druid,
-    Count
+    Cavalier = 1,
+    Champion = 2,
+    BlackKnight = 3,
+    Thief = 4,
+    Rogue = 5,
+    Spy = 6,
+    Assassin = 7,
+    Monk = 8,
+    Initiate = 9,
+    Master = 10,
+    Ninja = 11,
+    Paladin = 12,
+    Crusader = 13,
+    Hero = 14,
+    Villain = 15,
+    Archer = 16,
+    WarriorMage = 17,
+    MasterArcher = 18,
+    Sniper = 19,
+    Ranger = 20,
+    Hunter = 21,
+    RangerLord = 22,
+    BountyHunter = 23,
+    Cleric = 24,
+    Priest = 25,
+    HighPriest = 26,
+    PriestOfDark = 27,
+    Druid = 28,
+    GreatDruid = 29,
+    ArchDruid = 30,
+    Warlock = 31,
+    Sorcerer = 32,
+    Wizard = 33,
+    Archmage = 34,
+    Lich = 35,
+    Count = 36
 };
+
+// Returns the base class index (0-8) from any promotion tier
+inline int baseClassIndex(CharacterClass c)
+{
+    return static_cast<int>(c) >> 2;
+}
 
 // MM7 skills
 enum class SkillId : uint8_t
@@ -105,29 +127,31 @@ struct SkillValue
     int effective() const { return learned() ? level : 0; }
 };
 
-// Character conditions (bitfield)
-enum class Condition : uint16_t
+// Character condition indices (MM7 stores 18 int64 timestamps, not a bitfield)
+enum class ConditionIndex : uint8_t
 {
-    None = 0,
-    Cursed = 1 << 0,
-    Weak = 1 << 1,
-    Asleep = 1 << 2,
-    Afraid = 1 << 3,
-    Drunk = 1 << 4,
-    Insane = 1 << 5,
-    Poisoned1 = 1 << 6,
-    Diseased1 = 1 << 7,
-    Poisoned2 = 1 << 8,
-    Diseased2 = 1 << 9,
-    Poisoned3 = 1 << 10,
-    Diseased3 = 1 << 11,
-    Paralyzed = 1 << 12,
-    Unconscious = 1 << 13,
-    Dead = 1 << 14,
-    Stoned = 1 << 15,
+    Cursed = 0,
+    Weak = 1,
+    Asleep = 2,
+    Afraid = 3,
+    Drunk = 4,
+    Insane = 5,
+    Poison1 = 6,
+    Disease1 = 7,
+    Poison2 = 8,
+    Disease2 = 9,
+    Poison3 = 10,
+    Disease3 = 11,
+    Paralyzed = 12,
+    Unconscious = 13,
+    Dead = 14,
+    Stoned = 15,
+    Eradicated = 16,
+    Zombie = 17,
+    Count = 18
 };
 
-// Equipment slots
+// Equipment slots (matches MM7 binary layout: Rings 9-14, Amulet 15)
 enum class EquipSlot : uint8_t
 {
     MainHand = 0,
@@ -139,13 +163,13 @@ enum class EquipSlot : uint8_t
     Cloak,
     Gauntlets,
     Boots,
-    Amulet,
-    Ring1,
-    Ring2,
-    Ring3,
-    Ring4,
-    Ring5,
-    Ring6,
+    Ring1,  // 9
+    Ring2,  // 10
+    Ring3,  // 11
+    Ring4,  // 12
+    Ring5,  // 13
+    Ring6,  // 14
+    Amulet, // 15
     Count
 };
 
@@ -169,6 +193,8 @@ struct Stats
 
     static constexpr int kCount = 7;
 
+    // MM7 stat index order: 0=Might, 1=Intellect, 2=Personality, 3=Endurance,
+    // 4=Accuracy, 5=Speed, 6=Luck
     int& byIndex(int i)
     {
         switch (i)
@@ -180,9 +206,9 @@ struct Stats
         case 3:
             return endurance;
         case 4:
-            return speed;
-        case 5:
             return accuracy;
+        case 5:
+            return speed;
         case 6:
             return luck;
         default:
@@ -203,9 +229,9 @@ struct Stats
         case 3:
             return endurance;
         case 4:
-            return speed;
-        case 5:
             return accuracy;
+        case 5:
+            return speed;
         case 6:
             return luck;
         default:
@@ -219,7 +245,6 @@ struct Character
     std::string name = "New Hero";
     int faceId = 0;
     CharacterClass charClass = CharacterClass::Knight;
-    Race race = Race::Human;
     Gender gender = Gender::Male;
 
     // Primary attributes
@@ -236,14 +261,14 @@ struct Character
     int armorClass = 0;
     int age = 20;
 
-    // Resistances
+    // Base resistances (matches MM7 character struct: Fire, Air, Water, Earth, Mind, Body)
+    // Spirit, Light, Dark resistances come from equipment/buffs only (no base value)
     int fireResistance = 0;
     int airResistance = 0;
     int waterResistance = 0;
     int earthResistance = 0;
     int mindResistance = 0;
     int bodyResistance = 0;
-    int spiritResistance = 0;
 
     // Skills
     std::array<SkillValue, static_cast<size_t>(SkillId::Count)> skillLevels = {};
@@ -252,25 +277,34 @@ struct Character
     // Equipment
     std::array<ItemSlot, static_cast<size_t>(EquipSlot::Count)> equipment = {};
 
-    // Conditions
-    uint16_t conditions = 0;
+    // Conditions: MM7 stores 18 int64 timestamps (0 = not active, nonzero = game tick when set)
+    static constexpr int kConditionCount = static_cast<int>(ConditionIndex::Count);
+    std::array<int64_t, kConditionCount> conditionTimestamps = {};
 
-    bool hasCondition(Condition c) const { return (conditions & static_cast<uint16_t>(c)) != 0; }
+    bool hasCondition(ConditionIndex c) const
+    {
+        return conditionTimestamps[static_cast<size_t>(c)] != 0;
+    }
 
-    void setCondition(Condition c) { conditions |= static_cast<uint16_t>(c); }
-    void clearCondition(Condition c) { conditions &= ~static_cast<uint16_t>(c); }
+    void setCondition(ConditionIndex c, int64_t gameTime = 1)
+    {
+        conditionTimestamps[static_cast<size_t>(c)] = gameTime;
+    }
+
+    void clearCondition(ConditionIndex c)
+    {
+        conditionTimestamps[static_cast<size_t>(c)] = 0;
+    }
 
     bool isAlive() const
     {
-        return !hasCondition(Condition::Dead) && !hasCondition(Condition::Stoned);
+        return !hasCondition(ConditionIndex::Dead) && !hasCondition(ConditionIndex::Stoned) &&
+               !hasCondition(ConditionIndex::Eradicated);
     }
 
-    bool isConscious() const { return isAlive() && !hasCondition(Condition::Unconscious); }
+    bool isConscious() const { return isAlive() && !hasCondition(ConditionIndex::Unconscious); }
 
-    // Stat bonuses from race
-    static Stats racialBonuses(Race race);
-
-    // Calculate effective stat (base + bonuses)
+    // Calculate effective stat (base stats only — no racial system in MM7)
     int effectiveStat(int statIndex) const;
 
     // Recalculate derived stats (HP, SP, AC, resistances) from base stats + equipment

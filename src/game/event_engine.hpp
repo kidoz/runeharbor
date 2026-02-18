@@ -14,35 +14,64 @@ namespace runeharbor::game
 
 class GameWorld;
 
-// MM7 event command opcodes (from binary EVT files)
+// MM7 event command opcodes (from binary EVT files, matches actual bytecode values)
 enum class EventOpcode : uint8_t
 {
-    End = 0,           // End of event script
-    Nop = 1,           // No operation
-    SetVariable = 2,   // Set a game variable
-    CheckVariable = 3, // Branch if variable matches
-    GiveItem = 4,      // Give item to party
-    TakeItem = 5,      // Remove item from party
-    GiveGold = 6,      // Add gold
-    TakeGold = 7,      // Remove gold
-    GiveFood = 8,      // Add food
-    TakeFood = 9,      // Remove food
-    GiveXP = 10,       // Give experience to party
-    ShowText = 11,     // Display text message
-    ShowNPC = 12,      // Show NPC dialogue
-    Teleport = 13,     // Move party to map/position
-    PlaySound = 14,    // Play a sound effect
-    SetTimer = 15,     // Schedule a timed event
-    SetFace = 16,      // Change NPC face
-    CastSpell = 17,    // Cast a spell effect
-    AdvanceTime = 18,  // Fast-forward game time
-    SetReputation = 19 // Modify party reputation
+    Exit = 1,
+    NpcDialog = 2,
+    PlaySound = 3,
+    SkipNext = 4,
+    SkipNext2 = 5,
+    Teleport = 6,
+    GiveGold = 7,
+    SetPlayerVar = 8,
+    GiveItem = 9,
+    SetFlag = 10,
+    CheckFlag = 11,
+    ChangeMap = 12,
+    ModifyObject = 13,
+    CheckCondition = 14,
+    DoorControl = 15,
+    AddStat = 16,
+    RemoveItem = 17,
+    SubtractStat = 18,
+    ModifyNpc = 19,
+    ModifyNpcEx = 21,
+    ShowBuilding = 22,
+    ShowEffect = 23,
+    PlayAnimation = 24,
+    RandomGoto = 25,
+    ShowText = 26,
+    SetNpcPortrait = 29,
+    SetNpcName = 30,
+    GiveAward = 32,
+    StatusMessage = 33,
+    SpawnItem = 34,
+    SetPlayerSelect = 35,
+    JumpToEvent = 36,
+    SetGlobalVar = 39,
+    SetGlobalVar2 = 40,
+    CastSpell = 41,
+    ModifyDecoration = 42,
+    CheckSkill = 43,
+    SetMonsterTopic = 47,
+    SetMonsterField = 48,
+    SetMonsterHostile = 49,
+    SetMonsterGroup = 50,
+    CheckMapVar = 51,
+    ReplaceMonster = 54,
+    SetMonsterAi = 55,
+    CheckTime = 56,
+    GiveExperience = 57,
+    TakeGold = 58,
+    CureCondition = 59,
+    SetHostileByIdx = 60,
 };
 
 // A single command in an event script
 struct EventCommand
 {
-    EventOpcode opcode = EventOpcode::Nop;
+    EventOpcode opcode = EventOpcode::Exit;
     int param1 = 0;    // First integer parameter
     int param2 = 0;    // Second integer parameter
     int param3 = 0;    // Third integer parameter

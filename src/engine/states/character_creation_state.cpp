@@ -16,38 +16,60 @@ namespace runeharbor::engine
 namespace
 {
 
-const std::vector<std::string> kRaceNames = {"Human", "Elf", "Dwarf", "Goblin"};
+const std::vector<std::string> kFaceGroupNames = {"Human", "Elf", "Dwarf", "Goblin"};
 const std::vector<std::string> kGenderNames = {"Male", "Female"};
-const std::vector<std::string> kClassNames = {"Knight", "Paladin", "Archer", "Cleric", "Sorcerer",
-                                              "Thief",  "Monk",    "Ranger", "Druid"};
+
+// 9 base class names (used for cycling during character creation)
+const std::vector<std::string> kBaseClassNames = {"Knight", "Thief",  "Monk",
+                                                   "Paladin", "Archer", "Ranger",
+                                                   "Cleric",  "Druid",  "Sorcerer"};
+
+// Maps base class display index (0-8) to CharacterClass enum value
+constexpr CharacterClass kBaseClasses[] = {
+    CharacterClass::Knight,  CharacterClass::Thief,   CharacterClass::Monk,
+    CharacterClass::Paladin, CharacterClass::Archer,  CharacterClass::Ranger,
+    CharacterClass::Cleric,  CharacterClass::Druid,   CharacterClass::Sorcerer,
+};
+constexpr int kBaseClassCount = 9;
+
+// Reverse: find display index from CharacterClass
+int baseClassDisplayIndex(CharacterClass c)
+{
+    for (int i = 0; i < kBaseClassCount; i++)
+    {
+        if (kBaseClasses[i] == c)
+            return i;
+    }
+    return 0;
+}
+
 const std::vector<std::string> kStatNames = {"Might", "Intellect", "Personality", "Endurance",
-                                             "Speed", "Accuracy",  "Luck"};
+                                             "Accuracy", "Speed",  "Luck"};
 
-// Race base stats: [race][stat] order: Might, Intellect, Personality, Endurance, Speed, Accuracy,
-// Luck
-constexpr int kRaceBaseStats[4][7] = {
-    {11, 11, 11, 9, 11, 11, 9}, // Human
-    {7, 14, 11, 7, 11, 14, 9},  // Elf
-    {14, 11, 11, 14, 7, 7, 9},  // Dwarf
-    {14, 7, 7, 11, 14, 11, 9},  // Goblin
+// Face group base stats
+constexpr int kFaceBaseStats[4][7] = {
+    {11, 11, 11, 9, 11, 11, 9}, // Faces 0-7 (Human)
+    {7, 14, 11, 7, 11, 14, 9},  // Faces 8-11 (Elf)
+    {14, 11, 11, 14, 7, 7, 9},  // Faces 12-15 (Dwarf)
+    {14, 7, 7, 11, 14, 11, 9},  // Faces 16-19 (Goblin)
 };
 
-constexpr int kRaceStatMax[4][7] = {
-    {25, 25, 25, 25, 25, 25, 25}, // Human
-    {15, 30, 25, 15, 25, 30, 20}, // Elf
-    {30, 25, 25, 30, 15, 15, 20}, // Dwarf
-    {30, 15, 15, 25, 30, 25, 20}, // Goblin
+constexpr int kFaceStatMax[4][7] = {
+    {25, 25, 25, 25, 25, 25, 25}, // Faces 0-7
+    {15, 30, 25, 15, 25, 30, 20}, // Faces 8-11
+    {30, 25, 25, 30, 15, 15, 20}, // Faces 12-15
+    {30, 15, 15, 25, 30, 25, 20}, // Faces 16-19
 };
 
-Race raceFromFace(int faceId)
+int faceGroupFromId(int faceId)
 {
     if (faceId < 8)
-        return Race::Human;
+        return 0;
     if (faceId < 12)
-        return Race::Elf;
+        return 1;
     if (faceId < 16)
-        return Race::Dwarf;
-    return Race::Goblin;
+        return 2;
+    return 3;
 }
 
 Gender genderFromFace(int faceId)
@@ -80,15 +102,15 @@ struct ClassSkills
 };
 
 constexpr ClassSkills kClassStartingSkills[] = {
-    {"Sword", "Leather Armor"}, // Knight
-    {"Mace", "Spirit Magic"},   // Paladin
-    {"Bow", "Air Magic"},       // Archer
-    {"Mace", "Body Magic"},     // Cleric
-    {"Staff", "Fire Magic"},    // Sorcerer
-    {"Dagger", "Stealing"},     // Thief
-    {"Dodging", "Unarmed"},     // Monk
-    {"Axe", "Perception"},      // Ranger
-    {"Dagger", "Earth Magic"},  // Druid
+    {"Sword", "Leather Armor"}, // Knight (base 0)
+    {"Dagger", "Stealing"},     // Thief (base 1)
+    {"Dodging", "Unarmed"},     // Monk (base 2)
+    {"Mace", "Spirit Magic"},   // Paladin (base 3)
+    {"Bow", "Air Magic"},       // Archer (base 4)
+    {"Axe", "Perception"},      // Ranger (base 5)
+    {"Mace", "Body Magic"},     // Cleric (base 6)
+    {"Dagger", "Earth Magic"},  // Druid (base 7)
+    {"Staff", "Fire Magic"},    // Sorcerer (base 8)
 };
 
 } // namespace
@@ -231,29 +253,27 @@ std::optional<GameStateId> CharacterCreationState::update()
     {
         if (menuRowIndex == 1) // FACE
         {
-            int oldRace = static_cast<int>(raceFromFace(activeChar.faceId));
+            int oldGroup = faceGroupFromId(activeChar.faceId);
             activeChar.faceId = (activeChar.faceId + hDelta + 20) % 20;
-            int newRace = static_cast<int>(raceFromFace(activeChar.faceId));
-            if (oldRace != newRace)
+            int newGroup = faceGroupFromId(activeChar.faceId);
+            if (oldGroup != newGroup)
             {
                 updateCharacterForFace(activeChar);
             }
         }
         else if (menuRowIndex == 2) // CLASS
         {
-            int c = static_cast<int>(activeChar.charClass);
-            c = (c + hDelta + static_cast<int>(kClassNames.size())) %
-                static_cast<int>(kClassNames.size());
-            activeChar.charClass = static_cast<CharacterClass>(c);
+            int displayIdx = baseClassDisplayIndex(activeChar.charClass);
+            displayIdx = (displayIdx + hDelta + kBaseClassCount) % kBaseClassCount;
+            activeChar.charClass = kBaseClasses[displayIdx];
             updateSkillsForClass(activeChar);
         }
         else if (menuRowIndex >= 3 && menuRowIndex <= 9) // STATS
         {
             int statIdx = menuRowIndex - 3;
-            Race race = raceFromFace(activeChar.faceId);
-            int raceIdx = static_cast<int>(race);
+            int groupIdx = faceGroupFromId(activeChar.faceId);
             int minVal = activeChar.baseStats.byIndex(statIdx) - 2;
-            int maxVal = kRaceStatMax[raceIdx][statIdx];
+            int maxVal = kFaceStatMax[groupIdx][statIdx];
 
             if (hDelta > 0 && calculateBonusPointsRemaining() <= 0)
             {
@@ -372,13 +392,13 @@ void CharacterCreationState::render()
             nameStr += "_";
         ctx.debugText->drawText(sdlRenderer, sx, nameY, textScale, nr, ng, nb, nameStr);
 
-        // Race + Gender
-        Race race = raceFromFace(ch.faceId);
+        // Face group + Gender
+        int groupIdx = faceGroupFromId(ch.faceId);
         Gender gender = genderFromFace(ch.faceId);
-        std::string raceGender =
-            kRaceNames[static_cast<int>(race)] + " " + kGenderNames[static_cast<int>(gender)];
+        std::string groupGender =
+            kFaceGroupNames[groupIdx] + " " + kGenderNames[static_cast<int>(gender)];
         ctx.debugText->drawText(sdlRenderer, sx, ctx.scaleY(148), textScale, 180, 180, 180,
-                                raceGender);
+                                groupGender);
 
         // Class
         uint8_t cr = 200, cg = 200, cb = 200;
@@ -388,7 +408,8 @@ void CharacterCreationState::render()
             cg = 255;
             cb = 0;
         }
-        std::string classStr = kClassNames[static_cast<int>(ch.charClass)];
+        int displayIdx = baseClassDisplayIndex(ch.charClass);
+        std::string classStr = kBaseClassNames[displayIdx];
         if (isActive && menuRowIndex == 2)
             classStr = "< " + classStr + " >";
         ctx.debugText->drawText(sdlRenderer, sx, ctx.scaleY(166), textScale, cr, cg, cb, classStr);
@@ -454,18 +475,17 @@ int CharacterCreationState::calculateBonusPointsRemaining() const
 
 void CharacterCreationState::updateCharacterForFace(Character& ch)
 {
-    Race race = raceFromFace(ch.faceId);
-    int raceIdx = static_cast<int>(race);
+    int groupIdx = faceGroupFromId(ch.faceId);
     for (int i = 0; i < 7; i++)
     {
-        ch.baseStats.byIndex(i) = kRaceBaseStats[raceIdx][i];
+        ch.baseStats.byIndex(i) = kFaceBaseStats[groupIdx][i];
     }
     ch.stats = ch.baseStats;
 }
 
 void CharacterCreationState::updateSkillsForClass(Character& ch)
 {
-    int classIdx = static_cast<int>(ch.charClass);
+    int classIdx = baseClassIndex(ch.charClass);
     ch.skills.clear();
     ch.skills.push_back(kClassStartingSkills[classIdx].skill1);
     ch.skills.push_back(kClassStartingSkills[classIdx].skill2);

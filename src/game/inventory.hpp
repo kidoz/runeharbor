@@ -13,26 +13,31 @@
 namespace runeharbor::game
 {
 
-// Item category derived from equipStat field
-enum class ItemCategory : uint8_t
+// Item equip type (matches MM7's 21 equip types from items.txt)
+enum class EquipType : uint8_t
 {
-    Weapon = 0,
-    Armor,
-    Shield,
-    Helmet,
-    Belt,
-    Cloak,
-    Gauntlets,
-    Boots,
-    Amulet,
-    Ring,
-    Potion,
-    Scroll,
-    Reagent,
-    Gem,
-    Gold,
-    Misc,
-    Count
+    Weapon1H = 0,
+    Weapon2H = 1,
+    Missile = 2,
+    Armor = 3,
+    Shield = 4,
+    Helmet = 5,
+    Belt = 6,
+    Cloak = 7,
+    Gauntlets = 8,
+    Boots = 9,
+    Ring = 10,
+    Amulet = 11,
+    Wand = 12,
+    Reagent = 13,
+    Potion = 14,
+    SpellScroll = 15,
+    Book = 16,
+    MessageScroll = 17,
+    Deed = 18,
+    GoldItem = 19,
+    None = 20,
+    Count = 21
 };
 
 // Item material/quality tier
@@ -92,7 +97,7 @@ class Inventory
 
     // Item data lookup
     const formats::ItemEntry* getItemDef(int itemId) const;
-    ItemCategory getItemCategory(int itemId) const;
+    EquipType getEquipType(int itemId) const;
     EquipSlot getEquipSlot(int itemId) const;
     int getItemWeight(int itemId) const;
 
@@ -139,7 +144,7 @@ class Inventory
     bool giveItem(const Item& item);
 
   private:
-    ItemCategory categorizeItem(const formats::ItemEntry& entry) const;
+    EquipType categorizeItem(const formats::ItemEntry& entry) const;
     EquipSlot mapEquipSlot(const formats::ItemEntry& entry) const;
 
     util::ILogger& logger_;

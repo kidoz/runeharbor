@@ -261,7 +261,7 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
     header.version = SaveHeader::kVersion;
     header.timestamp = static_cast<uint64_t>(
         std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
-    header.gameTime = world.calendar().totalMinutes;
+    header.gameTime = static_cast<uint64_t>(world.calendar().totalTicks);
 
     const auto& party = world.party();
     const auto& mapName = world.currentMap();
@@ -277,8 +277,8 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
     const auto* headerBytes = reinterpret_cast<const uint8_t*>(&header);
     out.insert(out.end(), headerBytes, headerBytes + sizeof(header));
 
-    // Calendar
-    writeU64(out, world.calendar().totalMinutes);
+    // Calendar (ticks at 128/sec)
+    writeU64(out, static_cast<uint64_t>(world.calendar().totalTicks));
 
     // Current map
     writeString(out, world.currentMap());
@@ -306,7 +306,6 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
         writeString(out, ch.name);
         writeI32(out, ch.faceId);
         writeU8(out, static_cast<uint8_t>(ch.charClass));
-        writeU8(out, static_cast<uint8_t>(ch.race));
         writeU8(out, static_cast<uint8_t>(ch.gender));
 
         // Stats
@@ -325,14 +324,13 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
         writeI32(out, ch.armorClass);
         writeI32(out, ch.age);
 
-        // Resistances
+        // Resistances (6 base: Fire, Air, Water, Earth, Mind, Body)
         writeI32(out, ch.fireResistance);
         writeI32(out, ch.airResistance);
         writeI32(out, ch.waterResistance);
         writeI32(out, ch.earthResistance);
         writeI32(out, ch.mindResistance);
         writeI32(out, ch.bodyResistance);
-        writeI32(out, ch.spiritResistance);
 
         // Skills
         constexpr int skillCount = static_cast<int>(SkillId::Count);
@@ -351,8 +349,11 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
             writeI32(out, ch.equipment[static_cast<size_t>(s)].itemId);
         }
 
-        // Conditions
-        writeU16(out, ch.conditions);
+        // Conditions (18 int64 timestamps)
+        for (int c = 0; c < Character::kConditionCount; c++)
+        {
+            writeU64(out, static_cast<uint64_t>(ch.conditionTimestamps[static_cast<size_t>(c)]));
+        }
     }
 
     // Game variables
@@ -395,11 +396,11 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
 
     world.reset();
 
-    // Calendar
-    uint64_t calMinutes;
-    if (!readU64(ptr, end, calMinutes))
+    // Calendar (ticks at 128/sec)
+    uint64_t calTicks;
+    if (!readU64(ptr, end, calTicks))
         return false;
-    world.calendar().totalMinutes = calMinutes;
+    world.calendar().totalTicks = static_cast<int64_t>(calTicks);
 
     // Current map
     std::string mapName;
@@ -452,11 +453,10 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
             return false;
         ch.faceId = faceId;
 
-        uint8_t cls, race, gender;
-        if (!readU8(ptr, end, cls) || !readU8(ptr, end, race) || !readU8(ptr, end, gender))
+        uint8_t cls, gender;
+        if (!readU8(ptr, end, cls) || !readU8(ptr, end, gender))
             return false;
         ch.charClass = static_cast<CharacterClass>(cls);
-        ch.race = static_cast<Race>(race);
         ch.gender = static_cast<Gender>(gender);
 
         // Stats
@@ -495,7 +495,7 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
         ch.armorClass = ac;
         ch.age = age;
 
-        // Resistances
+        // Resistances (6 base: Fire, Air, Water, Earth, Mind, Body)
         int32_t res;
         if (!readI32(ptr, end, res))
             return false;
@@ -515,9 +515,6 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
         if (!readI32(ptr, end, res))
             return false;
         ch.bodyResistance = res;
-        if (!readI32(ptr, end, res))
-            return false;
-        ch.spiritResistance = res;
 
         // Skills
         uint16_t skillCount;
@@ -559,11 +556,14 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
                 return false;
         }
 
-        // Conditions
-        uint16_t cond;
-        if (!readU16(ptr, end, cond))
-            return false;
-        ch.conditions = cond;
+        // Conditions (18 int64 timestamps)
+        for (int c = 0; c < Character::kConditionCount; c++)
+        {
+            uint64_t ts;
+            if (!readU64(ptr, end, ts))
+                return false;
+            ch.conditionTimestamps[static_cast<size_t>(c)] = static_cast<int64_t>(ts);
+        }
     }
 
     // Game variables (placeholder)

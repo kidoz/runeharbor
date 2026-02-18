@@ -30,16 +30,27 @@ struct MonsterInstance
     // Position in world
     float x = 0, y = 0, z = 0;
 
-    // AI state
+    // AI state (matches MM7 binary values)
     enum class AIState : uint8_t
     {
-        Idle = 0,
-        Pursuing,
-        Attacking,
-        Fleeing,
-        Dead
+        Standing = 0,
+        Wandering = 1,
+        Guarding = 2,
+        Fidgeting = 3,
+        Fleeing = 4,
+        Dead = 5,
+        Pursuing = 6,
+        Attacking = 7,
+        AttackingRanged = 8,
+        AttackingMelee2 = 9,
+        Stunned = 11,
+        CastingSpell1 = 12,
+        CastingSpell2 = 13,
+        Paralyzed = 17,
+        CastingSpell3 = 18,
+        Stoned = 19,
     };
-    AIState aiState = AIState::Idle;
+    AIState aiState = AIState::Standing;
 
     int targetCharacter = -1; // Which party member to attack (-1 = none)
     float aggroRange = 2048.0f;
@@ -52,6 +63,8 @@ struct MonsterInstance
     int resistMind = 0;
     int resistSpirit = 0;
     int resistBody = 0;
+    int resistLight = 0;
+    int resistDark = 0;
     int resistPhysical = 0;
 
     bool isAlive() const { return aiState != AIState::Dead && currentHP > 0; }
@@ -66,19 +79,20 @@ struct AttackResult
     std::string description;
 };
 
-// Damage types
-enum class DamageType : uint8_t
+// Damage element types (matches MM7 binary layout: Fire=0 through Physical=10)
+enum class DamageElement : uint8_t
 {
-    Physical = 0,
-    Fire,
-    Air,
-    Water,
-    Earth,
-    Spirit,
-    Mind,
-    Body,
-    Light,
-    Dark,
+    Fire = 0,
+    Air = 1,
+    Water = 2,
+    Earth = 3,
+    Spirit = 4,
+    Unused = 5,
+    Body = 6,
+    Mind = 7,
+    Light = 8,
+    Dark = 9,
+    Physical = 10,
 };
 
 // Combat event callbacks for UI
@@ -124,8 +138,8 @@ class CombatSystem
 
     // Damage calculation
     static int rollDamage(const std::string& diceExpr);
-    int calculateDamage(int baseDamage, DamageType type, const MonsterInstance& target) const;
-    int calculateMonsterDamage(int baseDamage, DamageType type, int characterIndex) const;
+    int calculateDamage(int baseDamage, DamageElement type, const MonsterInstance& target) const;
+    int calculateMonsterDamage(int baseDamage, DamageElement type, int characterIndex) const;
 
     // Hit chance
     int hitChance(int attackerLevel, int attackerAccuracy, int defenderAC) const;

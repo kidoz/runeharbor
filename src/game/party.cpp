@@ -112,6 +112,7 @@ void Party::initDefault()
         {"Alexis", CharacterClass::Cleric, 12, {7, 13, 14, 9, 9, 7, 14}},
     };
 
+
     for (int i = 0; i < kPartySize; i++)
     {
         auto& ch = members_[static_cast<size_t>(i)];
@@ -120,7 +121,6 @@ void Party::initDefault()
         ch.charClass = defaults[i].charClass;
         ch.faceId = defaults[i].faceId;
         ch.baseStats = defaults[i].stats;
-        ch.race = Race::Human;
         ch.gender = (i < 2) ? Gender::Male : Gender::Female;
         ch.level = 1;
         ch.experience = 0;

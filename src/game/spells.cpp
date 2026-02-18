@@ -51,7 +51,8 @@ void SpellSystem::loadSpellData(const std::vector<formats::SpellEntry>& spells)
 
         // Determine target type from spell school and level
         // Simple heuristic: damage spells target enemies, healing/buff target allies
-        if (info.school == SpellSchool::Spirit || info.school == SpellSchool::Body)
+        if (info.school == SpellSchool::Spirit || info.school == SpellSchool::Body ||
+            info.school == SpellSchool::Mind)
         {
             info.target = SpellTarget::SingleAlly;
         }
@@ -168,32 +169,38 @@ SpellResult SpellSystem::castDamageSpell(int characterIndex, int spellId, Monste
         spellId, getEffectiveSkillLevel(characterIndex, spell->school), mastery);
 
     // Check resistance
-    // Simple: each element has a corresponding resistance on the monster
-    DamageType dmgType = static_cast<DamageType>(static_cast<int>(spell->school) + 1);
+    // DamageElement values match SpellSchool for elemental schools
+    DamageElement dmgType = static_cast<DamageElement>(static_cast<int>(spell->school));
     // Resistance roll: target has X% chance to resist
     int resistChance = 0;
     switch (dmgType)
     {
-    case DamageType::Fire:
+    case DamageElement::Fire:
         resistChance = target->resistFire;
         break;
-    case DamageType::Air:
+    case DamageElement::Air:
         resistChance = target->resistAir;
         break;
-    case DamageType::Water:
+    case DamageElement::Water:
         resistChance = target->resistWater;
         break;
-    case DamageType::Earth:
+    case DamageElement::Earth:
         resistChance = target->resistEarth;
         break;
-    case DamageType::Mind:
+    case DamageElement::Mind:
         resistChance = target->resistMind;
         break;
-    case DamageType::Spirit:
+    case DamageElement::Spirit:
         resistChance = target->resistSpirit;
         break;
-    case DamageType::Body:
+    case DamageElement::Body:
         resistChance = target->resistBody;
+        break;
+    case DamageElement::Light:
+        resistChance = target->resistLight;
+        break;
+    case DamageElement::Dark:
+        resistChance = target->resistDark;
         break;
     default:
         break;
@@ -213,6 +220,7 @@ SpellResult SpellSystem::castDamageSpell(int characterIndex, int spellId, Monste
     {
         target->currentHP = 0;
         target->aiState = MonsterInstance::AIState::Dead;
+
         result.description = ch.name + " casts " + spell->name + " killing " + target->name + " (" +
                              std::to_string(result.damage) + " damage)";
     }
@@ -364,14 +372,23 @@ int SpellSystem::calculateHealing(int spellId, int casterLevel, SkillMastery mas
 
 SpellSchool SpellSystem::determineSchool(int spellId) const
 {
-    // MM7 spell IDs: 1-11 = Fire, 12-22 = Air, 23-33 = Water, etc.
-    // Each school has 11 spells
+    // MM7 spell IDs: 1-11 = Fire, 12-22 = Air, 23-33 = Water, 34-44 = Earth,
+    // 45-55 = Spirit, 56-66 = Mind, 67-77 = Body, 78-88 = Light, 89-99 = Dark
+    // Maps to SpellSchool with gap at 4-5: Fire=0, Air=1, Water=2, Earth=3,
+    // Spirit=6, Mind=7, Body=8, Light=9, Dark=10
     if (spellId <= 0)
         return SpellSchool::Fire;
-    int schoolIndex = (spellId - 1) / 11;
-    if (schoolIndex >= static_cast<int>(SpellSchool::Count))
-        return SpellSchool::Fire;
-    return static_cast<SpellSchool>(schoolIndex);
+
+    int rawIndex = (spellId - 1) / 11; // 0-8 for the 9 spell schools
+    // Map raw sequential index to gapped SpellSchool values
+    constexpr SpellSchool kSchoolMap[] = {
+        SpellSchool::Fire,   SpellSchool::Air,   SpellSchool::Water,  SpellSchool::Earth,
+        SpellSchool::Spirit, SpellSchool::Mind,   SpellSchool::Body,
+        SpellSchool::Light,  SpellSchool::Dark,
+    };
+    if (rawIndex >= 0 && rawIndex < 9)
+        return kSchoolMap[rawIndex];
+    return SpellSchool::Fire;
 }
 
 } // namespace runeharbor::game

@@ -62,7 +62,7 @@ int CombatSystem::spawnMonster(int monsterId, float x, float y, float z)
     inst.x = x;
     inst.y = y;
     inst.z = z;
-    inst.aiState = MonsterInstance::AIState::Idle;
+    inst.aiState = MonsterInstance::AIState::Standing;
 
     inst.resistFire = def.resistFire;
     inst.resistAir = def.resistAir;
@@ -71,6 +71,8 @@ int CombatSystem::spawnMonster(int monsterId, float x, float y, float z)
     inst.resistMind = def.resistMind;
     inst.resistSpirit = def.resistSpirit;
     inst.resistBody = def.resistBody;
+    inst.resistLight = def.resistLight;
+    inst.resistDark = def.resistDark;
     inst.resistPhysical = def.resistPhysical;
 
     int index = static_cast<int>(monsters_.size());
@@ -169,7 +171,7 @@ AttackResult CombatSystem::playerAttack(int characterIndex, int monsterIndex)
         baseDamage *= 2;
     }
 
-    result.damage = calculateDamage(baseDamage, DamageType::Physical, *monster);
+    result.damage = calculateDamage(baseDamage, DamageElement::Physical, *monster);
     monster->currentHP -= result.damage;
 
     if (monster->currentHP <= 0)
@@ -250,35 +252,41 @@ int CombatSystem::rollDamage(const std::string& diceExpr)
     return std::max(0, total);
 }
 
-int CombatSystem::calculateDamage(int baseDamage, DamageType type,
+int CombatSystem::calculateDamage(int baseDamage, DamageElement type,
                                   const MonsterInstance& target) const
 {
     int resistance = 0;
     switch (type)
     {
-    case DamageType::Physical:
+    case DamageElement::Physical:
         resistance = target.resistPhysical;
         break;
-    case DamageType::Fire:
+    case DamageElement::Fire:
         resistance = target.resistFire;
         break;
-    case DamageType::Air:
+    case DamageElement::Air:
         resistance = target.resistAir;
         break;
-    case DamageType::Water:
+    case DamageElement::Water:
         resistance = target.resistWater;
         break;
-    case DamageType::Earth:
+    case DamageElement::Earth:
         resistance = target.resistEarth;
         break;
-    case DamageType::Mind:
+    case DamageElement::Mind:
         resistance = target.resistMind;
         break;
-    case DamageType::Spirit:
+    case DamageElement::Spirit:
         resistance = target.resistSpirit;
         break;
-    case DamageType::Body:
+    case DamageElement::Body:
         resistance = target.resistBody;
+        break;
+    case DamageElement::Light:
+        resistance = target.resistLight;
+        break;
+    case DamageElement::Dark:
+        resistance = target.resistDark;
         break;
     default:
         break;
@@ -289,7 +297,7 @@ int CombatSystem::calculateDamage(int baseDamage, DamageType type,
     return std::max(1, reduced); // Always at least 1 damage on a hit
 }
 
-int CombatSystem::calculateMonsterDamage(int baseDamage, DamageType type, int characterIndex) const
+int CombatSystem::calculateMonsterDamage(int baseDamage, DamageElement type, int characterIndex) const
 {
     if (!gameWorld_ || characterIndex < 0 || characterIndex >= kPartySize)
         return baseDamage;
@@ -298,28 +306,25 @@ int CombatSystem::calculateMonsterDamage(int baseDamage, DamageType type, int ch
     int resistance = 0;
     switch (type)
     {
-    case DamageType::Fire:
+    case DamageElement::Fire:
         resistance = ch.fireResistance;
         break;
-    case DamageType::Air:
+    case DamageElement::Air:
         resistance = ch.airResistance;
         break;
-    case DamageType::Water:
+    case DamageElement::Water:
         resistance = ch.waterResistance;
         break;
-    case DamageType::Earth:
+    case DamageElement::Earth:
         resistance = ch.earthResistance;
         break;
-    case DamageType::Mind:
+    case DamageElement::Mind:
         resistance = ch.mindResistance;
         break;
-    case DamageType::Spirit:
-        resistance = ch.spiritResistance;
-        break;
-    case DamageType::Body:
+    case DamageElement::Body:
         resistance = ch.bodyResistance;
         break;
-    case DamageType::Physical:
+    case DamageElement::Physical:
         resistance = ch.armorClass;
         break;
     default:
@@ -362,7 +367,7 @@ void CombatSystem::updateMonsterAI(MonsterInstance& monster, float /*deltaMs*/)
 
     switch (monster.aiState)
     {
-    case MonsterInstance::AIState::Idle:
+    case MonsterInstance::AIState::Standing:
     {
         // Check distance to party
         float dx = monster.x - party.worldX();
@@ -397,6 +402,9 @@ void CombatSystem::updateMonsterAI(MonsterInstance& monster, float /*deltaMs*/)
 
     case MonsterInstance::AIState::Fleeing:
     case MonsterInstance::AIState::Dead:
+        break;
+
+    default:
         break;
     }
 }
@@ -448,13 +456,13 @@ void CombatSystem::monsterAttack(MonsterInstance& monster)
         result.hit = true;
         int baseDmg = rollDamage(damageExpr);
         result.damage =
-            calculateMonsterDamage(baseDmg, DamageType::Physical, monster.targetCharacter);
+            calculateMonsterDamage(baseDmg, DamageElement::Physical, monster.targetCharacter);
         target.hitPoints -= result.damage;
 
         if (target.hitPoints <= 0)
         {
             target.hitPoints = 0;
-            target.setCondition(Condition::Unconscious);
+            target.setCondition(ConditionIndex::Unconscious);
             result.description = monster.name + " knocks out " + target.name + " (" +
                                  std::to_string(result.damage) + " damage)";
 
@@ -478,7 +486,7 @@ void CombatSystem::monsterAttack(MonsterInstance& monster)
     // Recovery time from monster stats
     monster.recoveryTime =
         std::max(500, (it != monsterDefs_.end()) ? it->second.recovery * 100 : 1000);
-    monster.aiState = MonsterInstance::AIState::Idle;
+    monster.aiState = MonsterInstance::AIState::Standing;
 }
 
 void CombatSystem::distributeXP(int xp)

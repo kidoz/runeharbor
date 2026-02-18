@@ -61,28 +61,28 @@ std::string getLowerExtension(const std::string& filename)
     return lower.substr(dot);
 }
 
-// Race base stats: [race][stat] order: Might, Intellect, Personality, Endurance, Speed, Accuracy,
-// Luck
-constexpr int kRaceBaseStats[4][7] = {
-    {11, 11, 11, 9, 11, 11, 9}, // Human
-    {7, 14, 11, 7, 11, 14, 9},  // Elf
-    {14, 11, 11, 14, 7, 7, 9},  // Dwarf
-    {14, 7, 7, 11, 14, 11, 9},  // Goblin
+// Base stats per face group (indexed by faceId ranges)
+// MM7 has no character races; base stats are determined by face/portrait
+constexpr int kFaceBaseStats[4][7] = {
+    {11, 11, 11, 9, 11, 11, 9}, // Faces 0-7
+    {7, 14, 11, 7, 11, 14, 9},  // Faces 8-11
+    {14, 11, 11, 14, 7, 7, 9},  // Faces 12-15
+    {14, 7, 7, 11, 14, 11, 9},  // Faces 16-19
 };
 
-// Face-to-race: 0-7=Human, 8-11=Elf, 12-15=Dwarf, 16-19=Goblin
-Race raceFromFace(int faceId)
+// Face group index from faceId
+int faceGroupFromId(int faceId)
 {
     if (faceId < 8)
-        return Race::Human;
+        return 0;
     if (faceId < 12)
-        return Race::Elf;
+        return 1;
     if (faceId < 16)
-        return Race::Dwarf;
-    return Race::Goblin;
+        return 2;
+    return 3;
 }
 
-// Starting skills per class (indexed by CharacterClass enum order)
+// Starting skills per base class (indexed by baseClassIndex)
 struct ClassSkills
 {
     const char* skill1;
@@ -1780,24 +1780,24 @@ void Application::initDefaultParty()
     party[3].name = "Alexis";
     party[3].faceId = 10;
     party[3].charClass = CharacterClass::Sorcerer;
+
     updateCharacterForFace(party[3]);
     updateSkillsForClass(party[3]);
 }
 
 void Application::updateCharacterForFace(Character& ch)
 {
-    Race race = raceFromFace(ch.faceId);
-    int raceIdx = static_cast<int>(race);
+    int groupIdx = faceGroupFromId(ch.faceId);
     for (int i = 0; i < 7; i++)
     {
-        ch.baseStats.byIndex(i) = kRaceBaseStats[raceIdx][i];
+        ch.baseStats.byIndex(i) = kFaceBaseStats[groupIdx][i];
     }
     ch.stats = ch.baseStats;
 }
 
 void Application::updateSkillsForClass(Character& ch)
 {
-    int classIdx = static_cast<int>(ch.charClass);
+    int classIdx = baseClassIndex(ch.charClass);
     ch.skills.clear();
     ch.skills.push_back(kClassStartingSkills[classIdx].skill1);
     ch.skills.push_back(kClassStartingSkills[classIdx].skill2);

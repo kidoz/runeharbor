@@ -6,50 +6,14 @@
 namespace runeharbor::game
 {
 
-Stats Character::racialBonuses(Race race)
-{
-    // MM7 racial stat bonuses
-    Stats bonus = {0, 0, 0, 0, 0, 0, 0};
-    switch (race)
-    {
-    case Race::Human:
-        // Humans are balanced, no bonuses
-        break;
-    case Race::Elf:
-        bonus.intellect = 2;
-        bonus.speed = 2;
-        bonus.accuracy = 2;
-        bonus.endurance = -2;
-        bonus.might = -2;
-        break;
-    case Race::Dwarf:
-        bonus.might = 2;
-        bonus.endurance = 2;
-        bonus.speed = -2;
-        bonus.accuracy = -2;
-        break;
-    case Race::Goblin:
-        bonus.speed = 2;
-        bonus.accuracy = 2;
-        bonus.might = -2;
-        bonus.personality = -2;
-        break;
-    default:
-        break;
-    }
-    return bonus;
-}
-
 int Character::effectiveStat(int statIndex) const
 {
-    int base = baseStats.byIndex(statIndex);
-    Stats racial = racialBonuses(race);
-    return base + racial.byIndex(statIndex);
+    return baseStats.byIndex(statIndex);
 }
 
 void Character::recalculateDerived()
 {
-    // Update current stats from base + racial
+    // Update current stats from base
     for (int i = 0; i < Stats::kCount; i++)
     {
         stats.byIndex(i) = effectiveStat(i);
@@ -58,33 +22,33 @@ void Character::recalculateDerived()
     // HP: base from endurance + level + class bonus
     int endBonus = std::max(0, (stats.endurance - 10) / 2);
     int classHpBase = 0;
-    switch (static_cast<int>(charClass))
+    switch (baseClassIndex(charClass))
     {
     case 0: // Knight
         classHpBase = 12;
         break;
-    case 1: // Paladin
+    case 3: // Paladin
         classHpBase = 10;
         break;
-    case 2: // Archer
+    case 4: // Archer
         classHpBase = 8;
         break;
-    case 3: // Cleric
+    case 6: // Cleric
         classHpBase = 8;
         break;
-    case 4: // Sorcerer
+    case 8: // Sorcerer
         classHpBase = 6;
         break;
-    case 5: // Thief
+    case 1: // Thief
         classHpBase = 8;
         break;
-    case 6: // Monk
+    case 2: // Monk
         classHpBase = 10;
         break;
-    case 7: // Ranger
+    case 5: // Ranger
         classHpBase = 8;
         break;
-    case 8: // Druid
+    case 7: // Druid
         classHpBase = 6;
         break;
     default:
@@ -98,33 +62,33 @@ void Character::recalculateDerived()
     int intBonus = std::max(0, (stats.intellect - 10) / 2);
     int perBonus = std::max(0, (stats.personality - 10) / 2);
     int classSpBase = 0;
-    switch (static_cast<int>(charClass))
+    switch (baseClassIndex(charClass))
     {
     case 0: // Knight
         classSpBase = 0;
         break;
-    case 1: // Paladin
+    case 3: // Paladin
         classSpBase = 4;
         break;
-    case 2: // Archer
+    case 4: // Archer
         classSpBase = 4;
         break;
-    case 3: // Cleric
+    case 6: // Cleric
         classSpBase = 6;
         break;
-    case 4: // Sorcerer
+    case 8: // Sorcerer
         classSpBase = 8;
         break;
-    case 5: // Thief
+    case 1: // Thief
         classSpBase = 0;
         break;
-    case 6: // Monk
+    case 2: // Monk
         classSpBase = 0;
         break;
-    case 7: // Ranger
+    case 5: // Ranger
         classSpBase = 4;
         break;
-    case 8: // Druid
+    case 7: // Druid
         classSpBase = 6;
         break;
     default:

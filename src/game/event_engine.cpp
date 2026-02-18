@@ -34,7 +34,7 @@ bool EventEngine::triggerEvent(int eventId)
 
     for (const auto& cmd : it->second.commands)
     {
-        if (cmd.opcode == EventOpcode::End)
+        if (cmd.opcode == EventOpcode::Exit)
         {
             break;
         }
@@ -58,24 +58,22 @@ void EventEngine::executeCommand(const EventCommand& cmd)
 {
     switch (cmd.opcode)
     {
-    case EventOpcode::SetVariable:
+    case EventOpcode::SetFlag:
         if (gameWorld_)
         {
             gameWorld_->setVar(static_cast<GameVarId>(cmd.param1), cmd.param2);
-            logger_.debug("SetVar " + std::to_string(cmd.param1) + " = " +
+            logger_.debug("SetFlag " + std::to_string(cmd.param1) + " = " +
                           std::to_string(cmd.param2));
         }
         break;
 
-    case EventOpcode::CheckVariable:
+    case EventOpcode::CheckFlag:
         if (gameWorld_)
         {
             int val = gameWorld_->getVar(static_cast<GameVarId>(cmd.param1));
             if (val != cmd.param2)
             {
-                // In a full implementation, this would skip to a branch target.
-                // For now, just log the check.
-                logger_.debug("CheckVar " + std::to_string(cmd.param1) + " != " +
+                logger_.debug("CheckFlag " + std::to_string(cmd.param1) + " != " +
                               std::to_string(cmd.param2) + " (actual=" + std::to_string(val) + ")");
             }
         }
@@ -97,23 +95,7 @@ void EventEngine::executeCommand(const EventCommand& cmd)
         }
         break;
 
-    case EventOpcode::GiveFood:
-        if (gameWorld_)
-        {
-            gameWorld_->party().addFood(cmd.param1);
-            logger_.debug("GiveFood " + std::to_string(cmd.param1));
-        }
-        break;
-
-    case EventOpcode::TakeFood:
-        if (gameWorld_)
-        {
-            gameWorld_->party().consumeFood(cmd.param1);
-            logger_.debug("TakeFood " + std::to_string(cmd.param1));
-        }
-        break;
-
-    case EventOpcode::GiveXP:
+    case EventOpcode::GiveExperience:
         if (gameWorld_)
         {
             // Distribute XP to all conscious party members
@@ -126,7 +108,7 @@ void EventEngine::executeCommand(const EventCommand& cmd)
                     ch.experience += xpEach;
                 }
             }
-            logger_.debug("GiveXP " + std::to_string(cmd.param1));
+            logger_.debug("GiveExperience " + std::to_string(cmd.param1));
         }
         break;
 
@@ -154,24 +136,20 @@ void EventEngine::executeCommand(const EventCommand& cmd)
         }
         break;
 
-    case EventOpcode::AdvanceTime:
+    case EventOpcode::SetGlobalVar:
         if (gameWorld_)
         {
-            gameWorld_->advanceTime(static_cast<uint64_t>(cmd.param1));
-            logger_.debug("AdvanceTime " + std::to_string(cmd.param1) + " minutes");
+            gameWorld_->setVar(static_cast<GameVarId>(cmd.param1), cmd.param2);
+            logger_.debug("SetGlobalVar " + std::to_string(cmd.param1) + " = " +
+                          std::to_string(cmd.param2));
         }
         break;
 
-    case EventOpcode::SetReputation:
-        if (gameWorld_)
-        {
-            gameWorld_->party().adjustReputation(cmd.param1);
-            logger_.debug("SetReputation delta=" + std::to_string(cmd.param1));
-        }
+    case EventOpcode::CastSpell:
+        logger_.debug("CastSpell " + std::to_string(cmd.param1));
         break;
 
-    case EventOpcode::Nop:
-    case EventOpcode::End:
+    case EventOpcode::Exit:
         break;
 
     default:

@@ -21,7 +21,7 @@ struct SaveHeader
     uint32_t magic = kMagic;
     uint32_t version = kVersion;
     uint64_t timestamp = 0;    // Real-world save time (Unix epoch seconds)
-    uint64_t gameTime = 0;     // In-game time (calendar minutes)
+    uint64_t gameTime = 0;     // In-game time (calendar ticks, 128/sec)
     char mapName[64] = {};     // Current map name
     char partyLeader[32] = {}; // First character's name (for display)
     int partyLevel = 0;        // Average party level (for display)

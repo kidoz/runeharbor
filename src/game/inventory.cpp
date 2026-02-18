@@ -24,11 +24,11 @@ const formats::ItemEntry* Inventory::getItemDef(int itemId) const
     return it != itemDefs_.end() ? &it->second : nullptr;
 }
 
-ItemCategory Inventory::getItemCategory(int itemId) const
+EquipType Inventory::getEquipType(int itemId) const
 {
     auto* def = getItemDef(itemId);
     if (!def)
-        return ItemCategory::Misc;
+        return EquipType::None;
     return categorizeItem(*def);
 }
 
@@ -49,26 +49,31 @@ int Inventory::getItemWeight(int itemId) const
     // Base weight by category
     switch (categorizeItem(*def))
     {
-    case ItemCategory::Weapon:
+    case EquipType::Weapon1H:
+    case EquipType::Wand:
         return 3 + def->material;
-    case ItemCategory::Armor:
+    case EquipType::Weapon2H:
+        return 5 + def->material;
+    case EquipType::Missile:
+        return 3 + def->material;
+    case EquipType::Armor:
         return 5 + def->material * 2;
-    case ItemCategory::Shield:
+    case EquipType::Shield:
         return 3;
-    case ItemCategory::Helmet:
+    case EquipType::Helmet:
         return 2;
-    case ItemCategory::Boots:
-    case ItemCategory::Gauntlets:
+    case EquipType::Boots:
+    case EquipType::Gauntlets:
         return 1;
-    case ItemCategory::Belt:
-    case ItemCategory::Cloak:
+    case EquipType::Belt:
+    case EquipType::Cloak:
         return 1;
-    case ItemCategory::Ring:
-    case ItemCategory::Amulet:
+    case EquipType::Ring:
+    case EquipType::Amulet:
         return 0;
-    case ItemCategory::Potion:
-    case ItemCategory::Scroll:
-    case ItemCategory::Reagent:
+    case EquipType::Potion:
+    case EquipType::SpellScroll:
+    case EquipType::Reagent:
         return 0;
     default:
         return 1;
@@ -339,40 +344,52 @@ bool Inventory::giveItem(const Item& item)
     return false;
 }
 
-ItemCategory Inventory::categorizeItem(const formats::ItemEntry& entry) const
+EquipType Inventory::categorizeItem(const formats::ItemEntry& entry) const
 {
     const auto& es = entry.equipStat;
-    if (es == "weapon" || es == "wand")
-        return ItemCategory::Weapon;
+    if (es == "weapon")
+        return EquipType::Weapon1H;
+    if (es == "weapon2h")
+        return EquipType::Weapon2H;
+    if (es == "missile")
+        return EquipType::Missile;
     if (es == "armor")
-        return ItemCategory::Armor;
+        return EquipType::Armor;
     if (es == "shield")
-        return ItemCategory::Shield;
+        return EquipType::Shield;
     if (es == "helm")
-        return ItemCategory::Helmet;
+        return EquipType::Helmet;
     if (es == "belt")
-        return ItemCategory::Belt;
+        return EquipType::Belt;
     if (es == "cloak")
-        return ItemCategory::Cloak;
+        return EquipType::Cloak;
     if (es == "gauntlets")
-        return ItemCategory::Gauntlets;
+        return EquipType::Gauntlets;
     if (es == "boots")
-        return ItemCategory::Boots;
-    if (es == "amulet")
-        return ItemCategory::Amulet;
+        return EquipType::Boots;
     if (es == "ring")
-        return ItemCategory::Ring;
-    if (es == "potion")
-        return ItemCategory::Potion;
-    if (es == "scroll" || es == "spell")
-        return ItemCategory::Scroll;
+        return EquipType::Ring;
+    if (es == "amulet")
+        return EquipType::Amulet;
+    if (es == "wand")
+        return EquipType::Wand;
     if (es == "reagent")
-        return ItemCategory::Reagent;
-    if (es == "gem")
-        return ItemCategory::Gem;
+        return EquipType::Reagent;
+    if (es == "potion")
+        return EquipType::Potion;
+    if (es == "scroll" || es == "spell")
+        return EquipType::SpellScroll;
+    if (es == "book")
+        return EquipType::Book;
+    if (es == "message")
+        return EquipType::MessageScroll;
+    if (es == "deed")
+        return EquipType::Deed;
     if (es == "gold")
-        return ItemCategory::Gold;
-    return ItemCategory::Misc;
+        return EquipType::GoldItem;
+    if (es == "gem")
+        return EquipType::None;
+    return EquipType::None;
 }
 
 EquipSlot Inventory::mapEquipSlot(const formats::ItemEntry& entry) const
@@ -380,25 +397,29 @@ EquipSlot Inventory::mapEquipSlot(const formats::ItemEntry& entry) const
     auto cat = categorizeItem(entry);
     switch (cat)
     {
-    case ItemCategory::Weapon:
+    case EquipType::Weapon1H:
+    case EquipType::Weapon2H:
+    case EquipType::Wand:
         return EquipSlot::MainHand;
-    case ItemCategory::Armor:
+    case EquipType::Missile:
+        return EquipSlot::Bow;
+    case EquipType::Armor:
         return EquipSlot::Armor;
-    case ItemCategory::Shield:
+    case EquipType::Shield:
         return EquipSlot::OffHand;
-    case ItemCategory::Helmet:
+    case EquipType::Helmet:
         return EquipSlot::Helmet;
-    case ItemCategory::Belt:
+    case EquipType::Belt:
         return EquipSlot::Belt;
-    case ItemCategory::Cloak:
+    case EquipType::Cloak:
         return EquipSlot::Cloak;
-    case ItemCategory::Gauntlets:
+    case EquipType::Gauntlets:
         return EquipSlot::Gauntlets;
-    case ItemCategory::Boots:
+    case EquipType::Boots:
         return EquipSlot::Boots;
-    case ItemCategory::Amulet:
+    case EquipType::Amulet:
         return EquipSlot::Amulet;
-    case ItemCategory::Ring:
+    case EquipType::Ring:
         return EquipSlot::Ring1; // Will find first free ring slot during equip
     default:
         return EquipSlot::Count; // Not equippable
