@@ -2,9 +2,79 @@
 #include "inventory.hpp"
 
 #include <algorithm>
+#include <charconv>
+#include <optional>
+
+#include "../util/string_utils.hpp"
 
 namespace runeharbor::game
 {
+
+namespace
+{
+EquipType mapEquipTypeCode(int code)
+{
+    switch (code)
+    {
+    case 0:
+        return EquipType::Weapon1H;
+    case 1:
+        return EquipType::Weapon2H;
+    case 2:
+        return EquipType::Missile;
+    case 3:
+        return EquipType::Armor;
+    case 4:
+        return EquipType::Shield;
+    case 5:
+        return EquipType::Helmet;
+    case 6:
+        return EquipType::Belt;
+    case 7:
+        return EquipType::Cloak;
+    case 8:
+        return EquipType::Gauntlets;
+    case 9:
+        return EquipType::Boots;
+    case 10:
+        return EquipType::Ring;
+    case 11:
+        return EquipType::Amulet;
+    case 12:
+        return EquipType::Wand;
+    case 13:
+        return EquipType::Reagent;
+    case 14:
+        return EquipType::Potion;
+    case 15:
+        return EquipType::SpellScroll;
+    case 16:
+        return EquipType::Book;
+    case 17:
+        return EquipType::MessageScroll;
+    case 18:
+        return EquipType::Deed;
+    case 19:
+        return EquipType::GoldItem;
+    case 20:
+    default:
+        return EquipType::None;
+    }
+}
+
+std::optional<int> parseIntStrict(std::string_view raw)
+{
+    int value = 0;
+    const char* begin = raw.data();
+    const char* end = raw.data() + raw.size();
+    auto [ptr, ec] = std::from_chars(begin, end, value);
+    if (ec != std::errc{} || ptr != end)
+    {
+        return std::nullopt;
+    }
+    return value;
+}
+} // namespace
 
 Inventory::Inventory(util::ILogger& logger) : logger_(logger) {}
 
@@ -92,7 +162,10 @@ const CharacterInventory& Inventory::getInventory(int characterIndex) const
 
 bool Inventory::canEquip(int characterIndex, int itemId) const
 {
-    (void)characterIndex; // TODO: check class restrictions
+    if (characterIndex < 0 || characterIndex >= static_cast<int>(inventories_.size()))
+    {
+        return false;
+    }
     auto slot = getEquipSlot(itemId);
     return slot != EquipSlot::Count;
 }
@@ -346,10 +419,20 @@ bool Inventory::giveItem(const Item& item)
 
 EquipType Inventory::categorizeItem(const formats::ItemEntry& entry) const
 {
-    const auto& es = entry.equipStat;
-    if (es == "weapon")
+    const std::string es = util::toLower(util::trim(entry.equipStat));
+    if (es.empty())
+    {
+        return EquipType::None;
+    }
+
+    if (auto code = parseIntStrict(es); code.has_value())
+    {
+        return mapEquipTypeCode(*code);
+    }
+
+    if (es == "weapon" || es == "weapon1h" || es == "weapon1or2")
         return EquipType::Weapon1H;
-    if (es == "weapon2h")
+    if (es == "weapon2" || es == "weapon2h" || es == "twohand")
         return EquipType::Weapon2H;
     if (es == "missile")
         return EquipType::Missile;
@@ -357,7 +440,7 @@ EquipType Inventory::categorizeItem(const formats::ItemEntry& entry) const
         return EquipType::Armor;
     if (es == "shield")
         return EquipType::Shield;
-    if (es == "helm")
+    if (es == "helm" || es == "helmet")
         return EquipType::Helmet;
     if (es == "belt")
         return EquipType::Belt;
@@ -371,24 +454,22 @@ EquipType Inventory::categorizeItem(const formats::ItemEntry& entry) const
         return EquipType::Ring;
     if (es == "amulet")
         return EquipType::Amulet;
-    if (es == "wand")
+    if (es == "wand" || es == "weaponw")
         return EquipType::Wand;
-    if (es == "reagent")
+    if (es == "reagent" || es == "herb")
         return EquipType::Reagent;
-    if (es == "potion")
+    if (es == "potion" || es == "bottle")
         return EquipType::Potion;
-    if (es == "scroll" || es == "spell")
+    if (es == "scroll" || es == "spell" || es == "spellscroll" || es == "sscroll")
         return EquipType::SpellScroll;
     if (es == "book")
         return EquipType::Book;
-    if (es == "message")
+    if (es == "message" || es == "mscroll")
         return EquipType::MessageScroll;
     if (es == "deed")
         return EquipType::Deed;
-    if (es == "gold")
+    if (es == "gold" || es == "golditem")
         return EquipType::GoldItem;
-    if (es == "gem")
-        return EquipType::None;
     return EquipType::None;
 }
 

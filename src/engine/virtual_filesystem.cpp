@@ -90,7 +90,7 @@ void VirtualFileSystem::unmountAll()
 
 std::optional<std::vector<uint8_t>> VirtualFileSystem::readFile(const std::string& filename)
 {
-    if (archives.empty() && imageArchives.empty())
+    if (archives.empty() && imageArchives.empty() && gameArchives.empty())
     {
         logger.warning("Cannot read file: no archives mounted");
         return std::nullopt;
@@ -242,6 +242,19 @@ std::optional<formats::ImageFileHeader> VirtualFileSystem::getImageInfo(const st
         if (info.has_value())
         {
             return info;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<std::vector<uint8_t>> VirtualFileSystem::getImagePalette(const std::string& filename)
+{
+    for (auto& archive : imageArchives)
+    {
+        auto pal = archive->extractPalette(filename);
+        if (pal.has_value())
+        {
+            return pal;
         }
     }
     return std::nullopt;

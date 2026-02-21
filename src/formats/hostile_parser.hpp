@@ -18,6 +18,8 @@ class HostileMatrix
   public:
     // Returns the hostility value from 'source' to 'target'
     std::optional<int> getHostility(const std::string& source, const std::string& target) const;
+    std::optional<int> getHostilityInsensitive(const std::string& source,
+                                               const std::string& target) const;
 
     // Adds a hostility value
     void addHostility(const std::string& source, const std::string& target, int value);

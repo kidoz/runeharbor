@@ -21,6 +21,16 @@ class CharacterCreationState : public IGameState
     void setFallbackBackground(void* tex, int w, int h);
     void setPortraitTexture(int index, void* tex, int w, int h);
 
+    // Overlay texture setters
+    void setFaceMask(void* tex, int w, int h);
+    void setOkButton(void* tex, int w, int h);
+    void setClearButton(void* tex, int w, int h);
+    void setMinusButton(void* tex, int w, int h);
+    void setPlusButton(void* tex, int w, int h);
+    void setLeftArrow(void* tex, int w, int h);
+    void setRightArrow(void* tex, int w, int h);
+    void setClassIcon(int index, void* tex, int w, int h);
+
     void enter() override;
     void exit() override;
     std::optional<GameStateId> update() override;
@@ -30,6 +40,7 @@ class CharacterCreationState : public IGameState
     int calculateBonusPointsRemaining() const;
     void updateCharacterForFace(Character& ch);
     void updateSkillsForClass(Character& ch);
+    void rebuildAvailableSkills();
 
     StateContext& ctx;
 
@@ -37,6 +48,15 @@ class CharacterCreationState : public IGameState
     int menuRowIndex = 0;
     bool isNaming = false;
     static constexpr int kRowCount = 10;
+
+    // Additional skill selection (2 per character)
+    static constexpr int kMaxExtraSkills = 2;
+    struct AvailableSkill
+    {
+        const char* name;
+        bool selected;
+    };
+    std::vector<AvailableSkill> availableSkills; // for active character's class
 
     // Textures (non-owning)
     void* background = nullptr;
@@ -50,6 +70,23 @@ class CharacterCreationState : public IGameState
     void* portraitTextures[kPortraitCount] = {};
     int portraitWidths[kPortraitCount] = {};
     int portraitHeights[kPortraitCount] = {};
+
+    // Overlay textures (non-owning, owned by Application)
+    struct TexRef
+    {
+        void* tex = nullptr;
+        int w = 0, h = 0;
+    };
+    TexRef faceMask;
+    TexRef okButton;
+    TexRef clearButton;
+    TexRef minusButton;
+    TexRef plusButton;
+    TexRef leftArrow;
+    TexRef rightArrow;
+
+    static constexpr int kClassIconCount = 9;
+    TexRef classIcons[kClassIconCount] = {};
 };
 
 } // namespace runeharbor::engine

@@ -13,6 +13,8 @@ platform_sources = files(
 # Engine sources
 engine_sources = files(
     'engine/application.cpp',
+    'engine/ini_config.cpp',
+    'engine/map_transition_resolver.cpp',
     'engine/map_scene.cpp',
     'engine/virtual_filesystem.cpp',
     'engine/states/state_context.cpp',
@@ -21,6 +23,8 @@ engine_sources = files(
     'engine/states/character_creation_state.cpp',
     'engine/states/loading_state.cpp',
     'engine/states/ingame_state.cpp',
+    'engine/states/credits_state.cpp',
+    'engine/states/load_game_state.cpp',
 )
 
 # Formats sources
@@ -40,20 +44,28 @@ formats_sources = files(
     'formats/global_text_parser.cpp',
     'formats/spells_parser.cpp',
     'formats/items_parser.cpp',
+    'formats/placemon_parser.cpp',
+    'formats/rnditems_parser.cpp',
     'formats/monsters_parser.cpp',
     'formats/mapstats_parser.cpp',
     'formats/quests_parser.cpp',
     'formats/classes_parser.cpp',
     'formats/awards_parser.cpp',
     'formats/hostile_parser.cpp',
+    'formats/npcdata_parser.cpp',
+    'formats/npctopic_parser.cpp',
     'formats/npctext_parser.cpp',
     'formats/npcnames_parser.cpp',
     'formats/autonote_parser.cpp',
     'formats/credits_parser.cpp',
+    'formats/two_d_events_parser.cpp',
+    'formats/frame_tables.cpp',
+    'formats/evt_script_parser.cpp',
 )
 
 # Graphics sources
 graphics_sources = files(
+    'graphics/bitmap_font.cpp',
     'graphics/debug_text.cpp',
     'graphics/palette.cpp',
     'graphics/image.cpp',
@@ -83,6 +95,7 @@ game_sources = files(
     'game/character.cpp',
     'game/party.cpp',
     'game/game_world.cpp',
+    'game/generation.cpp',
     'game/event_engine.cpp',
     'game/inventory.cpp',
     'game/combat.cpp',

@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <string>
 
+#include <cmath>
+
+#include "../engine/map_scene.hpp"
 #include "../game/game_world.hpp"
 #include "../graphics/debug_text.hpp"
 #include "../graphics/irenderer.hpp"
@@ -44,9 +47,93 @@ constexpr int kTimeY = 124;
 
 const char* kMonthNames[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
                              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+const char* kDayNames[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 
 const char* kClassName[] = {"Knight", "Paladin", "Archer", "Cleric", "Sorcerer",
                             "Thief",  "Monk",    "Ranger", "Druid"};
+
+struct MinimapBounds
+{
+    float minX = 0.0f;
+    float maxX = 0.0f;
+    float minY = 0.0f;
+    float maxY = 0.0f;
+    bool valid = false;
+};
+
+MinimapBounds buildMinimapBounds(const engine::MapScene* mapScene)
+{
+    MinimapBounds result;
+    if (!mapScene)
+    {
+        return result;
+    }
+
+    auto extend = [&](float x, float y)
+    {
+        if (!result.valid)
+        {
+            result.minX = x;
+            result.maxX = x;
+            result.minY = y;
+            result.maxY = y;
+            result.valid = true;
+            return;
+        }
+        result.minX = std::min(result.minX, x);
+        result.maxX = std::max(result.maxX, x);
+        result.minY = std::min(result.minY, y);
+        result.maxY = std::max(result.maxY, y);
+    };
+
+    const auto& blv = mapScene->getBLVData();
+    for (const auto& vertex : blv.vertices)
+    {
+        extend(static_cast<float>(vertex.x), static_cast<float>(vertex.y));
+    }
+
+    const auto& odm = mapScene->getODMData();
+    if (!odm.heightmap.empty())
+    {
+        constexpr float kCell = 512.0f;
+        const float half = static_cast<float>(runeharbor::formats::ODMMapData::TERRAIN_SIZE) * 0.5f;
+        extend((-half) * kCell, (-half) * kCell);
+        extend((half - 1.0f) * kCell, (half - 1.0f) * kCell);
+    }
+
+    for (const auto& building : odm.buildings)
+    {
+        const float minX = static_cast<float>(building.worldX + building.minX);
+        const float maxX = static_cast<float>(building.worldX + building.maxX);
+        const float minY = static_cast<float>(building.worldY + building.minY);
+        const float maxY = static_cast<float>(building.worldY + building.maxY);
+        extend(minX, minY);
+        extend(maxX, maxY);
+    }
+
+    if (result.valid)
+    {
+        if (std::abs(result.maxX - result.minX) < 1.0f)
+        {
+            result.maxX = result.minX + 1.0f;
+        }
+        if (std::abs(result.maxY - result.minY) < 1.0f)
+        {
+            result.maxY = result.minY + 1.0f;
+        }
+    }
+
+    return result;
+}
+
+float normalizeToUnit(float value, float min, float max)
+{
+    if (max <= min)
+    {
+        return 0.5f;
+    }
+    return std::clamp((value - min) / (max - min), 0.0f, 1.0f);
+}
 } // namespace
 
 int HUD::sx(int gameX, float scale, float offsetX) const
@@ -211,32 +298,52 @@ void HUD::renderResourceBar(graphics::IRenderer& renderer, const graphics::Debug
 void HUD::renderMinimap(graphics::IRenderer& renderer, const graphics::DebugText& debugText,
                         float scale, float offsetX, float offsetY)
 {
-    // Minimap placeholder
     renderer.drawFilledRect(sx(kMinimapX, scale, offsetX), sy(kMinimapY, scale, offsetY),
                             sw(kMinimapW, scale), sh(kMinimapH, scale), 15, 20, 15, 180);
     renderer.drawRect(sx(kMinimapX, scale, offsetX), sy(kMinimapY, scale, offsetY),
                       sw(kMinimapW, scale), sh(kMinimapH, scale), 80, 100, 80, 255);
 
     SDL_Renderer* sdl = renderer.getSDLRenderer();
-    if (!sdl)
-        return;
-
-    // Map name
-    const auto& mapName = gameWorld_->currentMap();
-    if (!mapName.empty())
+    if (sdl)
     {
-        debugText.drawText(sdl, sx(kMinimapX + 4, scale, offsetX),
-                           sy(kMinimapY + 4, scale, offsetY), 1, 200, 200, 200, mapName);
-    }
-    else
-    {
-        debugText.drawText(sdl, sx(kMinimapX + 20, scale, offsetX),
-                           sy(kMinimapY + 48, scale, offsetY), 1, 100, 100, 100, "MINIMAP");
+        // Map name
+        const auto& mapName = gameWorld_->currentMap();
+        if (!mapName.empty())
+        {
+            debugText.drawText(sdl, sx(kMinimapX + 4, scale, offsetX),
+                               sy(kMinimapY + 4, scale, offsetY), 1, 200, 200, 200, mapName);
+        }
+        else
+        {
+            debugText.drawText(sdl, sx(kMinimapX + 20, scale, offsetX),
+                               sy(kMinimapY + 48, scale, offsetY), 1, 100, 100, 100, "MINIMAP");
+        }
     }
 
-    // Party position indicator (center dot)
-    int cx = sx(kMinimapX + kMinimapW / 2, scale, offsetX);
-    int cy = sy(kMinimapY + kMinimapH / 2, scale, offsetY);
+    constexpr float kPad = 4.0f;
+    const float innerW = static_cast<float>(kMinimapW) - 2.0f * kPad;
+    const float innerH = static_cast<float>(kMinimapH) - 2.0f * kPad;
+    const MinimapBounds bounds = buildMinimapBounds(mapScene_);
+
+    float partyU = 0.5f;
+    float partyV = 0.5f;
+    if (bounds.valid)
+    {
+        partyU = normalizeToUnit(gameWorld_->party().worldX(), bounds.minX, bounds.maxX);
+        // Minimap Y grows downward; world Y grows upward in map coordinates.
+        partyV = 1.0f - normalizeToUnit(gameWorld_->party().worldY(), bounds.minY, bounds.maxY);
+
+        const int mapFrameX = sx(kMinimapX + static_cast<int>(kPad), scale, offsetX);
+        const int mapFrameY = sy(kMinimapY + static_cast<int>(kPad), scale, offsetY);
+        const int mapFrameW = sw(static_cast<int>(innerW), scale);
+        const int mapFrameH = sh(static_cast<int>(innerH), scale);
+        renderer.drawRect(mapFrameX, mapFrameY, mapFrameW, mapFrameH, 65, 120, 65, 180);
+    }
+
+    const float px = static_cast<float>(kMinimapX) + kPad + partyU * innerW;
+    const float py = static_cast<float>(kMinimapY) + kPad + partyV * innerH;
+    const int cx = sx(static_cast<int>(px), scale, offsetX);
+    const int cy = sy(static_cast<int>(py), scale, offsetY);
     renderer.drawFilledRect(cx - 2, cy - 2, 5, 5, 255, 255, 100, 255);
 }
 
@@ -251,8 +358,9 @@ void HUD::renderTimeDisplay(graphics::IRenderer& renderer, const graphics::Debug
 
     // Date
     int monthIdx = std::clamp(cal.month() - 1, 0, 11);
-    std::string dateStr =
-        std::to_string(cal.day()) + " " + kMonthNames[monthIdx] + " " + std::to_string(cal.year());
+    int dayIdx = std::clamp(cal.dayOfWeek(), 0, 6);
+    std::string dateStr = std::string(kDayNames[dayIdx]) + " " + std::to_string(cal.day()) + " " +
+                          kMonthNames[monthIdx] + " " + std::to_string(cal.year());
     debugText.drawText(sdl, sx(kTimeX, scale, offsetX), sy(kTimeY, scale, offsetY), 1, 200, 200,
                        200, dateStr);
 

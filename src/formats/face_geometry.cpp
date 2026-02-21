@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
-#include "../util/string_utils.hpp"
+#include "face_geometry.hpp"
+
 #include <cmath>
 
-#include "face_geometry.hpp"
+#include "../util/string_utils.hpp"
 
 namespace runeharbor::formats
 {

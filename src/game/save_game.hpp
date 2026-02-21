@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -11,12 +12,13 @@ namespace runeharbor::game
 {
 
 class GameWorld;
+class Inventory;
 
 /// Save file header
 struct SaveHeader
 {
     static constexpr uint32_t kMagic = 0x52484256; // "RHBV" (RuneHarBor saVe)
-    static constexpr uint32_t kVersion = 1;
+    static constexpr uint32_t kVersion = 11;
 
     uint32_t magic = kMagic;
     uint32_t version = kVersion;
@@ -43,16 +45,29 @@ class SaveGame
     explicit SaveGame(util::ILogger& logger);
 
     /// Save current game state to a slot (0-based index)
-    bool save(const GameWorld& world, int slotIndex);
+    bool save(const GameWorld& world, int slotIndex,
+              const std::vector<uint8_t>* eventRuntimeState = nullptr,
+              const Inventory* inventory = nullptr);
 
     /// Load game state from a slot into the given world
-    bool load(GameWorld& world, int slotIndex);
+    bool load(GameWorld& world, int slotIndex, std::vector<uint8_t>* eventRuntimeState = nullptr,
+              Inventory* inventory = nullptr);
+
+    /// Load game state from autosave.mm7
+    bool loadAutosave(GameWorld& world, std::vector<uint8_t>* eventRuntimeState = nullptr,
+                      Inventory* inventory = nullptr);
 
     /// Get info about all save slots (for UI display)
     std::vector<SaveSlotInfo> listSlots() const;
 
+    /// Read autosave header metadata when available.
+    std::optional<SaveHeader> autosaveHeader() const;
+
     /// Check if a slot has a save file
     bool slotExists(int slotIndex) const;
+
+    /// Check if autosave.mm7 exists
+    bool autosaveExists() const;
 
     /// Delete a save slot
     bool deleteSlot(int slotIndex);
@@ -61,10 +76,13 @@ class SaveGame
     void setSaveDirectory(const std::string& dir) { saveDir_ = dir; }
 
     /// Max number of save slots
-    static constexpr int kMaxSlots = 10;
+    static constexpr int kMaxSlots = 40;
 
   private:
     std::string slotPath(int slotIndex) const;
+    std::string legacySlotPath(int slotIndex) const;
+    std::string autosavePath() const;
+    std::string resolveExistingSlotPath(int slotIndex) const;
 
     // Serialization helpers
     void writeU8(std::vector<uint8_t>& buf, uint8_t val);

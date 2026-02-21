@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
-#include "../util/string_utils.hpp"
+#include "npcnames_parser.hpp"
+
 #include <algorithm>
 #include <format>
 #include <sstream> // For std::istringstream and std::getline
 
-#include "npcnames_parser.hpp"
+#include "../util/string_utils.hpp"
 
 namespace runeharbor::formats
 {

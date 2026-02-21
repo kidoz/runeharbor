@@ -136,6 +136,10 @@ class SpellSystem
     // Cast a buff spell on self or party
     SpellResult castBuffSpell(int characterIndex, int spellId);
 
+    // Event/script spell cast path (opcode-driven): applies effect directly to party targets
+    // without requiring caster skill/mana checks.
+    SpellResult castScriptSpell(int spellId, int power, int targetCharIndex);
+
     // Get spells available to a character (based on learned skills)
     std::vector<int> getAvailableSpells(int characterIndex) const;
 

@@ -12,11 +12,16 @@ namespace runeharbor::game
 class GameWorld;
 }
 
+namespace runeharbor::engine
+{
+class MapScene;
+}
+
 namespace runeharbor::ui
 {
 
 /// In-game HUD rendering.
-/// Draws party portraits, HP/SP bars, gold/food, time, minimap placeholder.
+/// Draws party portraits, HP/SP bars, gold/food, time, and a simple minimap.
 /// Operates in game coordinates (640x480); caller provides scaling.
 class HUD
 {
@@ -25,6 +30,7 @@ class HUD
 
     /// Set the game world to read party/calendar data from
     void setGameWorld(game::GameWorld* world) { gameWorld_ = world; }
+    void setMapScene(engine::MapScene* mapScene) { mapScene_ = mapScene; }
 
     /// Render the HUD overlay.
     /// @param renderer Renderer for drawing primitives
@@ -51,6 +57,7 @@ class HUD
     int sh(int gameH, float scale) const;
 
     game::GameWorld* gameWorld_ = nullptr;
+    engine::MapScene* mapScene_ = nullptr;
 };
 
 } // namespace runeharbor::ui

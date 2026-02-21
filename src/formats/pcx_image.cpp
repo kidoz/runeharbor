@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
-#include "../util/string_utils.hpp"
+#include "pcx_image.hpp"
+
 #include <algorithm>
 #include <exception>
 #include <format>
 
 #include <cstring>
 
-#include "pcx_image.hpp"
+#include "../util/string_utils.hpp"
 
 namespace runeharbor::formats
 {

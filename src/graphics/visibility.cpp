@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: MIT
 #include "visibility.hpp"
 
+#include <algorithm>
+#include <limits>
+#include <utility>
+
 #include <cmath>
 
 #include "../formats/blv_map.hpp"
+#include "../formats/odm_map.hpp"
 
 namespace runeharbor::graphics
 {
@@ -189,15 +194,56 @@ void PortalVisibility::floodFill(const formats::BLVMapData& mapData, uint16_t se
 
 // ── TerrainLOD ───────────────────────────────────────────────────────────────
 
+float TerrainLOD::lod1DistSq_ = TerrainLOD::kLOD1DistSq;
+float TerrainLOD::lod2DistSq_ = TerrainLOD::kLOD2DistSq;
+float TerrainLOD::maxRenderDistSq_ = TerrainLOD::kMaxRenderDistSq;
+
 int TerrainLOD::lodStep(float distanceSq)
 {
-    if (distanceSq > kMaxRenderDistSq)
+    if (distanceSq > maxRenderDistSq_)
         return 0; // Don't render at all
-    if (distanceSq > kLOD2DistSq)
+    if (distanceSq > lod2DistSq_)
         return 4;
-    if (distanceSq > kLOD1DistSq)
+    if (distanceSq > lod1DistSq_)
         return 2;
     return 1;
+}
+
+void TerrainLOD::configureFromGridBands(int gridBand1, int gridBand2, int gridBand3)
+{
+    const int nearBand = std::max(1, gridBand1);
+    const int midBand = std::max(nearBand, gridBand2);
+    const int farBand = std::max(midBand, gridBand3);
+
+    const float lod1Dist = static_cast<float>(nearBand) * 1500.0f;
+    const float lod2Dist = static_cast<float>(midBand) * 2000.0f;
+    const float maxDist = static_cast<float>(farBand) * 2000.0f;
+
+    lod1DistSq_ = lod1Dist * lod1Dist;
+    lod2DistSq_ = lod2Dist * lod2Dist;
+    maxRenderDistSq_ = maxDist * maxDist;
+}
+
+void TerrainLOD::resetDefaults()
+{
+    lod1DistSq_ = kLOD1DistSq;
+    lod2DistSq_ = kLOD2DistSq;
+    maxRenderDistSq_ = kMaxRenderDistSq;
+}
+
+float TerrainLOD::lod1DistSq()
+{
+    return lod1DistSq_;
+}
+
+float TerrainLOD::lod2DistSq()
+{
+    return lod2DistSq_;
+}
+
+float TerrainLOD::maxRenderDistSq()
+{
+    return maxRenderDistSq_;
 }
 
 // ── AsyncLoader ──────────────────────────────────────────────────────────────
@@ -214,7 +260,14 @@ void AsyncLoader::enqueue(const std::string& name, LoadRequest::Type type)
             return;
     }
 
+    // Clear previous failure state if caller is retrying this resource.
+    failed_.erase(name);
     pending_.push_back({name, type, false});
+}
+
+void AsyncLoader::setHandler(LoadRequest::Type type, LoadHandler handler)
+{
+    handlers_[typeToIndex(type)] = std::move(handler);
 }
 
 bool AsyncLoader::isLoaded(const std::string& name) const
@@ -222,22 +275,270 @@ bool AsyncLoader::isLoaded(const std::string& name) const
     return loaded_.count(name) > 0;
 }
 
-void AsyncLoader::processPending()
+bool AsyncLoader::isFailed(const std::string& name) const
 {
-    if (pending_.empty())
+    return failed_.count(name) > 0;
+}
+
+void AsyncLoader::processPending(size_t maxItems)
+{
+    if (pending_.empty() || maxItems == 0)
         return;
 
-    // Process one item per frame (actual loading would happen here)
-    auto& req = pending_.front();
-    req.completed = true;
-    loaded_.insert(req.resourceName);
-    pending_.erase(pending_.begin());
+    const size_t toProcess = std::min(maxItems, pending_.size());
+    for (size_t i = 0; i < toProcess; i++)
+    {
+        auto req = pending_.front();
+        pending_.pop_front();
+
+        bool success = true;
+        const auto& handler = handlers_[typeToIndex(req.type)];
+        if (handler)
+        {
+            success = handler(req);
+        }
+
+        if (success)
+        {
+            loaded_.insert(req.resourceName);
+            failed_.erase(req.resourceName);
+        }
+        else
+        {
+            failed_.insert(req.resourceName);
+        }
+    }
 }
 
 void AsyncLoader::clear()
 {
     pending_.clear();
     loaded_.clear();
+    failed_.clear();
+}
+
+std::optional<PickHit> pickClosestProjectedPoint(const Mat4& viewProjection, int viewportWidth,
+                                                 int viewportHeight, int mouseX, int mouseY,
+                                                 std::span<const PickCandidate> candidates,
+                                                 float pickRadiusPx,
+                                                 const PickSelectionFilter& filter)
+{
+    if (viewportWidth <= 0 || viewportHeight <= 0 || candidates.empty())
+    {
+        return std::nullopt;
+    }
+
+    PickHit best{};
+    bool found = false;
+    float bestDepth = std::numeric_limits<float>::max();
+    float bestDistSq = std::numeric_limits<float>::max();
+    const float radiusSq = pickRadiusPx * pickRadiusPx;
+
+    for (const auto& candidate : candidates)
+    {
+        if (filter.requireEventId && candidate.eventId <= 0)
+        {
+            continue;
+        }
+        if (filter.type.has_value() && candidate.type != *filter.type)
+        {
+            continue;
+        }
+
+        Vec4 clip = viewProjection * Vec4(candidate.worldPos, 1.0f);
+        if (clip.w <= 0.001f)
+        {
+            continue;
+        }
+
+        const float ndcX = clip.x / clip.w;
+        const float ndcY = clip.y / clip.w;
+        if (ndcX < -1.0f || ndcX > 1.0f || ndcY < -1.0f || ndcY > 1.0f)
+        {
+            continue;
+        }
+
+        const float sx = (ndcX * 0.5f + 0.5f) * static_cast<float>(viewportWidth);
+        const float sy = (1.0f - (ndcY * 0.5f + 0.5f)) * static_cast<float>(viewportHeight);
+        const float dx = static_cast<float>(mouseX) - sx;
+        const float dy = static_cast<float>(mouseY) - sy;
+        const float distSq = dx * dx + dy * dy;
+        if (distSq > radiusSq)
+        {
+            continue;
+        }
+
+        const float depth = clip.w;
+        if (!found || depth < bestDepth ||
+            (std::abs(depth - bestDepth) < 0.01f && distSq < bestDistSq))
+        {
+            found = true;
+            bestDepth = depth;
+            bestDistSq = distSq;
+            best.id = candidate.id;
+            best.depth = depth;
+            best.screenDistanceSq = distSq;
+            best.type = candidate.type;
+            best.objectIndex = candidate.objectIndex;
+            best.eventId = candidate.eventId;
+            best.worldPos = candidate.worldPos;
+        }
+    }
+
+    return found ? std::optional<PickHit>(best) : std::nullopt;
+}
+
+std::vector<PickCandidate> collectMapEventCandidates(const formats::BLVMapData& blvData,
+                                                     const formats::ODMMapData& odmData,
+                                                     const Mat4& viewProjection,
+                                                     const Vec3& cameraPos)
+{
+    Frustum frustum;
+    frustum.extractFromMatrix(viewProjection);
+
+    std::unordered_set<uint16_t> visibleIndoorSectors;
+    if (!blvData.sectors.empty())
+    {
+        PortalVisibility portalVisibility;
+        visibleIndoorSectors = portalVisibility.computeVisibleSectors(blvData, cameraPos, 8);
+    }
+
+    return collectMapEventCandidates(blvData, odmData, frustum, visibleIndoorSectors);
+}
+
+std::vector<PickCandidate>
+collectMapEventCandidates(const formats::BLVMapData& blvData, const formats::ODMMapData& odmData,
+                          const Frustum& frustum,
+                          const std::unordered_set<uint16_t>& visibleIndoorSectors)
+{
+    std::vector<PickCandidate> candidates;
+    const bool hasIndoorSectorGraph = !blvData.sectors.empty();
+    const bool cullAllIndoor = hasIndoorSectorGraph && visibleIndoorSectors.empty();
+
+    if (!cullAllIndoor)
+    {
+        for (const auto& face : blvData.faces)
+        {
+            if (face.vertexIndices.empty() || face.isInvisible())
+            {
+                continue;
+            }
+            if (!visibleIndoorSectors.empty() && !visibleIndoorSectors.contains(face.sectorId))
+            {
+                continue;
+            }
+            if (!frustum.testAABB(static_cast<float>(face.minX), static_cast<float>(face.minY),
+                                  static_cast<float>(face.minZ), static_cast<float>(face.maxX),
+                                  static_cast<float>(face.maxY), static_cast<float>(face.maxZ)))
+            {
+                continue;
+            }
+
+            Vec3 centroid = Vec3::zero();
+            int valid = 0;
+            for (uint16_t vi : face.vertexIndices)
+            {
+                if (vi >= blvData.vertices.size())
+                {
+                    continue;
+                }
+                const auto& v = blvData.vertices[vi];
+                centroid = centroid + Vec3(static_cast<float>(v.x), static_cast<float>(v.y),
+                                           static_cast<float>(v.z));
+                valid++;
+            }
+            if (valid <= 0)
+            {
+                continue;
+            }
+            centroid = centroid * (1.0f / static_cast<float>(valid));
+            candidates.push_back(PickCandidate{
+                .id = (face.eventId > 0) ? face.eventId : static_cast<int>(candidates.size()) + 1,
+                .worldPos = centroid,
+                .type = PickObjectType::IndoorFace,
+                .objectIndex = static_cast<int>(&face - blvData.faces.data()),
+                .eventId = face.eventId,
+            });
+        }
+
+        for (size_t i = 0; i < blvData.decorations.size(); i++)
+        {
+            const auto& decor = blvData.decorations[i];
+            if (decor.hidden)
+            {
+                continue;
+            }
+            if (!frustum.testSphere(static_cast<float>(decor.x), static_cast<float>(decor.y),
+                                    static_cast<float>(decor.z), 128.0f))
+            {
+                continue;
+            }
+            candidates.push_back(PickCandidate{
+                .id = (decor.eventId > 0) ? static_cast<int>(decor.eventId)
+                                          : static_cast<int>(candidates.size()) + 1,
+                .worldPos = Vec3(static_cast<float>(decor.x), static_cast<float>(decor.y),
+                                 static_cast<float>(decor.z)),
+                .type = PickObjectType::IndoorDecoration,
+                .objectIndex = static_cast<int>(i),
+                .eventId = static_cast<int>(decor.eventId),
+            });
+        }
+    }
+
+    for (size_t bi = 0; bi < odmData.buildings.size(); bi++)
+    {
+        const auto& building = odmData.buildings[bi];
+        const float minX = static_cast<float>(building.worldX + building.minX);
+        const float minY = static_cast<float>(building.worldY + building.minY);
+        const float minZ = static_cast<float>(building.worldZ + building.minZ);
+        const float maxX = static_cast<float>(building.worldX + building.maxX);
+        const float maxY = static_cast<float>(building.worldY + building.maxY);
+        const float maxZ = static_cast<float>(building.worldZ + building.maxZ);
+        if (!frustum.testAABB(minX, minY, minZ, maxX, maxY, maxZ))
+        {
+            continue;
+        }
+
+        for (size_t fi = 0; fi < building.faces.size(); fi++)
+        {
+            const auto& face = building.faces[fi];
+            if (face.vertexIndices.empty() || face.isInvisible())
+            {
+                continue;
+            }
+
+            Vec3 centroid = Vec3::zero();
+            int valid = 0;
+            for (uint16_t vi : face.vertexIndices)
+            {
+                if (vi >= building.vertices.size())
+                {
+                    continue;
+                }
+                const auto& v = building.vertices[vi];
+                centroid = centroid + Vec3(static_cast<float>(v.x + building.worldX),
+                                           static_cast<float>(v.y + building.worldY),
+                                           static_cast<float>(v.z + building.worldZ));
+                valid++;
+            }
+            if (valid <= 0)
+            {
+                continue;
+            }
+            centroid = centroid * (1.0f / static_cast<float>(valid));
+            const int packedFaceIndex =
+                (static_cast<int>(bi & 0xFFFFu) << 16) | static_cast<int>(fi & 0xFFFFu);
+            candidates.push_back(PickCandidate{
+                .id = (face.eventId > 0) ? face.eventId : static_cast<int>(candidates.size()) + 1,
+                .worldPos = centroid,
+                .type = PickObjectType::OutdoorBuildingFace,
+                .objectIndex = packedFaceIndex,
+                .eventId = face.eventId,
+            });
+        }
+    }
+
+    return candidates;
 }
 
 } // namespace runeharbor::graphics

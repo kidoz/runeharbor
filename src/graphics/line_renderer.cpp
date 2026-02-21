@@ -5,8 +5,118 @@
 
 #include <cmath>
 
+#include "clip_utils.hpp"
+
 namespace runeharbor::graphics
 {
+
+namespace
+{
+constexpr int kOutLeft = 1 << 0;
+constexpr int kOutRight = 1 << 1;
+constexpr int kOutBottom = 1 << 2;
+constexpr int kOutTop = 1 << 3;
+
+int computeNdcOutCode(float x, float y)
+{
+    int code = 0;
+    if (x < -1.0f)
+    {
+        code |= kOutLeft;
+    }
+    else if (x > 1.0f)
+    {
+        code |= kOutRight;
+    }
+    if (y < -1.0f)
+    {
+        code |= kOutBottom;
+    }
+    else if (y > 1.0f)
+    {
+        code |= kOutTop;
+    }
+    return code;
+}
+
+bool clipLineToNdcRect(float& x0, float& y0, float& x1, float& y1)
+{
+    int out0 = computeNdcOutCode(x0, y0);
+    int out1 = computeNdcOutCode(x1, y1);
+
+    for (int guard = 0; guard < 16; guard++)
+    {
+        if ((out0 | out1) == 0)
+        {
+            return true;
+        }
+        if ((out0 & out1) != 0)
+        {
+            return false;
+        }
+
+        const int out = (out0 != 0) ? out0 : out1;
+        float x = 0.0f;
+        float y = 0.0f;
+
+        if (out & kOutTop)
+        {
+            const float dy = y1 - y0;
+            if (std::abs(dy) < 1e-6f)
+            {
+                return false;
+            }
+            x = x0 + (x1 - x0) * ((1.0f - y0) / dy);
+            y = 1.0f;
+        }
+        else if (out & kOutBottom)
+        {
+            const float dy = y1 - y0;
+            if (std::abs(dy) < 1e-6f)
+            {
+                return false;
+            }
+            x = x0 + (x1 - x0) * ((-1.0f - y0) / dy);
+            y = -1.0f;
+        }
+        else if (out & kOutRight)
+        {
+            const float dx = x1 - x0;
+            if (std::abs(dx) < 1e-6f)
+            {
+                return false;
+            }
+            y = y0 + (y1 - y0) * ((1.0f - x0) / dx);
+            x = 1.0f;
+        }
+        else
+        {
+            const float dx = x1 - x0;
+            if (std::abs(dx) < 1e-6f)
+            {
+                return false;
+            }
+            y = y0 + (y1 - y0) * ((-1.0f - x0) / dx);
+            x = -1.0f;
+        }
+
+        if (out == out0)
+        {
+            x0 = x;
+            y0 = y;
+            out0 = computeNdcOutCode(x0, y0);
+        }
+        else
+        {
+            x1 = x;
+            y1 = y;
+            out1 = computeNdcOutCode(x1, y1);
+        }
+    }
+
+    return false;
+}
+} // namespace
 
 LineRenderer::LineRenderer(SDL_Renderer* renderer, util::ILogger& logger)
     : renderer(renderer), logger(logger)
@@ -131,36 +241,11 @@ bool LineRenderer::clipAndProject(const Vec3& a, const Vec3& b, float& x1, float
     Vec4 clipA = viewProjection * Vec4(a, 1.0f);
     Vec4 clipB = viewProjection * Vec4(b, 1.0f);
 
-    // Near plane clipping (simplified - just check if both behind)
-    constexpr float NEAR_EPSILON = 0.1f;
-
-    if (clipA.w < NEAR_EPSILON && clipB.w < NEAR_EPSILON)
+    Vec4 clippedA;
+    Vec4 clippedB;
+    if (!clipLineNearPlane(clipA, clipB, clippedA, clippedB))
     {
-        // Both behind camera
         return false;
-    }
-
-    // If one point is behind camera, clip to near plane
-    Vec4 clippedA = clipA;
-    Vec4 clippedB = clipB;
-
-    if (clipA.w < NEAR_EPSILON)
-    {
-        // A is behind, clip towards B
-        float t = (NEAR_EPSILON - clipA.w) / (clipB.w - clipA.w);
-        clippedA.x = clipA.x + t * (clipB.x - clipA.x);
-        clippedA.y = clipA.y + t * (clipB.y - clipA.y);
-        clippedA.z = clipA.z + t * (clipB.z - clipA.z);
-        clippedA.w = NEAR_EPSILON;
-    }
-    else if (clipB.w < NEAR_EPSILON)
-    {
-        // B is behind, clip towards A
-        float t = (NEAR_EPSILON - clipB.w) / (clipA.w - clipB.w);
-        clippedB.x = clipB.x + t * (clipA.x - clipB.x);
-        clippedB.y = clipB.y + t * (clipA.y - clipB.y);
-        clippedB.z = clipB.z + t * (clipA.z - clipB.z);
-        clippedB.w = NEAR_EPSILON;
     }
 
     // Perspective divide
@@ -169,10 +254,12 @@ bool LineRenderer::clipAndProject(const Vec3& a, const Vec3& b, float& x1, float
     float ndcBx = clippedB.x / clippedB.w;
     float ndcBy = clippedB.y / clippedB.w;
 
-    // Quick reject if completely outside screen (with some margin)
-    constexpr float MARGIN = 2.0f;
-    if ((ndcAx < -MARGIN && ndcBx < -MARGIN) || (ndcAx > MARGIN && ndcBx > MARGIN) ||
-        (ndcAy < -MARGIN && ndcBy < -MARGIN) || (ndcAy > MARGIN && ndcBy > MARGIN))
+    if (!std::isfinite(ndcAx) || !std::isfinite(ndcAy) || !std::isfinite(ndcBx) ||
+        !std::isfinite(ndcBy))
+    {
+        return false;
+    }
+    if (!clipLineToNdcRect(ndcAx, ndcAy, ndcBx, ndcBy))
     {
         return false;
     }

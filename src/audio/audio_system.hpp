@@ -66,6 +66,8 @@ class AudioSystem
     // Master volume (0.0 - 1.0)
     float masterVolume() const { return masterVolume_; }
     void setMasterVolume(float vol);
+    void setMaxChannels(int channels);
+    int maxChannels() const { return maxChannels_; }
 
     // Query
     bool hasSound(const std::string& name) const;
@@ -77,6 +79,7 @@ class AudioSystem
     util::ILogger& logger_;
     bool initialized_ = false;
     float masterVolume_ = 1.0f;
+    int maxChannels_ = 16;
 
     std::unordered_map<std::string, SoundBuffer> sounds_;
     std::vector<SoundInstance> instances_;

@@ -424,6 +424,11 @@ bool BLVMap::parseFaceExtras(const std::vector<uint8_t>& data, size_t& offset)
         extra.textureDeltaV = disk->textureDeltaV;
         extra.cogNumber = disk->cogNumber;
         extra.eventID = disk->eventID;
+        if (extra.faceId >= 0 && static_cast<size_t>(extra.faceId) < mapData.faces.size())
+        {
+            mapData.faces[static_cast<size_t>(extra.faceId)].eventId =
+                static_cast<int>(extra.eventID);
+        }
         offset += extraSize;
     }
 
@@ -648,20 +653,46 @@ bool BLVMap::parseTrailingData(const std::vector<uint8_t>& data, size_t& offset)
     logger.debug(std::format("Door count: {}", doorCount));
 
     // 12. Decorations (count-prefixed, 32 bytes each)
-    uint32_t decorCount = 0;
-    if (!skipCountPrefixed(data, offset, 32, decorCount))
+    if (offset + 4 > data.size())
     {
-        logger.debug("Could not skip decorations");
+        logger.debug("No space for decoration count");
         return false;
     }
-    logger.debug(std::format("Skipped {} decorations", decorCount));
+    const uint32_t decorCount = *reinterpret_cast<const uint32_t*>(data.data() + offset);
+    offset += 4;
+    constexpr size_t decorSize = sizeof(BLVDecorationOnDisk);
+    if (offset + static_cast<size_t>(decorCount) * decorSize > data.size())
+    {
+        logger.debug("Decoration data exceeds file");
+        return false;
+    }
+
+    mapData.decorations.resize(decorCount);
+    for (uint32_t i = 0; i < decorCount; i++)
+    {
+        const auto* decor = reinterpret_cast<const BLVDecorationOnDisk*>(data.data() + offset);
+        auto& out = mapData.decorations[i];
+        out.x = decor->x;
+        out.y = decor->y;
+        out.z = decor->z;
+        out.eventId = decor->eventId;
+        offset += decorSize;
+    }
+    logger.debug(std::format("Parsed {} decorations", decorCount));
 
     // 13. Decoration names (decorCount x 32 chars)
-    size_t decorNamesSize = static_cast<size_t>(decorCount) * 32;
+    constexpr size_t nameSize = 32;
+    size_t decorNamesSize = static_cast<size_t>(decorCount) * nameSize;
     if (offset + decorNamesSize > data.size())
     {
         logger.debug("Decoration names exceed file");
         return false;
+    }
+    for (uint32_t i = 0; i < decorCount; i++)
+    {
+        mapData.decorations[i].name = extractString(
+            reinterpret_cast<const char*>(data.data() + offset + static_cast<size_t>(i) * nameSize),
+            nameSize);
     }
     offset += decorNamesSize;
 

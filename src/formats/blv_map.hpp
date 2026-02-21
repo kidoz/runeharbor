@@ -227,6 +227,23 @@ struct BLVSpawnPoint
     int16_t group;
 };
 
+// Decoration record (32 bytes)
+struct BLVDecorationOnDisk
+{
+    uint16_t nameIndex;
+    uint16_t flags;
+    int32_t x;
+    int32_t y;
+    int32_t z;
+    uint16_t direction;
+    uint16_t sectorIndex;
+    uint16_t field14;
+    uint16_t field16;
+    uint32_t field18;
+    uint32_t eventId;
+};
+static_assert(sizeof(BLVDecorationOnDisk) == 32);
+
 #pragma pack(pop)
 
 // Face attribute flags
@@ -281,6 +298,8 @@ struct ParsedFace
     int16_t textureId = -1;     // Texture bitmap index
     int16_t faceExtraId = -1;   // Face extra index
     std::string textureName;    // Texture name from face texture table
+    int eventId = 0;            // Event trigger id (face/decor trigger)
+    int eventTriggerType = 0;   // Trigger type marker (if available)
 
     // Per-vertex data (from faceData flat array)
     std::vector<int16_t> xIntercepts; // X intercept displacements
@@ -335,6 +354,16 @@ struct ParsedDoor
     std::vector<uint16_t> offsetIds;
 };
 
+struct ParsedDecoration
+{
+    int32_t x = 0;
+    int32_t y = 0;
+    int32_t z = 0;
+    uint32_t eventId = 0;
+    std::string name;
+    bool hidden = false;
+};
+
 // Parsed sector (room) with resolved face lists
 struct ParsedSector
 {
@@ -378,6 +407,7 @@ struct BLVMapData
     std::vector<ParsedSector> sectors;
     std::vector<BLVLight> lights;
     std::vector<ParsedDoor> doors;
+    std::vector<ParsedDecoration> decorations;
     std::vector<BLVSpawnPoint> spawns;
 };
 

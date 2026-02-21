@@ -80,6 +80,10 @@ class VirtualFileSystem
     /// Only works for files in image archives (BITMAPS.LOD, etc.)
     std::optional<formats::ImageFileHeader> getImageInfo(const std::string& filename);
 
+    /// Extract the embedded 768-byte RGB palette from an image LOD entry.
+    /// Returns nullopt if no embedded palette exists.
+    std::optional<std::vector<uint8_t>> getImagePalette(const std::string& filename);
+
   private:
     util::ILogger& logger;
 

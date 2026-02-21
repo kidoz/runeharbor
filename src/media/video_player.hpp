@@ -80,6 +80,8 @@ class VideoPlayer
 
     // Get audio samples for current frame (returns empty if no audio)
     std::vector<int16_t> getAudioSamples();
+    void setAudioEnabled(bool enabled);
+    bool isAudioEnabled() const { return audioEnabled_; }
 
   private:
     // Archives
@@ -118,6 +120,7 @@ class VideoPlayer
     uint8_t audioStreamChannels_ = 0;
     uint32_t lastAudioFrameQueued_ = UINT32_MAX;
     int audioTrack_ = 0;
+    bool audioEnabled_ = true;
     std::unique_ptr<BinkFrame> dummyBinkFrame_;
 
     // Internal methods

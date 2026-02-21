@@ -44,6 +44,14 @@ class TestWindow : public IWindow
     SDL_Window* getSDLWindow() override { return nullptr; }
 
     MouseState getMouseState() const override { return {}; }
+    std::optional<WindowPosition> getWindowPosition() const override
+    {
+        if (!windowPosition.has_value())
+        {
+            return std::nullopt;
+        }
+        return WindowPosition{windowPosition->x, windowPosition->y};
+    }
 
     bool wasMouseClicked(MouseButton) const override { return false; }
 
@@ -57,6 +65,7 @@ class TestWindow : public IWindow
     bool shutdownCalled = false;
     int eventCount = 0;
     int swapCount = 0;
+    std::optional<WindowPosition> windowPosition;
 };
 
 } // namespace

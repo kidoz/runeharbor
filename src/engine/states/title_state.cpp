@@ -84,11 +84,9 @@ std::optional<GameStateId> TitleState::update()
         case 0:
             return GameStateId::CharacterCreation; // NEW GAME
         case 1:
-            statusMessage = "Load game not implemented yet";
-            break;
+            return GameStateId::LoadGame; // LOAD GAME
         case 2:
-            statusMessage = "Credits not implemented yet";
-            break;
+            return GameStateId::Credits; // CREDITS
         case 3:
             return GameStateId::Quit;
         default:
@@ -103,11 +101,11 @@ std::optional<GameStateId> TitleState::update()
     }
     if (ctx.isKeyPressed(SDL_SCANCODE_L))
     {
-        statusMessage = "Load game not implemented yet";
+        return GameStateId::LoadGame;
     }
     else if (ctx.isKeyPressed(SDL_SCANCODE_C))
     {
-        statusMessage = "Credits not implemented yet";
+        return GameStateId::Credits;
     }
     else if (ctx.isKeyPressed(SDL_SCANCODE_Q) || ctx.isKeyPressed(SDL_SCANCODE_E))
     {

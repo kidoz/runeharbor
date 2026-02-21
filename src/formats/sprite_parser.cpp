@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
-#include "../util/string_utils.hpp"
+#include "sprite_parser.hpp"
+
 #include <format>
 
 #include "../util/ilogger.hpp"
-#include "sprite_parser.hpp"
+#include "../util/string_utils.hpp"
 
 namespace runeharbor::formats
 {

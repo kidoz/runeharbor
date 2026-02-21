@@ -47,6 +47,9 @@ class LineRenderer
     // Render all buffered lines (call at end of frame)
     void render();
 
+    // Number of buffered projected lines (for debug/tests)
+    int bufferedLineCount() const { return static_cast<int>(lines.size()); }
+
   private:
     // Transform 3D point to screen coordinates
     // Returns false if point is behind camera

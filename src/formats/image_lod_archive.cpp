@@ -578,6 +578,99 @@ std::optional<ImageFileHeader> ImageLODArchive::getFileInfo(const std::string& f
     return imgHeader;
 }
 
+std::optional<std::vector<uint8_t>> ImageLODArchive::extractPalette(const std::string& filename)
+{
+    if (!opened)
+    {
+        return std::nullopt;
+    }
+
+    // Find entry (case-insensitive)
+    const ImageLODDirectoryEntry* targetEntry = nullptr;
+    for (size_t i = 0; i < entries.size(); i++)
+    {
+        std::string entryName = buildFilename(i);
+        if (entryName.size() != filename.size())
+        {
+            continue;
+        }
+        bool match = true;
+        for (size_t j = 0; j < entryName.size(); j++)
+        {
+            if (std::tolower(static_cast<unsigned char>(entryName[j])) !=
+                std::tolower(static_cast<unsigned char>(filename[j])))
+            {
+                match = false;
+                break;
+            }
+        }
+        if (match)
+        {
+            targetEntry = &entries[i];
+            break;
+        }
+    }
+    if (!targetEntry)
+    {
+        return std::nullopt;
+    }
+
+    // Calculate actual file offset to the entry data
+    std::streamoff actualOffset;
+    ImageEntryType entryType = detectEntryType(*targetEntry);
+    if (externalOnly || entryType == ImageEntryType::ExternalFormat)
+    {
+        actualOffset = static_cast<std::streamoff>(targetEntry->offset) +
+                       static_cast<std::streamoff>(offsetDelta);
+    }
+    else
+    {
+        actualOffset = calculateDataOffset(*targetEntry);
+    }
+
+    // Read the 48-byte ImageFileHeader to get compressedSize
+    file.clear();
+    file.seekg(actualOffset, std::ios::beg);
+    if (!file.good())
+    {
+        return std::nullopt;
+    }
+
+    ImageFileHeader imgHeader;
+    file.read(reinterpret_cast<char*>(&imgHeader), sizeof(ImageFileHeader));
+    if (!file.good())
+    {
+        return std::nullopt;
+    }
+
+    // Data layout: ImageFileHeader(48B) + compressed_pixels(compressedSize) + palette(768B)
+    // The palette starts at offset: actualOffset + 48 + compressedSize
+    uint32_t remainingAfterPixels =
+        targetEntry->size - sizeof(ImageFileHeader) - imgHeader.compressedSize;
+    if (remainingAfterPixels < 768)
+    {
+        return std::nullopt; // No embedded palette
+    }
+
+    std::streamoff paletteOffset =
+        actualOffset +
+        static_cast<std::streamoff>(sizeof(ImageFileHeader) + imgHeader.compressedSize);
+    file.seekg(paletteOffset, std::ios::beg);
+    if (!file.good())
+    {
+        return std::nullopt;
+    }
+
+    std::vector<uint8_t> palette(768);
+    file.read(reinterpret_cast<char*>(palette.data()), 768);
+    if (!file.good())
+    {
+        return std::nullopt;
+    }
+
+    return palette;
+}
+
 bool ImageLODArchive::resolveEntryNames()
 {
     resolvedNames.clear();

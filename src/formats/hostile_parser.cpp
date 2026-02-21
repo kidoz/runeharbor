@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
-#include "../util/string_utils.hpp"
+#include "hostile_parser.hpp"
+
 #include <algorithm>
 #include <format>
 #include <set>     // For std::set in getEntityNames
 #include <sstream> // For std::istringstream and std::getline
 
-#include "hostile_parser.hpp"
+#include "../util/string_utils.hpp"
 
 namespace runeharbor::formats
 {
@@ -23,6 +24,36 @@ std::optional<int> HostileMatrix::getHostility(const std::string& source,
             return itCol->second;
         }
     }
+    return std::nullopt;
+}
+
+std::optional<int> HostileMatrix::getHostilityInsensitive(const std::string& source,
+                                                          const std::string& target) const
+{
+    if (auto exact = getHostility(source, target); exact.has_value())
+    {
+        return exact;
+    }
+
+    const std::string sourceNeedle = util::toLower(util::trim(source));
+    const std::string targetNeedle = util::toLower(util::trim(target));
+
+    for (const auto& [rowName, cols] : matrix)
+    {
+        if (util::toLower(util::trim(rowName)) != sourceNeedle)
+        {
+            continue;
+        }
+
+        for (const auto& [colName, value] : cols)
+        {
+            if (util::toLower(util::trim(colName)) == targetNeedle)
+            {
+                return value;
+            }
+        }
+    }
+
     return std::nullopt;
 }
 

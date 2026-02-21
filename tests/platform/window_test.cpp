@@ -38,6 +38,14 @@ class MockWindow : public IWindow
     SDL_Window* getSDLWindow() override { return nullptr; }
 
     MouseState getMouseState() const override { return {}; }
+    std::optional<WindowPosition> getWindowPosition() const override
+    {
+        if (!windowPosition.has_value())
+        {
+            return std::nullopt;
+        }
+        return WindowPosition{windowPosition->x, windowPosition->y};
+    }
     bool wasMouseClicked(MouseButton) const override { return false; }
     bool wasMousePressed(MouseButton) const override { return false; }
     void resetFrameState() override {}
@@ -49,6 +57,7 @@ class MockWindow : public IWindow
     bool shutdownCalled = false;
     int eventProcessCount = 0;
     int swapCount = 0;
+    std::optional<WindowPosition> windowPosition;
     WindowConfig lastConfig;
 
   private:
@@ -72,6 +81,8 @@ TEST_CASE("WindowConfig structure", "[window][config]")
         REQUIRE(config.height == 600);
         REQUIRE(config.fullscreen == false);
         REQUIRE(config.resizable == true);
+        REQUIRE_FALSE(config.windowX.has_value());
+        REQUIRE_FALSE(config.windowY.has_value());
     }
 
     SECTION("WindowConfig can be customized")
@@ -82,12 +93,18 @@ TEST_CASE("WindowConfig structure", "[window][config]")
         config.height = 1080;
         config.fullscreen = true;
         config.resizable = false;
+        config.windowX = 123;
+        config.windowY = 456;
 
         REQUIRE(config.title == "Custom Title");
         REQUIRE(config.width == 1920);
         REQUIRE(config.height == 1080);
         REQUIRE(config.fullscreen == true);
         REQUIRE(config.resizable == false);
+        REQUIRE(config.windowX.has_value());
+        REQUIRE(config.windowY.has_value());
+        REQUIRE(*config.windowX == 123);
+        REQUIRE(*config.windowY == 456);
     }
 }
 
@@ -164,6 +181,16 @@ TEST_CASE("MockWindow basic functionality", "[window][mock]")
         window.swapBuffers();
         window.swapBuffers();
         REQUIRE(window.swapCount == 3);
+    }
+
+    SECTION("Window position can be queried through interface")
+    {
+        REQUIRE_FALSE(window.getWindowPosition().has_value());
+        window.windowPosition = WindowPosition{321, 654};
+        auto pos = window.getWindowPosition();
+        REQUIRE(pos.has_value());
+        REQUIRE(pos->x == 321);
+        REQUIRE(pos->y == 654);
     }
 }
 

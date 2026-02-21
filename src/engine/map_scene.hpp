@@ -60,6 +60,8 @@ class MapScene
     const MapBounds& getBounds() const { return bounds; }
     const formats::BLVMapData& getBLVData() const { return blv; }
     const formats::ODMMapData& getODMData() const { return odm; }
+    formats::BLVMapData& mutableBLVData() { return blv; }
+    formats::ODMMapData& mutableODMData() { return odm; }
 
     void renderWireframe(graphics::LineRenderer& renderer, const MapRenderOptions& options) const;
 

@@ -13,6 +13,8 @@ enum class GameStateId
     CharacterCreation,
     Loading,
     InGame,
+    Credits,
+    LoadGame,
     Quit,
 };
 

@@ -20,6 +20,28 @@ int randomInt(int min, int max)
     std::uniform_int_distribution<int> dist(min, max);
     return dist(gen);
 }
+
+int resistanceForSchool(const Character& target, SpellSchool school)
+{
+    switch (school)
+    {
+    case SpellSchool::Fire:
+        return target.fireResistance;
+    case SpellSchool::Air:
+        return target.airResistance;
+    case SpellSchool::Water:
+        return target.waterResistance;
+    case SpellSchool::Earth:
+        return target.earthResistance;
+    case SpellSchool::Mind:
+    case SpellSchool::Spirit:
+        return target.mindResistance;
+    case SpellSchool::Body:
+        return target.bodyResistance;
+    default:
+        return 0;
+    }
+}
 } // namespace
 
 SpellSystem::SpellSystem(util::ILogger& logger) : logger_(logger) {}
@@ -301,6 +323,86 @@ SpellResult SpellSystem::castBuffSpell(int characterIndex, int spellId)
     return result;
 }
 
+SpellResult SpellSystem::castScriptSpell(int spellId, int power, int targetCharIndex)
+{
+    SpellResult result;
+    if (!gameWorld_ || targetCharIndex < 0 || targetCharIndex >= kPartySize)
+    {
+        result.description = "Invalid script spell target";
+        if (callbacks_.onSpellFailed)
+        {
+            callbacks_.onSpellFailed(spellId, result.description);
+        }
+        return result;
+    }
+
+    auto& target = gameWorld_->party().member(targetCharIndex);
+    const auto* spell = getSpell(spellId);
+    const SpellSchool school = spell ? spell->school : determineSchool(spellId);
+    const std::string spellName =
+        (spell && !spell->name.empty()) ? spell->name : ("Spell #" + std::to_string(spellId));
+
+    int magnitude = std::max(1, power);
+    if (power <= 0 && spell && spell->level > 0)
+    {
+        magnitude = std::max(magnitude, spell->level * 4);
+    }
+
+    const bool isHealing = (school == SpellSchool::Spirit || school == SpellSchool::Body);
+    if (isHealing)
+    {
+        if (!target.isAlive())
+        {
+            result.description = spellName + " has no effect";
+            return result;
+        }
+
+        const int before = target.hitPoints;
+        target.hitPoints = std::min(target.maxHitPoints, target.hitPoints + magnitude);
+        if (target.hitPoints > 0)
+        {
+            target.clearCondition(ConditionIndex::Unconscious);
+        }
+        result.healing = std::max(0, target.hitPoints - before);
+        result.success = true;
+        result.description = spellName + " restores " + std::to_string(result.healing) + " HP";
+    }
+    else
+    {
+        if (!target.isAlive())
+        {
+            result.description = spellName + " has no effect";
+            return result;
+        }
+
+        const int resistance = std::clamp(resistanceForSchool(target, school), 0, 95);
+        int damage = magnitude - (magnitude * resistance) / 100;
+        damage = std::max(1, damage);
+        if (damage < magnitude)
+        {
+            result.resisted = true;
+        }
+
+        target.hitPoints = std::max(0, target.hitPoints - damage);
+        if (target.hitPoints <= 0)
+        {
+            target.setCondition(ConditionIndex::Unconscious, gameWorld_->calendar().totalTicks);
+        }
+
+        result.damage = damage;
+        result.success = true;
+        result.description = spellName + " hits for " + std::to_string(result.damage) +
+                             (result.resisted ? " (resisted)" : "");
+    }
+
+    if (callbacks_.onSpellCast)
+    {
+        callbacks_.onSpellCast(spellId, -1, result);
+    }
+
+    return result;
+}
+
 std::vector<int> SpellSystem::getAvailableSpells(int characterIndex) const
 {
     std::vector<int> available;
@@ -382,9 +484,9 @@ SpellSchool SpellSystem::determineSchool(int spellId) const
     int rawIndex = (spellId - 1) / 11; // 0-8 for the 9 spell schools
     // Map raw sequential index to gapped SpellSchool values
     constexpr SpellSchool kSchoolMap[] = {
-        SpellSchool::Fire,   SpellSchool::Air,   SpellSchool::Water,  SpellSchool::Earth,
-        SpellSchool::Spirit, SpellSchool::Mind,   SpellSchool::Body,
-        SpellSchool::Light,  SpellSchool::Dark,
+        SpellSchool::Fire,  SpellSchool::Air,    SpellSchool::Water,
+        SpellSchool::Earth, SpellSchool::Spirit, SpellSchool::Mind,
+        SpellSchool::Body,  SpellSchool::Light,  SpellSchool::Dark,
     };
     if (rawIndex >= 0 && rawIndex < 9)
         return kSchoolMap[rawIndex];

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
-#include "../util/string_utils.hpp"
+#include "sprite_lod_archive.hpp"
+
 #include <algorithm>
 #include <format>
 
 #include <cstring>
 #include <zlib.h>
 
-#include "sprite_lod_archive.hpp"
+#include "../util/string_utils.hpp"
 
 namespace runeharbor::formats
 {

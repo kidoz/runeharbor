@@ -95,6 +95,10 @@ class ImageLODArchive
     std::optional<std::vector<uint8_t>> extractFile(const std::string& filename);
     std::optional<ImageFileHeader> getFileInfo(const std::string& filename);
 
+    /// Extract the 768-byte embedded palette from an image entry.
+    /// Layout: ImageFileHeader(48B) + compressed_pixels(compressedSize) + palette(768B)
+    std::optional<std::vector<uint8_t>> extractPalette(const std::string& filename);
+
   private:
     bool readHeader();
     bool readDirectory();

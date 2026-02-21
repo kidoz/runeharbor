@@ -25,6 +25,7 @@ class LineRenderer;
 class DebugText;
 class WorldRenderer;
 class Camera;
+class BitmapFont;
 } // namespace runeharbor::graphics
 namespace runeharbor::media
 {
@@ -33,7 +34,12 @@ class VideoPlayer;
 namespace runeharbor::game
 {
 class GameWorld;
-}
+class EventEngine;
+class CombatSystem;
+class SpellSystem;
+class Inventory;
+class SaveGame;
+} // namespace runeharbor::game
 namespace runeharbor::engine
 {
 class VirtualFileSystem;
@@ -55,11 +61,37 @@ struct SharedGameData
 {
     std::vector<Character>* party = nullptr;
     game::GameWorld* gameWorld = nullptr;
+    game::EventEngine* eventEngine = nullptr;
+    game::CombatSystem* combatSystem = nullptr;
+    game::SpellSystem* spellSystem = nullptr;
+    game::Inventory* inventory = nullptr;
+    game::SaveGame* saveGame = nullptr;
     MapScene* mapScene = nullptr;
+    std::string newGameStartMapName = "out01.odm";
     std::string startupMapName;
     bool startupPreferOutdoor = false;
     bool autoLoadMap = false;
+    bool showFrameRate = false;
+    // Non-zero => request loadingN.pcx screen during the next loading state.
+    int loadingScreenIndex = 0;
+    bool loadFromSave = false;
     bool quickStartReady = false;
+    bool hasPendingEventRuntimeState = false;
+    std::vector<uint8_t> pendingEventRuntimeState;
+    // 3D world viewport within 640x480 game coordinates ([screen] INI section).
+    int worldViewportX = 8;
+    int worldViewportY = 8;
+    int worldViewportWidth = 468;
+    int worldViewportHeight = 351;
+    std::string statusMessage;
+    // Runtime NPC dialogue handoff from event callbacks to in-game UI.
+    int pendingNpcDialogId = -1;
+    bool awaitingNpcDialogText = false;
+    bool openNpcDialogue = false;
+    std::string npcDialogueSpeaker;
+    std::string npcDialogueText;
+    std::vector<int> npcDialogueChoiceIds;
+    std::vector<std::string> npcDialogueChoiceTexts;
 };
 
 /// Shared resources and helpers available to all game states.
@@ -76,6 +108,12 @@ struct StateContext
     media::VideoPlayer* videoPlayer = nullptr;
     VirtualFileSystem* vfs = nullptr;
     graphics::Camera* camera = nullptr;
+
+    // Bitmap fonts (loaded from .fnt files in ICONS.LOD)
+    graphics::BitmapFont* createFont = nullptr;   // create.fnt (char creation headers)
+    graphics::BitmapFont* ccharFont = nullptr;    // CCHAR.FNT (character names)
+    graphics::BitmapFont* arrusFont = nullptr;    // ARRUS.FNT (stats/labels)
+    graphics::BitmapFont* smallnumFont = nullptr; // SMALLNUM.FNT (small numbers)
 
     SharedGameData* shared = nullptr;
 

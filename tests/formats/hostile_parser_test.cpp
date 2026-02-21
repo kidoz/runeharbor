@@ -46,6 +46,16 @@ Archer	0	0	0
         REQUIRE(actual_entities == expected_entities);
     }
 
+    SECTION("Hostility lookup supports case-insensitive entity names")
+    {
+        REQUIRE(parser.parse(data));
+        const auto& hostileMatrix = parser.getHostileMatrix();
+
+        REQUIRE(hostileMatrix.getHostilityInsensitive("party", "angel") == 0);
+        REQUIRE(hostileMatrix.getHostilityInsensitive("ARCHER", "party") == 0);
+        REQUIRE(hostileMatrix.getHostilityInsensitive("nonexistent", "party") == std::nullopt);
+    }
+
     SECTION("Empty data returns false")
     {
         std::vector<uint8_t> empty_data;

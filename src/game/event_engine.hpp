@@ -3,8 +3,10 @@
 
 #include <cstdint>
 #include <functional>
+#include <random>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "../util/ilogger.hpp"
@@ -13,10 +15,14 @@ namespace runeharbor::game
 {
 
 class GameWorld;
+class CombatSystem;
+class SpellSystem;
+class Inventory;
 
 // MM7 event command opcodes (from binary EVT files, matches actual bytecode values)
 enum class EventOpcode : uint8_t
 {
+    NoOp = 0,
     Exit = 1,
     NpcDialog = 2,
     PlaySound = 3,
@@ -44,11 +50,14 @@ enum class EventOpcode : uint8_t
     ShowText = 26,
     SetNpcPortrait = 29,
     SetNpcName = 30,
+    TriggerTimerAbsolute = 31,
     GiveAward = 32,
     StatusMessage = 33,
     SpawnItem = 34,
     SetPlayerSelect = 35,
     JumpToEvent = 36,
+    TriggerOnMapEnter = 37, // Map trigger marker (fires on map enter)
+    TriggerTimerPeriodic = 38,
     SetGlobalVar = 39,
     SetGlobalVar2 = 40,
     CastSpell = 41,
@@ -59,6 +68,7 @@ enum class EventOpcode : uint8_t
     SetMonsterHostile = 49,
     SetMonsterGroup = 50,
     CheckMapVar = 51,
+    TriggerOnMapLoad = 53, // Special marker used by map-load trigger table
     ReplaceMonster = 54,
     SetMonsterAi = 55,
     CheckTime = 56,
@@ -72,13 +82,17 @@ enum class EventOpcode : uint8_t
 struct EventCommand
 {
     EventOpcode opcode = EventOpcode::Exit;
-    int param1 = 0;    // First integer parameter
-    int param2 = 0;    // Second integer parameter
-    int param3 = 0;    // Third integer parameter
-    std::string text;  // String parameter (for ShowText, Teleport map name, etc.)
-    float fparam = 0;  // Float parameter (for positions)
-    float fparam2 = 0; // Second float parameter
-    float fparam3 = 0; // Third float parameter
+    int param1 = 0;       // First integer parameter
+    int param2 = 0;       // Second integer parameter
+    int param3 = 0;       // Third integer parameter
+    int param4 = 0;       // Fourth integer parameter
+    int param5 = 0;       // Fifth integer parameter
+    int param6 = 0;       // Sixth integer parameter
+    std::string text;     // String parameter (for ShowText, Teleport map name, etc.)
+    float fparam = 0;     // Float parameter (for positions)
+    float fparam2 = 0;    // Second float parameter
+    float fparam3 = 0;    // Third float parameter
+    int64_t i64param = 0; // Extended payload (timer interval ticks)
 };
 
 // A complete event script (sequence of commands)
@@ -102,8 +116,14 @@ enum class TriggerType : uint8_t
 struct EventCallbacks
 {
     std::function<void(const std::string& text)> onShowText;
+    std::function<void(int dialogTextId)> onNpcDialog;
+    std::function<void(int buildingId)> onShowBuilding;
     std::function<void(int soundId)> onPlaySound;
     std::function<void(const std::string& map, float x, float y, float z, float yaw)> onTeleport;
+    std::function<void(const std::string& map, int exitDirection, int transitionParam)> onChangeMap;
+    std::function<void(int itemId)> onGiveItem;
+    std::function<bool(int itemId)> onRemoveItem;
+    std::function<void(const EventCommand& command)> onMapCommand;
 };
 
 class EventEngine
@@ -113,6 +133,9 @@ class EventEngine
 
     // Set the game world reference for executing commands
     void setGameWorld(GameWorld* world) { gameWorld_ = world; }
+    void setCombatSystem(CombatSystem* combatSystem) { combatSystem_ = combatSystem; }
+    void setSpellSystem(SpellSystem* spellSystem) { spellSystem_ = spellSystem; }
+    void setInventory(Inventory* inventory) { inventory_ = inventory; }
 
     // Set callbacks for UI-facing effects
     void setCallbacks(const EventCallbacks& callbacks) { callbacks_ = callbacks; }
@@ -123,8 +146,22 @@ class EventEngine
     // Load event scripts from parsed data
     void loadEvents(const std::vector<EventScript>& scripts);
 
-    // Trigger an event by ID
-    bool triggerEvent(int eventId);
+    // Mark scripts that belong to the current map scope.
+    void setMapScopedEvents(const std::vector<EventScript>& scripts);
+
+    // Trigger an event by ID.
+    // contextFlag mirrors MM7 param_3 behavior (0 = deferred/non-interactive, 1 = interactive).
+    bool triggerEvent(int eventId, int contextFlag = 1);
+
+    // Trigger all events whose first command opcode matches `opcode`.
+    // Returns number of events that were executed.
+    int triggerEventsByFirstOpcode(uint8_t opcode, bool mapOnly = false);
+
+    // Rebuild map trigger state (on-enter and timers) for currently scoped map events.
+    void onMapLoaded();
+
+    // Process scheduled timer triggers against current game clock.
+    int updateRuntimeTriggers();
 
     // Check if an event exists
     bool hasEvent(int eventId) const;
@@ -132,13 +169,38 @@ class EventEngine
     // Clear all registered events
     void clear();
 
+    // Persist/restore runtime trigger state (timer schedule, last runtime tick).
+    std::vector<uint8_t> serializeRuntimeState() const;
+    bool deserializeRuntimeState(const std::vector<uint8_t>& data);
+
   private:
-    void executeCommand(const EventCommand& cmd);
+    size_t executeCommand(const EventScript& script, size_t index, bool& shouldExit);
+    std::vector<int> resolvePlayerTargets(uint8_t mode) const;
+    void applyStatDelta(int statId, int delta, uint8_t mode);
+    const EventScript* resolveEventScript(int eventId) const;
+
+    struct TimerTrigger
+    {
+        int eventId = 0;
+        int64_t nextTick = 0;
+        int64_t intervalTicks = 0;
+        bool periodic = false;
+        bool active = false;
+    };
 
     util::ILogger& logger_;
     GameWorld* gameWorld_ = nullptr;
+    CombatSystem* combatSystem_ = nullptr;
+    SpellSystem* spellSystem_ = nullptr;
+    Inventory* inventory_ = nullptr;
     EventCallbacks callbacks_;
     std::unordered_map<int, EventScript> events_;
+    std::unordered_map<int, EventScript> mapScopedEvents_;
+    std::vector<TimerTrigger> timerTriggers_;
+    int64_t lastRuntimeTick_ = -1;
+    int executionContext_ = 1;
+    uint8_t playerSelectMode_ = 4; // 0..3 specific, 4 active, 5 all, 6 random
+    mutable std::mt19937 rng_{0xE7715EEDu};
 };
 
 } // namespace runeharbor::game

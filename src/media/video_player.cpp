@@ -593,8 +593,29 @@ std::vector<int16_t> VideoPlayer::getAudioSamples()
     return {};
 }
 
+void VideoPlayer::setAudioEnabled(bool enabled)
+{
+    audioEnabled_ = enabled;
+    if (!audioEnabled_)
+    {
+        closeAudioStream();
+        return;
+    }
+
+    if (active_)
+    {
+        setupAudioStream();
+    }
+}
+
 void VideoPlayer::setupAudioStream()
 {
+    if (!audioEnabled_)
+    {
+        closeAudioStream();
+        return;
+    }
+
     if (!hasAudio())
     {
         closeAudioStream();
@@ -651,7 +672,7 @@ void VideoPlayer::closeAudioStream()
 
 void VideoPlayer::queueAudioForCurrentFrame()
 {
-    if (!audioStream_ || !active_ || paused_ || !hasAudio())
+    if (!audioEnabled_ || !audioStream_ || !active_ || paused_ || !hasAudio())
     {
         return;
     }

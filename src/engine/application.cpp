@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <array>
 #include <exception>
 #include <filesystem>
 #include <format>
@@ -11,22 +12,40 @@
 
 #include <cctype>
 
+#include "../formats/credits_parser.hpp"
+#include "../formats/hostile_parser.hpp"
 #include "../formats/image_lod_archive.hpp"
+#include "../formats/items_parser.hpp"
+#include "../formats/mapstats_parser.hpp"
+#include "../formats/monsters_parser.hpp"
+#include "../formats/npcdata_parser.hpp"
+#include "../formats/npcnames_parser.hpp"
+#include "../formats/npctext_parser.hpp"
+#include "../formats/npctopic_parser.hpp"
 #include "../formats/pcx_image.hpp"
+#include "../formats/placemon_parser.hpp"
+#include "../formats/rnditems_parser.hpp"
+#include "../formats/spells_parser.hpp"
 #include "../formats/sprite_parser.hpp"
+#include "../formats/two_d_events_parser.hpp"
+#include "../graphics/bitmap_font.hpp"
 #include "../graphics/image.hpp"
 #include "../graphics/line_renderer.hpp"
 #include "../graphics/palette.hpp"
 #include "../graphics/sdl_renderer.hpp"
+#include "../graphics/visibility.hpp"
 #include "../graphics/world_renderer.hpp"
 #include "../media/vid_archive.hpp"
 #include "../media/vid_manifest.hpp"
 #include "../media/video_player.hpp"
 #include "../platform/iwindow.hpp"
 #include "../util/ilogger.hpp"
+#include "map_transition_resolver.hpp"
 #include "states/character_creation_state.hpp"
+#include "states/credits_state.hpp"
 #include "states/ingame_state.hpp"
 #include "states/intro_state.hpp"
+#include "states/load_game_state.hpp"
 #include "states/loading_state.hpp"
 #include "states/state_context.hpp"
 #include "states/title_state.hpp"
@@ -36,8 +55,36 @@ namespace runeharbor::engine
 {
 
 Application::Application(util::ILogger& logger, platform::IWindow& window)
-    : logger(logger), window(window), vfs(std::make_unique<VirtualFileSystem>(logger))
+    : logger(logger), window(window), audioSystem_(std::make_unique<audio::AudioSystem>(logger)),
+      vfs(std::make_unique<VirtualFileSystem>(logger)),
+      evtParser_(std::make_unique<formats::EvtScriptParser>(logger)),
+      contentGenerator_(std::make_unique<game::ContentGenerator>(logger)),
+      gameWorld_(std::make_unique<game::GameWorld>()),
+      eventEngine_(std::make_unique<game::EventEngine>(logger)),
+      combatSystem_(std::make_unique<game::CombatSystem>(logger)),
+      spellSystem_(std::make_unique<game::SpellSystem>(logger)),
+      inventory_(std::make_unique<game::Inventory>(logger)),
+      saveGame_(std::make_unique<game::SaveGame>(logger)),
+      sndArchive_(std::make_unique<formats::SndArchive>(logger)),
+      soundList_(std::make_unique<formats::SoundList>(logger))
 {
+    if (eventEngine_)
+    {
+        eventEngine_->setGameWorld(gameWorld_.get());
+        eventEngine_->setCombatSystem(combatSystem_.get());
+        eventEngine_->setSpellSystem(spellSystem_.get());
+        eventEngine_->setInventory(inventory_.get());
+    }
+    if (combatSystem_)
+    {
+        combatSystem_->setGameWorld(gameWorld_.get());
+    }
+    if (spellSystem_)
+    {
+        spellSystem_->setGameWorld(gameWorld_.get());
+    }
+
+    configureGameplayCallbacks();
     initDefaultParty();
 }
 
@@ -59,6 +106,45 @@ std::string getLowerExtension(const std::string& filename)
         return "";
     }
     return lower.substr(dot);
+}
+
+std::string normalizeMapName(std::string name, bool preferOutdoor)
+{
+    if (name.empty())
+    {
+        return name;
+    }
+
+    const std::string ext = getLowerExtension(name);
+    if (ext == ".blv" || ext == ".odm")
+    {
+        return name;
+    }
+
+    const std::string lower = toLower(name);
+    if (preferOutdoor || lower.rfind("out", 0) == 0 || lower.rfind("i", 0) == 0)
+    {
+        return name + ".odm";
+    }
+
+    return name + ".blv";
+}
+
+const char* directionName(int direction)
+{
+    switch (resolveSpawnIndexFromDirection(direction))
+    {
+    case 1:
+        return "North";
+    case 2:
+        return "South";
+    case 3:
+        return "East";
+    case 4:
+        return "West";
+    default:
+        return "Default";
+    }
 }
 
 // Base stats per face group (indexed by faceId ranges)
@@ -145,9 +231,24 @@ bool Application::initialize(const platform::WindowConfig& windowConfig)
     debugText = std::make_unique<graphics::DebugText>();
     mapScene = std::make_unique<MapScene>(logger);
     videoPlayer = std::make_unique<media::VideoPlayer>();
+    if (audioSystem_ && !audioSystem_->initialize())
+    {
+        logger.warning("Audio subsystem unavailable; continuing without sound effects");
+    }
+    if (audioSystem_)
+    {
+        audioSystem_->setMaxChannels(bootConfig_.mixerChannels);
+    }
     updateViewport();
 
     logger.info("Press ESC or close window to exit");
+
+    if (contentGenerator_)
+    {
+        const uint64_t seed = static_cast<uint64_t>(SDL_GetTicks());
+        contentGenerator_->setWorldSeed(seed);
+        logger.info(std::format("Content generator seed initialized from startup ticks: {}", seed));
+    }
 
     initStates();
 
@@ -162,6 +263,13 @@ void Application::initStates()
     // Create shared data
     sharedData = std::make_unique<SharedGameData>();
     sharedData->party = &party;
+    sharedData->gameWorld = gameWorld_.get();
+    sharedData->eventEngine = eventEngine_.get();
+    sharedData->combatSystem = combatSystem_.get();
+    sharedData->spellSystem = spellSystem_.get();
+    sharedData->inventory = inventory_.get();
+    sharedData->saveGame = saveGame_.get();
+    sharedData->newGameStartMapName = defaultStartMapName_;
 
     // Create state context
     stateCtx = std::make_unique<StateContext>(StateContext{
@@ -185,6 +293,8 @@ void Application::initStates()
     charCreationState = std::make_unique<CharacterCreationState>(*stateCtx);
     loadingState = std::make_unique<LoadingState>(*stateCtx);
     inGameState = std::make_unique<InGameState>(*stateCtx);
+    creditsState = std::make_unique<CreditsState>(*stateCtx);
+    loadGameState = std::make_unique<LoadGameState>(*stateCtx);
 
     // Wire up loading state callbacks
     loadingState->setProgress(&loadProgress);
@@ -208,6 +318,12 @@ void Application::updateStateContext()
     stateCtx->keyState = keyState;
     stateCtx->previousKeyState = &previousKeyState;
     stateCtx->keyCount = keyCount;
+
+    // Wire bitmap fonts
+    stateCtx->createFont = createFont_.get();
+    stateCtx->ccharFont = ccharFont_.get();
+    stateCtx->arrusFont = arrusFont_.get();
+    stateCtx->smallnumFont = smallnumFont_.get();
 
     if (sharedData)
     {
@@ -243,6 +359,12 @@ void Application::transitionTo(GameStateId id)
     case GameStateId::InGame:
         activeState = inGameState.get();
         break;
+    case GameStateId::Credits:
+        activeState = creditsState.get();
+        break;
+    case GameStateId::LoadGame:
+        activeState = loadGameState.get();
+        break;
     case GameStateId::Quit:
     {
         SDL_Event quitEvent = {};
@@ -270,6 +392,12 @@ bool Application::loadGameData(const std::filesystem::path& dataPath)
 
     dataRoot = dataPath;
     gameRoot = dataPath.parent_path();
+    if (saveGame_)
+    {
+        const std::filesystem::path saveDir =
+            gameRoot.empty() ? std::filesystem::path("saves") : (gameRoot / "saves");
+        saveGame_->setSaveDirectory(saveDir.string());
+    }
 
     // Text/data archives
     const std::vector<std::string> textArchives = {
@@ -277,11 +405,20 @@ bool Application::loadGameData(const std::filesystem::path& dataPath)
     };
 
     // Image archives (use different format)
-    const std::vector<std::string> imageArchives = {
+    std::vector<std::string> imageArchives = {
         "BITMAPS.LOD",
         "ICONS.LOD",
-        "SPRITES.LOD",
     };
+    if (preferLowResSprites_)
+    {
+        imageArchives.push_back("SPRITELO.LOD");
+        imageArchives.push_back("SPRITES.LOD");
+        logger.info("Low-resolution sprite mode enabled (preferring SPRITELO.LOD)");
+    }
+    else
+    {
+        imageArchives.push_back("SPRITES.LOD");
+    }
 
     const std::vector<std::string> gameArchives = {
         "GAMES.LOD",
@@ -378,6 +515,26 @@ bool Application::loadGameData(const std::filesystem::path& dataPath)
 
     logger.info(std::format("Successfully mounted {} LOD archive(s)", mountedCount));
 
+    // Optional sound archive (Audio.snd) used for event-driven WAV playback.
+    if (sndArchive_)
+    {
+        sndArchive_->close();
+    }
+    loadedSounds_.clear();
+    const std::array<std::string, 3> sndCandidates = {"Audio.snd", "audio.snd", "AUDIO.SND"};
+    for (const auto& name : sndCandidates)
+    {
+        const auto sndPath = dataPath / name;
+        if (!std::filesystem::exists(sndPath))
+        {
+            continue;
+        }
+        if (sndArchive_ && sndArchive_->open(sndPath))
+        {
+            break;
+        }
+    }
+
     // Demo: list some files
     auto allFiles = vfs->listAllFiles();
     logger.info(std::format("Total files available: {}", allFiles.size()));
@@ -392,7 +549,98 @@ bool Application::loadGameData(const std::filesystem::path& dataPath)
         }
     }
 
+    loadMapStatsTable();
+    loadDataTables();
+    loadGlobalEventScripts();
+
     gameDataLoaded = true;
+
+    auto readFirstExisting =
+        [this](const std::vector<std::string>& names) -> std::optional<std::vector<uint8_t>>
+    {
+        for (const auto& name : names)
+        {
+            if (auto data = vfs->readFile(name); data.has_value())
+            {
+                return data;
+            }
+        }
+        return std::nullopt;
+    };
+
+    bool spriteFramesLoaded = false;
+    bool textureFramesLoaded = false;
+
+    if (useDefsMode_)
+    {
+        logger.info("Development data mode enabled (-usedefs)");
+
+        if (auto sftData = readFirstExisting({"sft.txt", "SFT.TXT"}); sftData.has_value())
+        {
+            const std::string text(reinterpret_cast<const char*>(sftData->data()), sftData->size());
+            if (spriteFrameTable_.parseText(text))
+            {
+                spriteFramesLoaded = true;
+                logger.info(std::format("Parsed {} sprite frame entries from sft.txt",
+                                        spriteFrameTable_.entries().size()));
+            }
+            else
+            {
+                logger.warning("Failed to parse sft.txt (sprite frame table)");
+            }
+        }
+
+        if (auto tftData = readFirstExisting({"tft.def", "TFT.DEF"}); tftData.has_value())
+        {
+            const std::string text(reinterpret_cast<const char*>(tftData->data()), tftData->size());
+            if (textureFrameTable_.parseText(text))
+            {
+                textureFramesLoaded = true;
+                logger.info(std::format("Parsed {} texture frame entries from tft.def",
+                                        textureFrameTable_.entries().size()));
+            }
+            else
+            {
+                logger.warning("Failed to parse tft.def (texture frame table)");
+            }
+        }
+    }
+
+    // Fallback to binary frame tables from events.lod.
+    if (!spriteFramesLoaded)
+    {
+        if (auto dsftData = vfs->readFile("dsft.bin"); dsftData.has_value())
+        {
+            if (spriteFrameTable_.parse(*dsftData))
+            {
+                spriteFramesLoaded = true;
+                logger.info(std::format("Parsed {} sprite frame entries",
+                                        spriteFrameTable_.entries().size()));
+            }
+            else
+            {
+                logger.warning("Failed to parse dsft.bin (sprite frame table)");
+            }
+        }
+    }
+
+    if (!textureFramesLoaded)
+    {
+        if (auto dtftData = vfs->readFile("dtft.bin"); dtftData.has_value())
+        {
+            if (textureFrameTable_.parse(*dtftData))
+            {
+                textureFramesLoaded = true;
+                logger.info(std::format("Parsed {} texture frame entries",
+                                        textureFrameTable_.entries().size()));
+            }
+            else
+            {
+                logger.warning("Failed to parse dtft.bin (texture frame table)");
+            }
+        }
+    }
+
     buildIntroPlaylist();
     if (introState)
     {
@@ -412,6 +660,9 @@ void Application::configureBootFlow(const std::string& mapName, bool preferOutdo
     startupMapName = mapName;
     startupPreferOutdoor = preferOutdoor;
     autoLoadMap = autoLoad;
+    pendingEntryDirection_ = 0;
+    pendingArrivalOverride_.active = false;
+    pendingTransition_ = {};
 
     // Sync to shared data
     if (sharedData)
@@ -419,6 +670,8 @@ void Application::configureBootFlow(const std::string& mapName, bool preferOutdo
         sharedData->startupMapName = mapName;
         sharedData->startupPreferOutdoor = preferOutdoor;
         sharedData->autoLoadMap = autoLoad;
+        sharedData->loadingScreenIndex = 0;
+        sharedData->loadFromSave = false;
     }
 
     // If map name is specified via CLI, skip menu and go directly to loading
@@ -874,6 +1127,16 @@ void Application::setGameState(GameState state)
     {
         startupMapName.clear();
         startupPreferOutdoor = false;
+        pendingEntryDirection_ = 0;
+        pendingArrivalOverride_.active = false;
+        pendingTransition_ = {};
+        if (sharedData)
+        {
+            sharedData->loadFromSave = false;
+            sharedData->loadingScreenIndex = 0;
+            sharedData->hasPendingEventRuntimeState = false;
+            sharedData->pendingEventRuntimeState.clear();
+        }
     }
     else if (state == GameState::Loading)
     {
@@ -903,7 +1166,48 @@ void Application::updateStateMachine()
                 startupPreferOutdoor = sharedData->startupPreferOutdoor;
                 quickStartReady = sharedData->quickStartReady;
                 autoLoadMap = sharedData->autoLoadMap;
+
+                if (sharedData->loadFromSave && gameWorld_)
+                {
+                    pendingEntryDirection_ = 0;
+                    pendingArrivalOverride_.active = true;
+                    pendingArrivalOverride_.x = gameWorld_->party().worldX();
+                    pendingArrivalOverride_.y = gameWorld_->party().worldY();
+                    pendingArrivalOverride_.z = gameWorld_->party().worldZ();
+                    pendingArrivalOverride_.yaw = gameWorld_->party().yaw();
+
+                    pendingTransition_.active = true;
+                    pendingTransition_.sourceMap.clear();
+                    pendingTransition_.targetMap = startupMapName;
+                    pendingTransition_.exitDirection = 0;
+                    pendingTransition_.transitionParam = 0;
+                    pendingTransition_.hasArrivalOverride = true;
+                    pendingTransition_.arrivalX = pendingArrivalOverride_.x;
+                    pendingTransition_.arrivalY = pendingArrivalOverride_.y;
+                    pendingTransition_.arrivalZ = pendingArrivalOverride_.z;
+                    pendingTransition_.arrivalYaw = pendingArrivalOverride_.yaw;
+
+                    sharedData->loadingScreenIndex = 0;
+                    sharedData->loadFromSave = false;
+                }
             }
+
+            // When transitioning from CharacterCreation to Loading, commit party
+            // and set up the Emerald Island spawn
+            if (activeStateId == GameStateId::CharacterCreation && *next == GameStateId::Loading)
+            {
+                commitPartyToGameWorld();
+                if (gameWorld_)
+                {
+                    auto& gp = gameWorld_->party();
+                    gameWorld_->setCurrentMap(gp.currentMap());
+                }
+            }
+            if (activeStateId == GameStateId::InGame && *next == GameStateId::Loading)
+            {
+                preserveCurrentMapState();
+            }
+
             transitionTo(*next);
         }
     }
@@ -950,11 +1254,6 @@ void Application::buildIntroPlaylist()
         videoPlayer->loadArchive(vidPath);
     }
 
-    // Build a filtered intro list (logos + intro)
-    const std::vector<std::string> preferred = {
-        "3DOLOGO.SMK", "JVC.BIK", "NEW WORLD LOGO.BIK", "INTRO.BIK", "INTRO POST.BIK",
-    };
-
     auto clipMatches = [](const std::string& name, const std::string& target)
     {
         if (name.size() != target.size())
@@ -972,8 +1271,23 @@ void Application::buildIntroPlaylist()
         return true;
     };
 
+    auto isLogoClip = [&](const std::string& name)
+    {
+        return clipMatches(name, "3DOLOGO.SMK") || clipMatches(name, "JVC.BIK") ||
+               clipMatches(name, "NEW WORLD LOGO.BIK");
+    };
+
+    // Build a filtered intro list (logos + intro, unless noLogo is enabled)
+    const std::vector<std::string> preferred = {
+        "3DOLOGO.SMK", "JVC.BIK", "NEW WORLD LOGO.BIK", "INTRO.BIK", "INTRO POST.BIK",
+    };
+
     for (const auto& want : preferred)
     {
+        if (bootConfig_.noLogo && isLogoClip(want))
+        {
+            continue;
+        }
         for (const auto& clip : manifest.clips())
         {
             if (clipMatches(clip.name, want))
@@ -988,6 +1302,10 @@ void Application::buildIntroPlaylist()
     {
         for (const auto& clip : manifest.clips())
         {
+            if (bootConfig_.noLogo && isLogoClip(clip.name))
+            {
+                continue;
+            }
             introPlaylist.push_back({clip.name, 2500});
             if (introPlaylist.size() >= 3)
             {
@@ -1011,9 +1329,12 @@ bool Application::loadUiAssets()
     loadPcxTexture({"makeme.pcx", "MAKEME.PCX", "Create.pcx", "CREATE.PCX"}, "Create",
                    createBackground, createBackgroundWidth, createBackgroundHeight);
 
-    // Extract palette from MAKEME.PCX for use with paletted textures that have paletteId=0
-    // In the original VGA engine, the background PCX set the shared screen palette
-    for (const auto& pcxName : {"makeme.pcx", "MAKEME.PCX", "Create.pcx", "CREATE.PCX"})
+    // Extract palette for paletted textures with paletteId=0 ("use screen palette").
+    // In the original VGA engine, the background PCX set the hardware palette.
+    // Try Title.pcx first (title screen buttons need its palette), then makeme.pcx.
+    // Both may be 24-bit (3 planes) but still embed a 768-byte VGA palette at the end.
+    for (const auto& pcxName :
+         {"Title.pcx", "TITLE.PCX", "makeme.pcx", "MAKEME.PCX", "Create.pcx", "CREATE.PCX"})
     {
         auto pcxData = vfs->readFile(pcxName);
         if (!pcxData.has_value())
@@ -1023,6 +1344,7 @@ bool Application::loadUiAssets()
         auto pcx = formats::decodePCX(*pcxData, logger);
         if (pcx.has_value() && !pcx->is24Bit())
         {
+            // 8-bit paletted PCX: use the decoded palette directly
             screenPaletteRGB.resize(768);
             for (int i = 0; i < 256; i++)
             {
@@ -1031,14 +1353,94 @@ bool Application::loadUiAssets()
                 screenPaletteRGB[i * 3 + 1] = c.g;
                 screenPaletteRGB[i * 3 + 2] = c.b;
             }
-            logger.info(std::format("Extracted screen palette from {} ({} colors)", pcxName, 256));
+            logger.info(std::format("Extracted screen palette from {} (8-bit paletted)", pcxName));
+            break;
+        }
+        // 24-bit PCX: check for embedded VGA palette at end of raw data (0x0C marker + 768 bytes)
+        if (pcxData->size() >= 769 && (*pcxData)[pcxData->size() - 769] == 0x0C)
+        {
+            screenPaletteRGB.assign(pcxData->end() - 768, pcxData->end());
+            logger.info(std::format(
+                "Extracted screen palette from {} (24-bit, embedded VGA palette)", pcxName));
             break;
         }
     }
 
-    loadPcxSequence("loading", loadingFrames, loadingFrameWidths, loadingFrameHeights);
-    loadPcxTexture({"loading.pcx", "Loading.pcx", "LOADING.PCX"}, "Loading", loadingBackground,
-                   loadingBackgroundWidth, loadingBackgroundHeight);
+    // Load bitmap fonts (FONTPAL + .fnt files from ICONS.LOD)
+    {
+        auto fontPalData = vfs->readFile("FONTPAL");
+        if (!fontPalData.has_value())
+            fontPalData = vfs->readFile("fontpal");
+        if (fontPalData.has_value() && fontPalData->size() >= 768)
+        {
+            fontPalRGB_.assign(fontPalData->begin(), fontPalData->begin() + 768);
+            logger.info("Loaded FONTPAL palette");
+        }
+        else
+        {
+            logger.warning("FONTPAL not found; bitmap fonts will be unavailable");
+        }
+
+        if (!fontPalRGB_.empty())
+        {
+            SDL_Renderer* sdlR = renderer->getSDLRenderer();
+            struct FontEntry
+            {
+                const char* name;
+                std::unique_ptr<graphics::BitmapFont>& target;
+            };
+            FontEntry fonts[] = {
+                {"create.fnt", createFont_},
+                {"cchar.fnt", ccharFont_},
+                {"arrus.fnt", arrusFont_},
+                {"smallnum.fnt", smallnumFont_},
+            };
+            for (auto& fe : fonts)
+            {
+                auto fntData = vfs->readFile(fe.name);
+                if (!fntData.has_value())
+                {
+                    // Try uppercase
+                    std::string upper = fe.name;
+                    for (auto& c : upper)
+                        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                    fntData = vfs->readFile(upper);
+                }
+                if (fntData.has_value())
+                {
+                    fe.target = std::make_unique<graphics::BitmapFont>();
+                    if (fe.target->load(*fntData, fontPalRGB_))
+                    {
+                        if (sdlR && fe.target->createAtlas(sdlR))
+                        {
+                            logger.info(std::format("Loaded bitmap font: {} (height={})", fe.name,
+                                                    fe.target->height()));
+                        }
+                        else
+                        {
+                            logger.warning(
+                                std::format("Failed to create atlas for font: {}", fe.name));
+                        }
+                    }
+                    else
+                    {
+                        logger.warning(std::format("Failed to parse font: {}", fe.name));
+                        fe.target.reset();
+                    }
+                }
+                else
+                {
+                    logger.warning(std::format("Font file not found: {}", fe.name));
+                }
+            }
+        }
+    }
+
+    loadPcxSequence("loading", loadingFrames, loadingFrameWidths, loadingFrameHeights,
+                    &loadingFrameNumbers);
+    loadPcxTexture({"lsave640.pcx", "LSave640.pcx", "LSAVE640.PCX", "loading.pcx", "Loading.pcx",
+                    "LOADING.PCX"},
+                   "Loading", loadingBackground, loadingBackgroundWidth, loadingBackgroundHeight);
 
     // Load per-button hover textures from ICONS.LOD
     // title_* are the correct title screen overlays (~85x30)
@@ -1069,6 +1471,49 @@ bool Application::loadUiAssets()
                        portraitWidths[i], portraitHeights[i]);
     }
 
+    // Load character creation overlay textures from ICONS.LOD
+    loadPcxTexture({"FACEMASK", "facemask"}, "FaceMask", ccFaceMask_.tex, ccFaceMask_.w,
+                   ccFaceMask_.h);
+    loadPcxTexture({"BUTTMAKE", "buttmake"}, "OkBtn", ccOkButton_.tex, ccOkButton_.w,
+                   ccOkButton_.h);
+    loadPcxTexture({"buttmake2", "BUTTMAKE2"}, "ClearBtn", ccClearButton_.tex, ccClearButton_.w,
+                   ccClearButton_.h);
+    loadPcxTexture({"MAKEMINU", "makeminu"}, "MinusBtn", ccMinusButton_.tex, ccMinusButton_.w,
+                   ccMinusButton_.h);
+    loadPcxTexture({"MAKEPLUS", "makeplus"}, "PlusBtn", ccPlusButton_.tex, ccPlusButton_.w,
+                   ccPlusButton_.h);
+    loadPcxTexture({"presleft", "PRESLEFT"}, "LeftArrow", ccLeftArrow_.tex, ccLeftArrow_.w,
+                   ccLeftArrow_.h);
+    loadPcxTexture({"presrigh", "PRESRIGH"}, "RightArrow", ccRightArrow_.tex, ccRightArrow_.w,
+                   ccRightArrow_.h);
+
+    const char* classIconNames[] = {"IC_KNIGHT", "IC_Thief",  "IC_MONK",  "IC_PALADIN", "IC_ARCHER",
+                                    "IC_RANGER", "IC_CLERIC", "IC_DRUID", "IC_SORC"};
+    for (int i = 0; i < kClassIconCount; i++)
+    {
+        std::string lower = classIconNames[i];
+        for (auto& c : lower)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        loadPcxTexture({classIconNames[i], lower}, std::string("ClassIcon_") + classIconNames[i],
+                       ccClassIcons_[i].tex, ccClassIcons_[i].w, ccClassIcons_[i].h);
+    }
+
+    // Load credits from CREDITS.TXT in events.lod
+    if (creditsState && vfs->fileExists("CREDITS.TXT"))
+    {
+        auto creditsData = vfs->readFile("CREDITS.TXT");
+        if (creditsData.has_value())
+        {
+            formats::CreditsParser creditsParser(logger);
+            if (creditsParser.parse(*creditsData))
+            {
+                creditsState->setCreditsSections(creditsParser.getCreditsSections());
+                logger.info(std::format("Parsed {} credits sections",
+                                        creditsParser.getCreditsSections().size()));
+            }
+        }
+    }
+
     // Wire textures to state objects
     if (titleState)
     {
@@ -1090,6 +1535,18 @@ bool Application::loadUiAssets()
             charCreationState->setPortraitTexture(i, portraitTextures[i], portraitWidths[i],
                                                   portraitHeights[i]);
         }
+        charCreationState->setFaceMask(ccFaceMask_.tex, ccFaceMask_.w, ccFaceMask_.h);
+        charCreationState->setOkButton(ccOkButton_.tex, ccOkButton_.w, ccOkButton_.h);
+        charCreationState->setClearButton(ccClearButton_.tex, ccClearButton_.w, ccClearButton_.h);
+        charCreationState->setMinusButton(ccMinusButton_.tex, ccMinusButton_.w, ccMinusButton_.h);
+        charCreationState->setPlusButton(ccPlusButton_.tex, ccPlusButton_.w, ccPlusButton_.h);
+        charCreationState->setLeftArrow(ccLeftArrow_.tex, ccLeftArrow_.w, ccLeftArrow_.h);
+        charCreationState->setRightArrow(ccRightArrow_.tex, ccRightArrow_.w, ccRightArrow_.h);
+        for (int i = 0; i < kClassIconCount; i++)
+        {
+            charCreationState->setClassIcon(i, ccClassIcons_[i].tex, ccClassIcons_[i].w,
+                                            ccClassIcons_[i].h);
+        }
     }
     if (loadingState)
     {
@@ -1097,7 +1554,19 @@ bool Application::loadUiAssets()
                                     loadingBackgroundHeight);
         loadingState->setFallbackBackground(titleBackground, titleBackgroundWidth,
                                             titleBackgroundHeight);
-        loadingState->setAnimationFrames(&loadingFrames, &loadingFrameWidths, &loadingFrameHeights);
+        loadingState->setAnimationFrames(&loadingFrames, &loadingFrameWidths, &loadingFrameHeights,
+                                         &loadingFrameNumbers);
+    }
+    if (loadGameState)
+    {
+        // Try to load lsave640.pcx as background for the load game screen
+        void* loadBg = nullptr;
+        int loadBgW = 0, loadBgH = 0;
+        if (loadPcxTexture({"lsave640.pcx", "LSave640.pcx", "LSAVE640.PCX"}, "LoadGame", loadBg,
+                           loadBgW, loadBgH))
+        {
+            loadGameState->setBackground(loadBg, loadBgW, loadBgH);
+        }
     }
 
     uiAssetsLoaded = true;
@@ -1122,6 +1591,17 @@ void Application::unloadUiAssets()
         for (auto* tex : loadingFrames)
         {
             renderer->destroyTexture(tex);
+        }
+        renderer->destroyTexture(ccFaceMask_.tex);
+        renderer->destroyTexture(ccOkButton_.tex);
+        renderer->destroyTexture(ccClearButton_.tex);
+        renderer->destroyTexture(ccMinusButton_.tex);
+        renderer->destroyTexture(ccPlusButton_.tex);
+        renderer->destroyTexture(ccLeftArrow_.tex);
+        renderer->destroyTexture(ccRightArrow_.tex);
+        for (int i = 0; i < kClassIconCount; i++)
+        {
+            renderer->destroyTexture(ccClassIcons_[i].tex);
         }
     }
 
@@ -1149,6 +1629,23 @@ void Application::unloadUiAssets()
     loadingFrames.clear();
     loadingFrameWidths.clear();
     loadingFrameHeights.clear();
+    loadingFrameNumbers.clear();
+    ccFaceMask_ = {};
+    ccOkButton_ = {};
+    ccClearButton_ = {};
+    ccMinusButton_ = {};
+    ccPlusButton_ = {};
+    ccLeftArrow_ = {};
+    ccRightArrow_ = {};
+    for (int i = 0; i < kClassIconCount; i++)
+    {
+        ccClassIcons_[i] = {};
+    }
+    createFont_.reset();
+    ccharFont_.reset();
+    arrusFont_.reset();
+    smallnumFont_.reset();
+    fontPalRGB_.clear();
     uiAssetsLoaded = false;
 }
 
@@ -1260,14 +1757,14 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
             continue;
         }
 
-        // Load palette
-        // paletteId=0 means "use the active screen palette" (VGA-era concept)
-        std::optional<std::vector<uint8_t>> palData;
-        if (imgInfo->paletteId == 0 && !screenPaletteRGB.empty())
+        // Load palette: prefer embedded palette from the LOD entry itself,
+        // then try screen palette, then PAL### from BITMAPS.LOD.
+        std::optional<std::vector<uint8_t>> palData = vfs->getImagePalette(name);
+        if (!palData.has_value() && imgInfo->paletteId == 0 && !screenPaletteRGB.empty())
         {
             palData = screenPaletteRGB;
         }
-        else
+        if (!palData.has_value())
         {
             int palId = imgInfo->paletteId > 0 ? imgInfo->paletteId : 1;
             std::string palName = std::format("PAL{:03d}", palId);
@@ -1319,11 +1816,16 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
 }
 
 bool Application::loadPcxSequence(const std::string& prefix, std::vector<void*>& textures,
-                                  std::vector<int>& widths, std::vector<int>& heights)
+                                  std::vector<int>& widths, std::vector<int>& heights,
+                                  std::vector<int>* frameNumbers)
 {
     textures.clear();
     widths.clear();
     heights.clear();
+    if (frameNumbers)
+    {
+        frameNumbers->clear();
+    }
 
     if (!renderer || !vfs)
     {
@@ -1437,6 +1939,10 @@ bool Application::loadPcxSequence(const std::string& prefix, std::vector<void*>&
             textures.push_back(tex);
             widths.push_back(static_cast<int>(pcx->width));
             heights.push_back(static_cast<int>(pcx->height));
+            if (frameNumbers)
+            {
+                frameNumbers->push_back(entry.index);
+            }
         }
         catch (const std::exception& ex)
         {
@@ -1531,11 +2037,109 @@ void Application::finalizeLoadingTask()
         configureCameraForMap();
         wireUpMapTextures();
         setGameState(GameState::InGame);
+
+        // Sync loaded map name to GameWorld
+        if (gameWorld_ && mapScene && !mapScene->getName().empty())
+        {
+            gameWorld_->setCurrentMap(mapScene->getName());
+            const auto& runtimeConfig = gameWorld_->runtimeConfig();
+
+            if (runtimeConfig.noDecorations)
+            {
+                mapScene->mutableBLVData().decorations.clear();
+                mapScene->mutableODMData().buildings.clear();
+            }
+
+            const std::string& mapName = mapScene->getName();
+            restoreCurrentMapState(mapName);
+            loadMapEventScripts(mapName);
+            if (eventEngine_)
+            {
+                eventEngine_->onMapLoaded();
+                if (sharedData && sharedData->hasPendingEventRuntimeState)
+                {
+                    if (!eventEngine_->deserializeRuntimeState(
+                            sharedData->pendingEventRuntimeState))
+                    {
+                        logger.warning("Failed to restore event runtime state from save payload");
+                    }
+                    sharedData->hasPendingEventRuntimeState = false;
+                    sharedData->pendingEventRuntimeState.clear();
+                }
+            }
+
+            bool shouldGenerateContent = false;
+            if (!gameWorld_->hasGeneratedContent(mapName))
+            {
+                shouldGenerateContent = true;
+            }
+            else if (const auto* generated = gameWorld_->getGeneratedContent(mapName);
+                     generated != nullptr)
+            {
+                const int respawnDays = std::max(0, generated->respawnDays);
+                if (respawnDays > 0)
+                {
+                    const int64_t nowTicks = gameWorld_->calendar().totalTicks;
+                    const int64_t elapsedTicks =
+                        std::max<int64_t>(0, nowTicks - generated->generatedAtTicks);
+                    const int64_t respawnTicks =
+                        static_cast<int64_t>(respawnDays) * game::GameCalendar::kTicksPerDay;
+                    if (elapsedTicks >= respawnTicks)
+                    {
+                        shouldGenerateContent = true;
+                    }
+                }
+            }
+
+            if (shouldGenerateContent && contentGenerator_)
+            {
+                game::GenerationConfig generationConfig;
+                generationConfig.mapDifficulty =
+                    resolveMapDifficulty(mapName, startupPreferOutdoor ? 4 : 5);
+                generationConfig.maxMonsters =
+                    runtimeConfig.noMonsters ? 0 : (startupPreferOutdoor ? 96 : 64);
+                generationConfig.maxChests = startupPreferOutdoor ? 24 : 18;
+
+                game::GeneratedMapContent generated = contentGenerator_->generateForMap(
+                    mapName, mapScene->getBLVData().spawns, mapScene->getODMData().spawns,
+                    generationConfig);
+                generated.generatedAtTicks = gameWorld_->calendar().totalTicks;
+                generated.respawnDays = resolveMapRespawnDays(mapName, 0);
+                gameWorld_->setGeneratedContent(mapName, std::move(generated));
+            }
+
+            if (combatSystem_)
+            {
+                combatSystem_->clearMonsters();
+                if (const auto* generated = gameWorld_->getGeneratedContent(mapName);
+                    generated != nullptr)
+                {
+                    for (const auto& monster : generated->monsters)
+                    {
+                        combatSystem_->spawnMonster(monster.monsterId, monster.x, monster.y,
+                                                    monster.z, monster.group);
+                    }
+                }
+                combatSystem_->setInCombat(false);
+            }
+
+            applyMapEntryPoint();
+            pendingTransition_.active = false;
+            if (sharedData)
+            {
+                sharedData->loadingScreenIndex = 0;
+            }
+        }
     }
     else
     {
-        logger.error(std::format("finalizeLoadingTask: failed, error='{}', hasScene={}",
-                                 error, loadedScene != nullptr));
+        logger.error(std::format("finalizeLoadingTask: failed, error='{}', hasScene={}", error,
+                                 loadedScene != nullptr));
+        pendingTransition_ = {};
+        if (sharedData)
+        {
+            sharedData->loadingScreenIndex = 0;
+        }
         setGameState(GameState::TitleScreen);
     }
 }
@@ -1556,7 +2160,20 @@ void Application::runLoadingTask(LoadRequest request)
 
     if (!request.mapName.empty())
     {
-        if (request.preferOutdoor)
+        // If the name already has an extension, only try the matching format
+        std::string ext = getLowerExtension(request.mapName);
+        bool hasOdm = (ext == ".odm");
+        bool hasBlv = (ext == ".blv");
+
+        if (hasOdm)
+        {
+            loaded = tryLoad(request.mapName, true);
+        }
+        else if (hasBlv)
+        {
+            loaded = tryLoad(request.mapName, false);
+        }
+        else if (request.preferOutdoor)
         {
             loaded = tryLoad(request.mapName, true);
             if (!loaded)
@@ -1803,6 +2420,1632 @@ void Application::updateSkillsForClass(Character& ch)
     ch.skills.push_back(kClassStartingSkills[classIdx].skill2);
 }
 
+void Application::commitPartyToGameWorld()
+{
+    if (!gameWorld_)
+    {
+        return;
+    }
+    auto& gp = gameWorld_->party();
+    for (int i = 0; i < game::kPartySize && i < static_cast<int>(party.size()); i++)
+    {
+        gp.member(i) = party[static_cast<size_t>(i)];
+    }
+    logger.info("Committed party data to GameWorld");
+}
+
+void Application::configureGameplayCallbacks()
+{
+    if (eventEngine_)
+    {
+        game::EventCallbacks callbacks;
+        callbacks.onShowText = [this](const std::string& text)
+        {
+            if (sharedData)
+            {
+                if (sharedData->awaitingNpcDialogText)
+                {
+                    sharedData->npcDialogueText = text;
+                    sharedData->openNpcDialogue = true;
+                    sharedData->awaitingNpcDialogText = false;
+                }
+                else
+                {
+                    sharedData->statusMessage = text;
+                }
+            }
+            logger.info(std::format("Event: {}", text));
+        };
+        callbacks.onNpcDialog = [this](int dialogTextId)
+        {
+            if (sharedData)
+            {
+                std::string speaker = std::format("NPC #{}", dialogTextId);
+                if (auto ownerIt = npcDialogOwnerById_.find(dialogTextId);
+                    ownerIt != npcDialogOwnerById_.end() && !ownerIt->second.empty())
+                {
+                    speaker = ownerIt->second;
+                }
+                else if (auto npcNameIt = npcNameById_.find(dialogTextId);
+                         npcNameIt != npcNameById_.end() && !npcNameIt->second.empty())
+                {
+                    speaker = npcNameIt->second;
+                }
+                else if (!npcNamePool_.empty())
+                {
+                    const size_t idx =
+                        static_cast<size_t>(std::max(0, dialogTextId)) % npcNamePool_.size();
+                    speaker = npcNamePool_[idx];
+                }
+
+                sharedData->pendingNpcDialogId = dialogTextId;
+                sharedData->awaitingNpcDialogText = true;
+                sharedData->openNpcDialogue = true;
+                sharedData->npcDialogueSpeaker = std::move(speaker);
+                sharedData->npcDialogueChoiceIds.clear();
+                sharedData->npcDialogueChoiceTexts.clear();
+
+                if (auto textIt = npcDialogTextById_.find(dialogTextId);
+                    textIt != npcDialogTextById_.end())
+                {
+                    sharedData->npcDialogueText = textIt->second;
+                }
+                else
+                {
+                    sharedData->npcDialogueText.clear();
+                }
+
+                std::vector<int> topicIds;
+                if (auto byNpcIt = npcTopicIdsByNpcId_.find(dialogTextId);
+                    byNpcIt != npcTopicIdsByNpcId_.end())
+                {
+                    topicIds = byNpcIt->second;
+                }
+                else if (auto byTextIt = npcTopicIdsByTextId_.find(dialogTextId);
+                         byTextIt != npcTopicIdsByTextId_.end())
+                {
+                    topicIds = byTextIt->second;
+                }
+
+                for (int topicId : topicIds)
+                {
+                    if (topicId <= 0)
+                    {
+                        continue;
+                    }
+                    std::string topicLabel = std::format("Topic #{}", topicId);
+                    if (auto topicIt = npcTopicNameById_.find(topicId);
+                        topicIt != npcTopicNameById_.end() && !topicIt->second.empty())
+                    {
+                        topicLabel = topicIt->second;
+                    }
+
+                    sharedData->npcDialogueChoiceIds.push_back(topicId);
+                    sharedData->npcDialogueChoiceTexts.push_back(std::move(topicLabel));
+                    if (sharedData->npcDialogueChoiceIds.size() >= 4)
+                    {
+                        break;
+                    }
+                }
+            }
+        };
+        callbacks.onShowBuilding = [this](int buildingId)
+        {
+            const std::string name = resolveBuildingDisplayName(buildingId);
+            if (sharedData)
+            {
+                sharedData->statusMessage =
+                    name.empty()
+                        ? std::format("Building interaction opened (id #{})", buildingId)
+                        : std::format("Building interaction opened: {} (id #{})", name, buildingId);
+            }
+        };
+        callbacks.onPlaySound = [this](int soundId) { playEventSound(soundId); };
+        callbacks.onTeleport = [this](const std::string& map, float x, float y, float z, float yaw)
+        {
+            const std::string trimmedMap = toLower(map);
+            const bool intraMapTeleport =
+                map.empty() || (!trimmedMap.empty() && trimmedMap[0] == '0');
+
+            if (gameWorld_)
+            {
+                gameWorld_->party().setWorldPosition(x, y, z);
+                gameWorld_->party().setOrientation(yaw, gameWorld_->party().pitch());
+            }
+
+            if (intraMapTeleport)
+            {
+                return;
+            }
+
+            preserveCurrentMapState();
+            startupMapName = normalizeMapName(map, false);
+            startupPreferOutdoor = (getLowerExtension(startupMapName) == ".odm");
+            autoLoadMap = true;
+            pendingEntryDirection_ = 0;
+            pendingArrivalOverride_.active = true;
+            pendingArrivalOverride_.x = x;
+            pendingArrivalOverride_.y = y;
+            pendingArrivalOverride_.z = z;
+            pendingArrivalOverride_.yaw = yaw;
+            pendingTransition_.active = true;
+            pendingTransition_.sourceMap = gameWorld_ ? gameWorld_->currentMap() : "";
+            pendingTransition_.targetMap = startupMapName;
+            pendingTransition_.exitDirection = 0;
+            pendingTransition_.transitionParam = 0;
+            pendingTransition_.hasArrivalOverride = true;
+            pendingTransition_.arrivalX = x;
+            pendingTransition_.arrivalY = y;
+            pendingTransition_.arrivalZ = z;
+            pendingTransition_.arrivalYaw = yaw;
+
+            if (sharedData)
+            {
+                sharedData->startupMapName = startupMapName;
+                sharedData->startupPreferOutdoor = startupPreferOutdoor;
+                sharedData->autoLoadMap = true;
+                sharedData->loadingScreenIndex = 0;
+                sharedData->statusMessage = this->buildTransitionText(startupMapName, 0);
+            }
+
+            setGameState(GameState::Loading);
+            transitionTo(GameStateId::Loading);
+        };
+        callbacks.onChangeMap =
+            [this](const std::string& map, int exitDirection, int transitionParam)
+        {
+            const std::string lower = toLower(map);
+            if (lower == "arbiter good")
+            {
+                if (gameWorld_)
+                {
+                    gameWorld_->party().setAlignment(game::Alignment::Good);
+                }
+                if (sharedData)
+                {
+                    sharedData->statusMessage = "Party alignment changed to Good";
+                }
+                logger.info("Event: party alignment set to Good");
+                return;
+            }
+            if (lower == "arbiter evil")
+            {
+                if (gameWorld_)
+                {
+                    gameWorld_->party().setAlignment(game::Alignment::Evil);
+                }
+                if (sharedData)
+                {
+                    sharedData->statusMessage = "Party alignment changed to Evil";
+                }
+                logger.info("Event: party alignment set to Evil");
+                return;
+            }
+
+            std::string targetMap = map;
+            if (lower == "pcout01")
+            {
+                targetMap = "out01.odm";
+            }
+
+            preserveCurrentMapState();
+            startupMapName = normalizeMapName(targetMap, false);
+            startupPreferOutdoor = (getLowerExtension(startupMapName) == ".odm");
+            autoLoadMap = true;
+            pendingEntryDirection_ = resolveSpawnIndexFromDirection(exitDirection);
+            const game::MapTransition* transitionMeta =
+                resolveInteractionTransition(gameWorld_.get(), startupMapName);
+            const bool useArrivalOverride = transitionMeta && transitionMeta->hasArrivalOverride;
+            pendingArrivalOverride_.active = false;
+            if (useArrivalOverride)
+            {
+                pendingArrivalOverride_.active = true;
+                pendingArrivalOverride_.x = transitionMeta->targetX;
+                pendingArrivalOverride_.y = transitionMeta->targetY;
+                pendingArrivalOverride_.z = transitionMeta->targetZ;
+                pendingArrivalOverride_.yaw = transitionMeta->targetYaw;
+                pendingEntryDirection_ = 0;
+            }
+            pendingTransition_.active = true;
+            pendingTransition_.sourceMap = gameWorld_ ? gameWorld_->currentMap() : "";
+            pendingTransition_.targetMap = startupMapName;
+            pendingTransition_.exitDirection = pendingEntryDirection_;
+            pendingTransition_.transitionParam = transitionParam;
+            pendingTransition_.hasArrivalOverride = useArrivalOverride;
+            pendingTransition_.arrivalX = 0.0f;
+            pendingTransition_.arrivalY = 0.0f;
+            pendingTransition_.arrivalZ = 0.0f;
+            pendingTransition_.arrivalYaw = 0.0f;
+            if (useArrivalOverride)
+            {
+                pendingTransition_.arrivalX = transitionMeta->targetX;
+                pendingTransition_.arrivalY = transitionMeta->targetY;
+                pendingTransition_.arrivalZ = transitionMeta->targetZ;
+                pendingTransition_.arrivalYaw = transitionMeta->targetYaw;
+            }
+
+            if (sharedData)
+            {
+                sharedData->startupMapName = startupMapName;
+                sharedData->startupPreferOutdoor = startupPreferOutdoor;
+                sharedData->autoLoadMap = true;
+                sharedData->loadingScreenIndex = std::max(0, transitionParam);
+                sharedData->statusMessage =
+                    this->buildTransitionText(startupMapName, pendingEntryDirection_);
+            }
+
+            setGameState(GameState::Loading);
+            transitionTo(GameStateId::Loading);
+        };
+        callbacks.onGiveItem = [this](int itemId)
+        {
+            if (!inventory_ || itemId <= 0)
+            {
+                return;
+            }
+            game::Item item;
+            item.itemId = itemId;
+            (void)inventory_->giveItem(item);
+        };
+        callbacks.onRemoveItem = [this](int itemId) -> bool
+        {
+            if (!inventory_ || itemId <= 0)
+            {
+                return false;
+            }
+            return inventory_->removeItem(itemId);
+        };
+        callbacks.onMapCommand = [this](const game::EventCommand& cmd)
+        {
+            if (!mapScene)
+            {
+                return;
+            }
+
+            auto& blv = mapScene->mutableBLVData();
+            auto& odm = mapScene->mutableODMData();
+
+            const int param1 = cmd.param1;
+            const int param2 = cmd.param2;
+            const int param3 = cmd.param3;
+            const auto interaction =
+                gameWorld_ ? gameWorld_->lastEventInteraction() : game::EventInteractionContext{};
+            constexpr uint32_t kInvisible =
+                static_cast<uint32_t>(formats::FaceAttribute::Invisible);
+
+            auto resolveIndoorFaceIndex = [&]() -> int
+            {
+                if (param1 >= 0 && static_cast<size_t>(param1) < blv.faces.size())
+                {
+                    return param1;
+                }
+                if (interaction.type == game::EventInteractionType::IndoorFace &&
+                    interaction.objectIndex >= 0 &&
+                    static_cast<size_t>(interaction.objectIndex) < blv.faces.size())
+                {
+                    return interaction.objectIndex;
+                }
+                return -1;
+            };
+
+            auto resolveIndoorDecorationIndex = [&]() -> int
+            {
+                if (interaction.type == game::EventInteractionType::IndoorDecoration &&
+                    interaction.objectIndex >= 0 &&
+                    static_cast<size_t>(interaction.objectIndex) < blv.decorations.size())
+                {
+                    return interaction.objectIndex;
+                }
+                if (param1 >= 0 && static_cast<size_t>(param1) < blv.decorations.size())
+                {
+                    return param1;
+                }
+                return -1;
+            };
+
+            struct OutdoorFaceTarget
+            {
+                int buildingIndex = -1;
+                int faceIndex = -1; // -1 means "all faces in building"
+            };
+
+            auto decodeOutdoorFaceTarget = [&](int packedFaceIndex) -> OutdoorFaceTarget
+            {
+                OutdoorFaceTarget target;
+                if (packedFaceIndex < 0)
+                {
+                    return target;
+                }
+
+                const int buildingIndex = (packedFaceIndex >> 16) & 0xFFFF;
+                const int faceIndex = packedFaceIndex & 0xFFFF;
+                if (buildingIndex < 0 || static_cast<size_t>(buildingIndex) >= odm.buildings.size())
+                {
+                    return target;
+                }
+
+                target.buildingIndex = buildingIndex;
+                const auto& building = odm.buildings[static_cast<size_t>(buildingIndex)];
+                if (faceIndex >= 0 && static_cast<size_t>(faceIndex) < building.faces.size())
+                {
+                    target.faceIndex = faceIndex;
+                }
+                return target;
+            };
+
+            auto resolveOutdoorFaceTarget = [&]() -> OutdoorFaceTarget
+            {
+                if (interaction.type == game::EventInteractionType::OutdoorBuildingFace &&
+                    interaction.objectIndex >= 0)
+                {
+                    return decodeOutdoorFaceTarget(interaction.objectIndex);
+                }
+
+                if (param1 >= 0)
+                {
+                    if (static_cast<size_t>(param1) < odm.buildings.size())
+                    {
+                        OutdoorFaceTarget target;
+                        target.buildingIndex = param1;
+                        return target;
+                    }
+
+                    if (((param1 >> 16) & 0xFFFF) != 0)
+                    {
+                        return decodeOutdoorFaceTarget(param1);
+                    }
+                }
+
+                return {};
+            };
+
+            auto applyFaceVisibilityAction =
+                [&](uint32_t& attributes, int action, bool zeroMeansHide)
+            {
+                const bool currentlyHidden = (attributes & kInvisible) != 0;
+                bool hide = currentlyHidden;
+
+                if (action == 2)
+                {
+                    hide = !currentlyHidden;
+                }
+                else if (zeroMeansHide)
+                {
+                    hide = (action == 0);
+                }
+                else
+                {
+                    hide = (action != 0);
+                }
+
+                if (hide)
+                {
+                    attributes |= kInvisible;
+                }
+                else
+                {
+                    attributes &= ~kInvisible;
+                }
+            };
+
+            switch (cmd.opcode)
+            {
+            case game::EventOpcode::DoorControl:
+                if (const int faceIndex = resolveIndoorFaceIndex(); faceIndex >= 0)
+                {
+                    auto& face = blv.faces[static_cast<size_t>(faceIndex)];
+                    applyFaceVisibilityAction(face.attributes, param2, true);
+                }
+                break;
+
+            case game::EventOpcode::ModifyObject:
+                if (const int faceIndex = resolveIndoorFaceIndex(); faceIndex >= 0)
+                {
+                    auto& face = blv.faces[static_cast<size_t>(faceIndex)];
+                    applyFaceVisibilityAction(face.attributes, param2, false);
+                }
+                break;
+
+            case game::EventOpcode::ModifyDecoration:
+                if (const int decorIndex = resolveIndoorDecorationIndex(); decorIndex >= 0)
+                {
+                    auto& decoration = blv.decorations[static_cast<size_t>(decorIndex)];
+                    if (param2 == 2)
+                    {
+                        decoration.hidden = !decoration.hidden;
+                    }
+                    else
+                    {
+                        decoration.hidden = (param2 == 0);
+                    }
+                    break;
+                }
+
+                if (const auto target = resolveOutdoorFaceTarget(); target.buildingIndex >= 0)
+                {
+                    auto& building = odm.buildings[static_cast<size_t>(target.buildingIndex)];
+                    if (target.faceIndex >= 0 &&
+                        static_cast<size_t>(target.faceIndex) < building.faces.size())
+                    {
+                        applyFaceVisibilityAction(
+                            building.faces[static_cast<size_t>(target.faceIndex)].attributes,
+                            param2, true);
+                        break;
+                    }
+
+                    for (auto& face : building.faces)
+                    {
+                        applyFaceVisibilityAction(face.attributes, param2, true);
+                    }
+                }
+                break;
+
+            case game::EventOpcode::SpawnItem:
+                if (gameWorld_)
+                {
+                    const game::GameVarId marker = static_cast<game::GameVarId>(0x7600);
+                    gameWorld_->setVar(marker, gameWorld_->getVar(marker) + std::max(1, param2));
+                }
+                break;
+
+            default:
+                break;
+            }
+
+            if (gameWorld_)
+            {
+                const game::GameVarId varId = static_cast<game::GameVarId>(
+                    0x7000 + static_cast<int>(static_cast<uint8_t>(cmd.opcode)));
+                gameWorld_->setVar(varId, param1 ^ param2 ^ param3);
+            }
+        };
+        eventEngine_->setCallbacks(callbacks);
+    }
+
+    if (combatSystem_)
+    {
+        game::CombatCallbacks callbacks;
+        callbacks.onCharacterAttack = [this](int characterIndex,
+                                             const game::MonsterInstance& target,
+                                             const game::AttackResult& result)
+        {
+            logger.debug(std::format("Combat: party[{}] -> {} :: {}", characterIndex, target.name,
+                                     result.description));
+        };
+        callbacks.onMonsterAttack = [this](const game::MonsterInstance& attacker,
+                                           int characterIndex, const game::AttackResult& result)
+        {
+            logger.debug(std::format("Combat: {} -> party[{}] :: {}", attacker.name, characterIndex,
+                                     result.description));
+        };
+        callbacks.onMonsterKilled = [this](const game::MonsterInstance& monster, int xpReward)
+        { logger.info(std::format("Combat: {} defeated (+{} xp)", monster.name, xpReward)); };
+        callbacks.onCharacterDowned = [this](int characterIndex)
+        { logger.warning(std::format("Combat: party member {} downed", characterIndex)); };
+        combatSystem_->setCallbacks(callbacks);
+    }
+
+    if (spellSystem_)
+    {
+        game::SpellCallbacks callbacks;
+        callbacks.onSpellCast =
+            [this](int spellId, int casterIndex, const game::SpellResult& result)
+        {
+            logger.debug(std::format("Spell #{} by party[{}]: {}", spellId, casterIndex,
+                                     result.description));
+        };
+        callbacks.onSpellFailed = [this](int spellId, const std::string& reason)
+        { logger.debug(std::format("Spell #{} failed: {}", spellId, reason)); };
+        spellSystem_->setCallbacks(callbacks);
+    }
+}
+
+void Application::loadDataTables()
+{
+    if (!vfs)
+    {
+        return;
+    }
+
+    auto readFirstExisting =
+        [this](const std::vector<std::string>& names) -> std::optional<std::vector<uint8_t>>
+    {
+        for (const auto& name : names)
+        {
+            if (auto data = vfs->readFile(name); data.has_value())
+            {
+                return data;
+            }
+        }
+        return std::nullopt;
+    };
+
+    if (combatSystem_)
+    {
+        std::vector<formats::MonsterEntry> parsedMonsters;
+
+        if (auto monstersData = readFirstExisting({"monsters.txt", "MONSTERS.TXT", "Monsters.txt"});
+            monstersData.has_value())
+        {
+            formats::MonstersParser parser(logger);
+            if (parser.parse(*monstersData))
+            {
+                parsedMonsters = parser.getMonsters();
+                combatSystem_->loadMonsterData(parsedMonsters);
+            }
+        }
+
+        if (!parsedMonsters.empty())
+        {
+            if (auto hostileData = readFirstExisting({"hostile.txt", "HOSTILE.TXT", "Hostile.txt"});
+                hostileData.has_value())
+            {
+                formats::HostileParser parser(logger);
+                if (parser.parse(*hostileData))
+                {
+                    std::unordered_map<int, bool> hostilityByMonsterId;
+                    hostilityByMonsterId.reserve(parsedMonsters.size());
+
+                    const auto& matrix = parser.getHostileMatrix();
+                    for (const auto& monster : parsedMonsters)
+                    {
+                        auto hostileValue = matrix.getHostilityInsensitive(monster.name, "Party");
+                        if (!hostileValue.has_value())
+                        {
+                            hostileValue = matrix.getHostilityInsensitive("Party", monster.name);
+                        }
+                        if (hostileValue.has_value())
+                        {
+                            hostilityByMonsterId[monster.id] = (*hostileValue != 0);
+                        }
+                    }
+
+                    combatSystem_->setPartyHostilityByMonsterId(std::move(hostilityByMonsterId));
+                }
+            }
+        }
+    }
+
+    if (spellSystem_)
+    {
+        if (auto spellsData = readFirstExisting({"spells.txt", "SPELLS.TXT", "Spells.txt"});
+            spellsData.has_value())
+        {
+            formats::SpellsParser parser(logger);
+            if (parser.parse(*spellsData))
+            {
+                spellSystem_->loadSpellData(parser.getSpells());
+            }
+        }
+    }
+
+    if (inventory_)
+    {
+        if (auto itemsData = readFirstExisting({"items.txt", "ITEMS.TXT", "Items.txt"});
+            itemsData.has_value())
+        {
+            formats::ItemsParser parser(logger);
+            if (parser.parse(*itemsData))
+            {
+                inventory_->loadItemData(parser.getItems());
+            }
+        }
+    }
+
+    if (contentGenerator_)
+    {
+        if (auto placeMonData = readFirstExisting({"placemon.txt", "PLACEMON.TXT", "PlaceMon.txt"});
+            placeMonData.has_value())
+        {
+            formats::PlacemonParser parser(logger);
+            if (parser.parse(*placeMonData))
+            {
+                std::vector<game::MonsterPlacementRule> rules;
+                std::unordered_map<std::string, size_t> ruleIndex;
+                rules.reserve(parser.getEntries().size());
+
+                for (const auto& entry : parser.getEntries())
+                {
+                    const std::string key = toLower(entry.mapName) + "|" +
+                                            std::to_string(entry.minDifficulty) + "|" +
+                                            std::to_string(entry.maxDifficulty);
+
+                    size_t idx = 0;
+                    if (auto it = ruleIndex.find(key); it != ruleIndex.end())
+                    {
+                        idx = it->second;
+                    }
+                    else
+                    {
+                        idx = rules.size();
+                        ruleIndex[key] = idx;
+                        game::MonsterPlacementRule rule;
+                        rule.mapName = toLower(entry.mapName);
+                        rule.minDifficulty = entry.minDifficulty;
+                        rule.maxDifficulty = entry.maxDifficulty;
+                        rules.push_back(std::move(rule));
+                    }
+
+                    rules[idx].entries.push_back({entry.monsterId, entry.weight});
+                }
+
+                contentGenerator_->setMonsterPlacementRules(std::move(rules));
+            }
+        }
+
+        if (auto rndItemsData = readFirstExisting({"rnditems.txt", "RNDITEMS.TXT", "RndItems.txt"});
+            rndItemsData.has_value())
+        {
+            formats::RndItemsParser parser(logger);
+            if (parser.parse(*rndItemsData))
+            {
+                std::vector<game::TreasureItemWeight> weights;
+                weights.reserve(parser.getEntries().size());
+                for (const auto& entry : parser.getEntries())
+                {
+                    game::TreasureItemWeight weight;
+                    weight.itemId = entry.itemId;
+                    weight.baseLevel = entry.baseLevel;
+                    weight.levelWeights = entry.levelWeights;
+                    weights.push_back(weight);
+                }
+                contentGenerator_->setTreasureItemWeights(std::move(weights));
+            }
+        }
+    }
+
+    buildingDisplayNameById_.clear();
+    if (auto twoDEventsData = readFirstExisting({"2dEvents.txt", "2DEVENTS.TXT", "2DEvents.txt"});
+        twoDEventsData.has_value())
+    {
+        formats::TwoDEventsParser parser(logger);
+        if (parser.parse(*twoDEventsData))
+        {
+            for (const auto& entry : parser.getEntries())
+            {
+                if (!entry.displayName.empty())
+                {
+                    buildingDisplayNameById_[entry.id] = entry.displayName;
+                }
+            }
+            logger.info(std::format("Loaded {} 2dEvents building definitions",
+                                    buildingDisplayNameById_.size()));
+        }
+    }
+
+    npcDialogTextById_.clear();
+    npcDialogOwnerById_.clear();
+    npcNameById_.clear();
+    npcTopicIdsByNpcId_.clear();
+    npcTopicIdsByTextId_.clear();
+    npcTopicNameById_.clear();
+    if (auto npcTextData = readFirstExisting({"npctext.txt", "NPCTEXT.TXT", "NPCText.txt"});
+        npcTextData.has_value())
+    {
+        formats::NPCTextParser parser(logger);
+        if (parser.parse(*npcTextData))
+        {
+            for (const auto& entry : parser.getNPCTextEntries())
+            {
+                if (entry.id <= 0)
+                {
+                    continue;
+                }
+                if (!entry.text.empty())
+                {
+                    npcDialogTextById_[entry.id] = entry.text;
+                }
+                if (!entry.owner.empty())
+                {
+                    npcDialogOwnerById_[entry.id] = entry.owner;
+                }
+            }
+            logger.info(std::format("Loaded {} npc text entries", npcDialogTextById_.size()));
+        }
+    }
+
+    if (auto npcTopicData = readFirstExisting({"npctopic.txt", "NPCTOPIC.TXT", "NPCTOPIC.txt"});
+        npcTopicData.has_value())
+    {
+        formats::NPCTopicParser parser(logger);
+        if (parser.parse(*npcTopicData))
+        {
+            for (const auto& entry : parser.getEntries())
+            {
+                if (entry.id <= 0)
+                {
+                    continue;
+                }
+                if (!entry.topic.empty())
+                {
+                    npcTopicNameById_[entry.id] = entry.topic;
+                }
+                for (int textId : entry.textIds)
+                {
+                    if (textId <= 0)
+                    {
+                        continue;
+                    }
+                    auto& topics = npcTopicIdsByTextId_[textId];
+                    if (std::find(topics.begin(), topics.end(), entry.id) == topics.end())
+                    {
+                        topics.push_back(entry.id);
+                    }
+                }
+            }
+
+            logger.info(std::format("Loaded {} npc topic labels and {} text->topic maps",
+                                    npcTopicNameById_.size(), npcTopicIdsByTextId_.size()));
+        }
+    }
+
+    if (auto npcData = readFirstExisting({"npcdata.txt", "NPCDATA.TXT", "NPCData.txt"});
+        npcData.has_value())
+    {
+        formats::NPCDataParser parser(logger);
+        if (parser.parse(*npcData))
+        {
+            for (const auto& entry : parser.getEntries())
+            {
+                if (entry.id <= 0)
+                {
+                    continue;
+                }
+
+                if (!entry.name.empty())
+                {
+                    npcNameById_[entry.id] = entry.name;
+                }
+
+                std::vector<int> topicIds;
+                topicIds.reserve(entry.actionEventIds.size());
+                for (int topicId : entry.actionEventIds)
+                {
+                    if (topicId <= 0)
+                    {
+                        continue;
+                    }
+                    if (std::find(topicIds.begin(), topicIds.end(), topicId) == topicIds.end())
+                    {
+                        topicIds.push_back(topicId);
+                    }
+                }
+                if (!topicIds.empty())
+                {
+                    npcTopicIdsByNpcId_[entry.id] = std::move(topicIds);
+                }
+            }
+
+            logger.info(std::format("Loaded {} npc profiles with {} dialogue topic sets",
+                                    npcNameById_.size(), npcTopicIdsByNpcId_.size()));
+        }
+    }
+
+    npcNamePool_.clear();
+    if (auto npcNamesData = readFirstExisting({"npcnames.txt", "NPCNAMES.TXT", "NPCNames.txt"});
+        npcNamesData.has_value())
+    {
+        formats::NPCNamesParser parser(logger);
+        if (parser.parse(*npcNamesData))
+        {
+            const auto& names = parser.getNPCNames();
+            npcNamePool_.reserve(names.maleNames.size() + names.femaleNames.size());
+            for (const auto& name : names.maleNames)
+            {
+                if (!name.empty())
+                {
+                    npcNamePool_.push_back(name);
+                }
+            }
+            for (const auto& name : names.femaleNames)
+            {
+                if (!name.empty())
+                {
+                    npcNamePool_.push_back(name);
+                }
+            }
+            logger.info(std::format("Loaded {} npc fallback names", npcNamePool_.size()));
+        }
+    }
+
+    soundNameById_.clear();
+    if (soundList_)
+    {
+        if (auto dsoundsData = readFirstExisting({"dsounds.bin", "DSOUNDS.BIN"});
+            dsoundsData.has_value() && soundList_->parse(*dsoundsData))
+        {
+            for (const auto& [soundId, event] : soundList_->getAllSounds())
+            {
+                if (!event.name.empty())
+                {
+                    soundNameById_[soundId] = event.name;
+                }
+            }
+            logger.info(
+                std::format("Loaded {} sound ID mappings from dsounds.bin", soundNameById_.size()));
+        }
+    }
+}
+
+void Application::loadGlobalEventScripts()
+{
+    if (!vfs || !evtParser_ || !eventEngine_)
+    {
+        return;
+    }
+
+    std::optional<std::vector<uint8_t>> evtData;
+    for (const auto& name : {"global.evt", "GLOBAL.EVT", "Global.evt"})
+    {
+        evtData = vfs->readFile(name);
+        if (evtData.has_value())
+        {
+            break;
+        }
+    }
+
+    if (!evtData.has_value())
+    {
+        globalEventScripts_.clear();
+        eventEngine_->clear();
+        logger.warning("Global event script not found (global.evt)");
+        return;
+    }
+
+    std::vector<std::string> strings = {""};
+    for (const auto& name : {"global.str", "GLOBAL.STR", "Global.str"})
+    {
+        if (auto strData = vfs->readFile(name); strData.has_value())
+        {
+            strings = evtParser_->parseStringTable(*strData);
+            break;
+        }
+    }
+
+    globalEventScripts_ = evtParser_->parseEventData(*evtData, strings);
+    eventEngine_->clear();
+    eventEngine_->loadEvents(globalEventScripts_);
+    eventEngine_->setMapScopedEvents({});
+    logger.info(std::format("Loaded {} global event scripts", globalEventScripts_.size()));
+}
+
+void Application::loadMapEventScripts(const std::string& mapName)
+{
+    if (!vfs || !evtParser_ || !eventEngine_)
+    {
+        return;
+    }
+
+    eventEngine_->clear();
+    if (!globalEventScripts_.empty())
+    {
+        eventEngine_->loadEvents(globalEventScripts_);
+    }
+
+    if (mapName.empty())
+    {
+        eventEngine_->setMapScopedEvents({});
+        if (gameWorld_)
+        {
+            gameWorld_->clearTransitions();
+        }
+        return;
+    }
+
+    std::string baseName = mapName;
+    const size_t dot = baseName.find_last_of('.');
+    if (dot != std::string::npos)
+    {
+        baseName = baseName.substr(0, dot);
+    }
+
+    std::optional<std::vector<uint8_t>> evtData;
+    const std::array<std::string, 3> evtCandidates = {baseName + ".evt", toLower(baseName) + ".evt",
+                                                      toLower(baseName) + ".EVT"};
+    for (const auto& name : evtCandidates)
+    {
+        evtData = vfs->readFile(name);
+        if (evtData.has_value())
+        {
+            break;
+        }
+    }
+
+    if (!evtData.has_value())
+    {
+        eventEngine_->setMapScopedEvents({});
+        if (gameWorld_)
+        {
+            gameWorld_->clearTransitions();
+        }
+        logger.debug(std::format("No map event script for {}", mapName));
+        return;
+    }
+
+    std::vector<std::string> strings = {""};
+    const std::array<std::string, 3> strCandidates = {baseName + ".str", toLower(baseName) + ".str",
+                                                      toLower(baseName) + ".STR"};
+    for (const auto& name : strCandidates)
+    {
+        if (auto strData = vfs->readFile(name); strData.has_value())
+        {
+            strings = evtParser_->parseStringTable(*strData);
+            break;
+        }
+    }
+
+    auto mapScripts = evtParser_->parseEventData(*evtData, strings);
+
+    if (gameWorld_)
+    {
+        gameWorld_->clearTransitions();
+
+        for (const auto& script : mapScripts)
+        {
+            game::MapTransition selectedTransition;
+            bool hasSelectedTransition = false;
+
+            for (const auto& cmd : script.commands)
+            {
+                game::MapTransition transition;
+                bool hasTransition = false;
+
+                if (cmd.opcode == game::EventOpcode::ChangeMap && !cmd.text.empty())
+                {
+                    std::string target = toLower(cmd.text);
+                    if (target == "pcout01")
+                    {
+                        target = "out01.odm";
+                    }
+                    if (target != "arbiter good" && target != "arbiter evil")
+                    {
+                        const std::string normalized = normalizeMapName(target, false);
+                        const std::string ext = getLowerExtension(normalized);
+                        if (ext == ".blv" || ext == ".odm")
+                        {
+                            transition.targetMap = normalized;
+                            const auto yaw = directionToEntryYaw(cmd.param1);
+                            transition.targetYaw = yaw.has_value() ? *yaw : 0.0f;
+                            transition.hasArrivalOverride = false;
+                            hasTransition = true;
+                        }
+                    }
+                }
+                else if (cmd.opcode == game::EventOpcode::Teleport && !cmd.text.empty() &&
+                         cmd.text.front() != '0')
+                {
+                    const std::string normalized = normalizeMapName(cmd.text, false);
+                    const std::string ext = getLowerExtension(normalized);
+                    if (ext == ".blv" || ext == ".odm")
+                    {
+                        transition.targetMap = normalized;
+                        transition.targetX = cmd.fparam;
+                        transition.targetY = cmd.fparam2;
+                        transition.targetZ = cmd.fparam3;
+                        transition.targetYaw = static_cast<float>(cmd.param1);
+                        transition.hasArrivalOverride = true;
+                        hasTransition = true;
+                    }
+                }
+
+                if (!hasTransition)
+                {
+                    continue;
+                }
+
+                if (!hasSelectedTransition ||
+                    (!selectedTransition.hasArrivalOverride && transition.hasArrivalOverride))
+                {
+                    selectedTransition = std::move(transition);
+                    hasSelectedTransition = true;
+                }
+            }
+
+            if (hasSelectedTransition)
+            {
+                selectedTransition.targetDisplayName =
+                    resolveMapDisplayName(selectedTransition.targetMap);
+                gameWorld_->addTransition(script.eventId, selectedTransition);
+            }
+        }
+    }
+
+    eventEngine_->setMapScopedEvents(mapScripts);
+    logger.info(std::format("Loaded {} map event scripts for {}", mapScripts.size(), mapName));
+}
+
+void Application::preserveCurrentMapState()
+{
+    if (!gameWorld_ || !mapScene || !mapScene->isLoaded())
+    {
+        return;
+    }
+
+    const std::string mapName = mapScene->getName();
+    if (mapName.empty())
+    {
+        return;
+    }
+
+    game::SavedMapState state;
+
+    const auto& blv = mapScene->getBLVData();
+    if (!blv.faces.empty())
+    {
+        state.indoorFaceAttributes.reserve(blv.faces.size());
+        for (const auto& face : blv.faces)
+        {
+            state.indoorFaceAttributes.push_back(face.attributes);
+        }
+    }
+    if (!blv.decorations.empty())
+    {
+        state.indoorDecorationHidden.reserve(blv.decorations.size());
+        for (const auto& decoration : blv.decorations)
+        {
+            state.indoorDecorationHidden.push_back(decoration.hidden ? 1u : 0u);
+        }
+    }
+
+    const auto& odm = mapScene->getODMData();
+    if (!odm.buildings.empty())
+    {
+        state.outdoorBuildingFaceAttributes.resize(odm.buildings.size());
+        for (size_t bi = 0; bi < odm.buildings.size(); bi++)
+        {
+            const auto& building = odm.buildings[bi];
+            auto& attrs = state.outdoorBuildingFaceAttributes[bi];
+            attrs.reserve(building.faces.size());
+            for (const auto& face : building.faces)
+            {
+                attrs.push_back(face.attributes);
+            }
+        }
+    }
+
+    gameWorld_->setSavedMapState(mapName, std::move(state));
+}
+
+void Application::restoreCurrentMapState(const std::string& mapName)
+{
+    if (!gameWorld_ || !mapScene || !mapScene->isLoaded() || mapName.empty())
+    {
+        return;
+    }
+
+    const game::SavedMapState* state = gameWorld_->getSavedMapState(mapName);
+    if (!state)
+    {
+        return;
+    }
+
+    auto& blv = mapScene->mutableBLVData();
+    if (!blv.faces.empty() && !state->indoorFaceAttributes.empty())
+    {
+        const size_t count = std::min(blv.faces.size(), state->indoorFaceAttributes.size());
+        for (size_t i = 0; i < count; i++)
+        {
+            blv.faces[i].attributes = state->indoorFaceAttributes[i];
+        }
+    }
+    if (!blv.decorations.empty() && !state->indoorDecorationHidden.empty())
+    {
+        const size_t count = std::min(blv.decorations.size(), state->indoorDecorationHidden.size());
+        for (size_t i = 0; i < count; i++)
+        {
+            blv.decorations[i].hidden = state->indoorDecorationHidden[i] != 0;
+        }
+    }
+
+    auto& odm = mapScene->mutableODMData();
+    if (!odm.buildings.empty() && !state->outdoorBuildingFaceAttributes.empty())
+    {
+        const size_t buildingCount =
+            std::min(odm.buildings.size(), state->outdoorBuildingFaceAttributes.size());
+        for (size_t bi = 0; bi < buildingCount; bi++)
+        {
+            auto& building = odm.buildings[bi];
+            const auto& savedFaces = state->outdoorBuildingFaceAttributes[bi];
+            const size_t faceCount = std::min(building.faces.size(), savedFaces.size());
+            for (size_t fi = 0; fi < faceCount; fi++)
+            {
+                building.faces[fi].attributes = savedFaces[fi];
+            }
+        }
+    }
+}
+
+void Application::applyMapEntryPoint()
+{
+    if (!gameWorld_ || !mapScene || !mapScene->isLoaded())
+    {
+        pendingArrivalOverride_.active = false;
+        pendingEntryDirection_ = 0;
+        return;
+    }
+
+    if (pendingArrivalOverride_.active)
+    {
+        gameWorld_->party().setWorldPosition(pendingArrivalOverride_.x, pendingArrivalOverride_.y,
+                                             pendingArrivalOverride_.z);
+        gameWorld_->party().setOrientation(pendingArrivalOverride_.yaw,
+                                           gameWorld_->party().pitch());
+        pendingArrivalOverride_.active = false;
+        pendingEntryDirection_ = 0;
+        return;
+    }
+
+    const int spawnIndex = resolveSpawnIndexFromDirection(pendingEntryDirection_);
+    const auto entryYaw = directionToEntryYaw(pendingEntryDirection_);
+    pendingEntryDirection_ = 0;
+
+    auto applyEntryOrientation = [this, entryYaw]()
+    {
+        if (!gameWorld_ || !entryYaw.has_value())
+        {
+            return;
+        }
+        gameWorld_->party().setOrientation(*entryYaw, gameWorld_->party().pitch());
+    };
+
+    const auto& indoorSpawns = mapScene->getBLVData().spawns;
+    if (!indoorSpawns.empty())
+    {
+        size_t selected = 0;
+        if (spawnIndex > 0)
+        {
+            bool matched = false;
+            for (size_t i = 0; i < indoorSpawns.size(); i++)
+            {
+                const auto& spawn = indoorSpawns[i];
+                if (spawn.group == spawnIndex || static_cast<int>(spawn.objectIndex) == spawnIndex)
+                {
+                    selected = i;
+                    matched = true;
+                    break;
+                }
+            }
+
+            if (!matched)
+            {
+                const size_t fallback = static_cast<size_t>(spawnIndex - 1);
+                if (fallback < indoorSpawns.size())
+                {
+                    selected = fallback;
+                }
+            }
+        }
+
+        const auto& spawn = indoorSpawns[selected];
+        gameWorld_->party().setWorldPosition(
+            static_cast<float>(spawn.x), static_cast<float>(spawn.y), static_cast<float>(spawn.z));
+        applyEntryOrientation();
+        return;
+    }
+
+    const auto& outdoorSpawns = mapScene->getODMData().spawns;
+    if (!outdoorSpawns.empty())
+    {
+        size_t selected = 0;
+        if (spawnIndex > 0)
+        {
+            bool matched = false;
+            for (size_t i = 0; i < outdoorSpawns.size(); i++)
+            {
+                const auto& spawn = outdoorSpawns[i];
+                if (spawn.group == spawnIndex || static_cast<int>(spawn.objectIndex) == spawnIndex)
+                {
+                    selected = i;
+                    matched = true;
+                    break;
+                }
+            }
+
+            if (!matched)
+            {
+                const size_t fallback = static_cast<size_t>(spawnIndex - 1);
+                if (fallback < outdoorSpawns.size())
+                {
+                    selected = fallback;
+                }
+            }
+        }
+
+        const auto& spawn = outdoorSpawns[selected];
+        gameWorld_->party().setWorldPosition(
+            static_cast<float>(spawn.x), static_cast<float>(spawn.y), static_cast<float>(spawn.z));
+        applyEntryOrientation();
+    }
+}
+
+void Application::loadMapStatsTable()
+{
+    if (!vfs)
+    {
+        return;
+    }
+
+    std::optional<std::vector<uint8_t>> mapStatsData = vfs->readFile("MAPSTATS.TXT");
+    if (!mapStatsData.has_value())
+    {
+        mapStatsData = vfs->readFile("MapStats.txt");
+    }
+    if (!mapStatsData.has_value())
+    {
+        mapStatsData = vfs->readFile("mapstats.txt");
+    }
+
+    if (!mapStatsData.has_value())
+    {
+        logger.warning("MapStats table not found; using fallback map generation difficulty");
+        mapDifficultyByFileName_.clear();
+        mapRespawnDaysByFileName_.clear();
+        mapDisplayNameByFileName_.clear();
+        return;
+    }
+
+    formats::MapStatsParser parser(logger);
+    if (!parser.parse(*mapStatsData))
+    {
+        logger.warning("Failed to parse MAPSTATS.TXT; using fallback map generation difficulty");
+        mapDifficultyByFileName_.clear();
+        mapRespawnDaysByFileName_.clear();
+        mapDisplayNameByFileName_.clear();
+        return;
+    }
+
+    mapDifficultyByFileName_.clear();
+    mapRespawnDaysByFileName_.clear();
+    mapDisplayNameByFileName_.clear();
+    for (const auto& entry : parser.getMapStats())
+    {
+        if (entry.fileName.empty())
+        {
+            continue;
+        }
+        const std::string key = toLower(entry.fileName);
+        mapDifficultyByFileName_[key] =
+            game::ContentGenerator::estimateDifficultyFromMapStats(entry);
+        mapRespawnDaysByFileName_[key] = std::max(0, entry.refillDays);
+        if (!entry.name.empty())
+        {
+            mapDisplayNameByFileName_[key] = entry.name;
+        }
+    }
+
+    logger.info(std::format("Loaded {} map difficulty entries from MAPSTATS.TXT",
+                            mapDifficultyByFileName_.size()));
+}
+
+int Application::resolveMapDifficulty(const std::string& mapName, int fallback) const
+{
+    if (mapName.empty() || mapDifficultyByFileName_.empty())
+    {
+        return std::clamp(fallback, 1, 10);
+    }
+
+    const std::string key = toLower(mapName);
+    auto it = mapDifficultyByFileName_.find(key);
+    if (it != mapDifficultyByFileName_.end())
+    {
+        return std::clamp(it->second, 1, 10);
+    }
+
+    return std::clamp(fallback, 1, 10);
+}
+
+int Application::resolveMapRespawnDays(const std::string& mapName, int fallback) const
+{
+    if (mapName.empty() || mapRespawnDaysByFileName_.empty())
+    {
+        return std::max(0, fallback);
+    }
+
+    const std::string key = toLower(mapName);
+    auto it = mapRespawnDaysByFileName_.find(key);
+    if (it != mapRespawnDaysByFileName_.end())
+    {
+        return std::max(0, it->second);
+    }
+
+    return std::max(0, fallback);
+}
+
+std::string Application::resolveMapDisplayName(const std::string& mapName) const
+{
+    if (mapName.empty() || mapDisplayNameByFileName_.empty())
+    {
+        return mapName;
+    }
+
+    const std::string key = toLower(mapName);
+    if (auto it = mapDisplayNameByFileName_.find(key); it != mapDisplayNameByFileName_.end())
+    {
+        return it->second;
+    }
+
+    return mapName;
+}
+
+std::string Application::resolveSoundNameById(int soundId) const
+{
+    if (soundId <= 0)
+    {
+        return {};
+    }
+
+    if (auto it = soundNameById_.find(static_cast<uint32_t>(soundId)); it != soundNameById_.end())
+    {
+        return it->second;
+    }
+    return {};
+}
+
+void Application::playEventSound(int soundId)
+{
+    if (soundId <= 0)
+    {
+        return;
+    }
+
+    if (bootConfig_.noSound || !audioSystem_ || !audioSystem_->isInitialized())
+    {
+        logger.debug(std::format("Event PlaySound {} skipped (audio disabled)", soundId));
+        return;
+    }
+
+    std::string soundName = resolveSoundNameById(soundId);
+    if (soundName.empty())
+    {
+        logger.debug(std::format("Event PlaySound {} skipped (unknown sound id)", soundId));
+        return;
+    }
+
+    const std::string lowerName = toLower(soundName);
+    if (bootConfig_.noWalkSound && (lowerName.find("walk") != std::string::npos ||
+                                    lowerName.find("step") != std::string::npos))
+    {
+        return;
+    }
+
+    // Lazy-load WAV payload from Audio.snd on first use.
+    if (!loadedSounds_.contains(lowerName))
+    {
+        if (!sndArchive_ || !sndArchive_->isOpen())
+        {
+            logger.debug(
+                std::format("Event PlaySound {} skipped (Audio.snd not mounted)", soundId));
+            return;
+        }
+
+        std::vector<std::string> candidates;
+        if (soundName.find('.') != std::string::npos)
+        {
+            candidates.push_back(soundName);
+        }
+        else
+        {
+            candidates.push_back(soundName + ".wav");
+            candidates.push_back(soundName + ".WAV");
+            candidates.push_back(soundName);
+        }
+
+        std::optional<std::vector<uint8_t>> wavData;
+        for (const auto& candidate : candidates)
+        {
+            wavData = sndArchive_->extractFile(candidate);
+            if (wavData.has_value())
+            {
+                break;
+            }
+        }
+
+        if (!wavData.has_value() || wavData->empty())
+        {
+            logger.debug(std::format("Event PlaySound {} skipped (missing WAV for '{}')", soundId,
+                                     soundName));
+            return;
+        }
+
+        if (!audioSystem_->loadSound(lowerName, *wavData))
+        {
+            logger.debug(std::format("Event PlaySound {} skipped (failed to decode '{}')", soundId,
+                                     soundName));
+            return;
+        }
+        loadedSounds_.insert(lowerName);
+    }
+
+    if (audioSystem_->playSound(lowerName) < 0)
+    {
+        logger.debug(std::format("Event PlaySound {} failed to start '{}'", soundId, soundName));
+    }
+}
+
+std::string Application::resolveBuildingDisplayName(int buildingId) const
+{
+    if (auto it = buildingDisplayNameById_.find(buildingId); it != buildingDisplayNameById_.end())
+    {
+        return it->second;
+    }
+    return {};
+}
+
+std::string Application::buildTransitionText(const std::string& targetMap, int direction) const
+{
+    if (targetMap.empty())
+    {
+        return {};
+    }
+
+    const std::string displayName = resolveMapDisplayName(targetMap);
+    if (!mapDisplayNameByFileName_.empty() && displayName == targetMap)
+    {
+        logger.warning(std::format("No transition text found! target map='{}'", targetMap));
+    }
+    if (resolveSpawnIndexFromDirection(direction) == 0)
+    {
+        if (displayName == targetMap)
+        {
+            return std::format("Transition to {}", targetMap);
+        }
+        return std::format("Transition to {} ({})", displayName, targetMap);
+    }
+
+    if (displayName == targetMap)
+    {
+        return std::format("Transition to {} [{}]", targetMap, directionName(direction));
+    }
+    return std::format("Transition to {} ({}) [{}]", displayName, targetMap,
+                       directionName(direction));
+}
+
+void Application::setDefaultStartMap(const std::string& mapName)
+{
+    if (mapName.empty())
+    {
+        return;
+    }
+
+    std::string resolvedName = mapName;
+    std::string ext = getLowerExtension(resolvedName);
+    if (ext.empty())
+    {
+        resolvedName += ".odm";
+        ext = ".odm";
+    }
+
+    if (ext != ".odm" && ext != ".blv")
+    {
+        logger.warning(std::format("Ignoring invalid start map extension in '{}'", mapName));
+        return;
+    }
+
+    defaultStartMapName_ = resolvedName;
+    if (sharedData)
+    {
+        sharedData->newGameStartMapName = defaultStartMapName_;
+    }
+}
+
+void Application::setBootConfig(const BootConfig& config)
+{
+    bool noLogoChanged = (bootConfig_.noLogo != config.noLogo);
+    bootConfig_ = config;
+
+    if (gameWorld_)
+    {
+        game::RuntimeConfig runtimeConfig = gameWorld_->runtimeConfig();
+        runtimeConfig.noMonsters = config.noMonster;
+        runtimeConfig.noDamage = config.noDamage;
+        runtimeConfig.noDecorations = config.noDecoration;
+        runtimeConfig.noSky = config.noSky;
+        runtimeConfig.noWavyWater = config.noWavyWater;
+        runtimeConfig.noMist = config.noMist;
+        runtimeConfig.walkSpeed = std::max(1, config.walkSpeed);
+        runtimeConfig.partyHeight = std::max(1, config.partyHeight);
+        runtimeConfig.partyEyeLevel = std::max(0, config.partyEyeLevel);
+        runtimeConfig.gridBand1 = std::max(1, config.gridBand1);
+        runtimeConfig.gridBand2 = std::max(runtimeConfig.gridBand1, config.gridBand2);
+        runtimeConfig.gridBand3 = std::max(runtimeConfig.gridBand2, config.gridBand3);
+        runtimeConfig.terrainGamma = config.terrainGamma;
+        runtimeConfig.buildingGamma = config.buildingGamma;
+        runtimeConfig.distShade = std::max(0, config.distShade);
+        runtimeConfig.distShadeMist = std::max(runtimeConfig.distShade, config.distShadeMist);
+        runtimeConfig.distMist = std::max(runtimeConfig.distShadeMist, config.distMist);
+        runtimeConfig.skyDayTop = config.skyDayTop;
+        runtimeConfig.skyDayBottom = config.skyDayBottom;
+        runtimeConfig.skyNightTop = config.skyNightTop;
+        runtimeConfig.skyNightBottom = config.skyNightBottom;
+        gameWorld_->setRuntimeConfig(runtimeConfig);
+    }
+
+    if (sharedData)
+    {
+        sharedData->showFrameRate = config.showFr;
+        sharedData->worldViewportX = std::max(0, config.viewportX);
+        sharedData->worldViewportY = std::max(0, config.viewportY);
+        sharedData->worldViewportWidth = std::max(1, config.viewportWidth);
+        sharedData->worldViewportHeight = std::max(1, config.viewportHeight);
+    }
+
+    graphics::TerrainLOD::configureFromGridBands(config.gridBand1, config.gridBand2,
+                                                 config.gridBand3);
+
+    if (audioSystem_)
+    {
+        audioSystem_->setMaxChannels(config.mixerChannels);
+
+        if (config.noSound)
+        {
+            audioSystem_->stopAll();
+        }
+        else if (!audioSystem_->isInitialized())
+        {
+            if (!audioSystem_->initialize())
+            {
+                logger.warning("Failed to initialize audio subsystem from boot config");
+            }
+        }
+    }
+
+    if (videoPlayer)
+    {
+        videoPlayer->setAudioEnabled(!config.noSound);
+    }
+
+    if (config.noSound)
+    {
+        logger.info("Boot config: audio disabled");
+    }
+    if (config.noWalkSound)
+    {
+        logger.info("Boot config: walk-step sounds disabled");
+    }
+
+    if (config.noAnim)
+    {
+        if (renderer)
+        {
+            for (void* tex : loadingFrames)
+            {
+                renderer->destroyTexture(tex);
+            }
+        }
+        loadingFrames.clear();
+        loadingFrameWidths.clear();
+        loadingFrameHeights.clear();
+        loadingFrameNumbers.clear();
+        if (loadingState)
+        {
+            loadingState->setAnimationFrames(&loadingFrames, &loadingFrameWidths,
+                                             &loadingFrameHeights, &loadingFrameNumbers);
+        }
+        logger.info("Boot config: loading animations disabled");
+    }
+
+    if (noLogoChanged && config.noLogo && !config.noIntro && !gameRoot.empty())
+    {
+        buildIntroPlaylist();
+        if (introState)
+        {
+            introState->setPlaylist(introPlaylist);
+        }
+        if (gameState == GameState::IntroVideo && videoPlayer && !introPlaylist.empty())
+        {
+            videoPlayer->setPlaylist(introPlaylist);
+            videoPlayer->start(SDL_GetTicks());
+        }
+        logger.info("Boot config: logo videos disabled");
+    }
+
+    if ((config.noIntro || config.noAnim) && activeStateId == GameStateId::IntroVideo)
+    {
+        logger.info("Boot config: skipping intro videos");
+        transitionTo(GameStateId::TitleScreen);
+    }
+}
+
 void Application::shutdown()
 {
     logger.info("Shutting down...");
@@ -1814,6 +4057,15 @@ void Application::shutdown()
 
     clearMapTextureCache();
     unloadUiAssets();
+    if (audioSystem_)
+    {
+        audioSystem_->shutdown();
+    }
+    if (sndArchive_)
+    {
+        sndArchive_->close();
+    }
+    loadedSounds_.clear();
     vfs->unmountAll();
     renderer.reset();
     window.shutdown();

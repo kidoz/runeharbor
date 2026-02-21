@@ -133,6 +133,18 @@ bool DialogueWindow::handleKey(int scancode)
         return true;
     }
 
+    if (scancode >= SDL_SCANCODE_1 && scancode <= SDL_SCANCODE_9)
+    {
+        const int index = scancode - SDL_SCANCODE_1;
+        if (index >= 0 && index < static_cast<int>(choices_.size()))
+        {
+            if (onChoice_)
+                onChoice_(choices_[static_cast<size_t>(index)].id);
+            close();
+        }
+        return true;
+    }
+
     // Navigate choices
     if (scancode == SDL_SCANCODE_UP && selectedChoice_ > 0)
     {

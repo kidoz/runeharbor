@@ -76,6 +76,11 @@ bool SdlWindow::initialize(const WindowConfig& config)
         return false;
     }
 
+    if (config.windowX.has_value() && config.windowY.has_value())
+    {
+        SDL_SetWindowPosition(window, *config.windowX, *config.windowY);
+    }
+
     closeRequested = false;
     logger.debug("SDL3 window initialized successfully");
     return true;
@@ -165,6 +170,19 @@ void SdlWindow::processEvents()
 MouseState SdlWindow::getMouseState() const
 {
     return mouseState_;
+}
+
+std::optional<WindowPosition> SdlWindow::getWindowPosition() const
+{
+    if (!window)
+    {
+        return std::nullopt;
+    }
+
+    int x = 0;
+    int y = 0;
+    SDL_GetWindowPosition(window, &x, &y);
+    return WindowPosition{x, y};
 }
 
 bool SdlWindow::wasMouseClicked(MouseButton button) const

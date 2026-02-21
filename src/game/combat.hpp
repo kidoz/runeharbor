@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "../formats/monsters_parser.hpp"
@@ -26,6 +28,8 @@ struct MonsterInstance
     int experience = 0;   // XP reward on kill
     int speed = 0;        // Movement/action speed
     int recoveryTime = 0; // Current recovery countdown (ms)
+    int group = 0;        // Map/script group id (for event opcodes)
+    uint16_t topic = 0;   // Script dialog topic id
 
     // Position in world
     float x = 0, y = 0, z = 0;
@@ -52,8 +56,19 @@ struct MonsterInstance
     };
     AIState aiState = AIState::Standing;
 
+    enum class Personality : uint8_t
+    {
+        Normal = 0,
+        Wimp = 1,
+        Aggressive = 2,
+        Suicidal = 3,
+        Friendly = 4,
+    };
+    Personality personality = Personality::Normal;
+
     int targetCharacter = -1; // Which party member to attack (-1 = none)
     float aggroRange = 2048.0f;
+    bool hostile = true;
 
     // Resistances (copied from MonsterEntry)
     int resistFire = 0;
@@ -66,6 +81,7 @@ struct MonsterInstance
     int resistLight = 0;
     int resistDark = 0;
     int resistPhysical = 0;
+    std::array<int, 8> scriptFields = {};
 
     bool isAlive() const { return aiState != AIState::Dead && currentHP > 0; }
 };
@@ -121,7 +137,7 @@ class CombatSystem
     void loadMonsterData(const std::vector<formats::MonsterEntry>& monsters);
 
     // Spawn a monster into the active combat arena
-    int spawnMonster(int monsterId, float x, float y, float z);
+    int spawnMonster(int monsterId, float x, float y, float z, int group = 0);
 
     // Remove all monsters
     void clearMonsters();
@@ -152,6 +168,16 @@ class CombatSystem
     // Count alive monsters
     int aliveMonsterCount() const;
 
+    // Event-driven runtime mutations.
+    void setPartyHostilityByMonsterId(std::unordered_map<int, bool> hostilityByMonsterId);
+    void setMonsterTopic(int monsterIndex, uint16_t topic);
+    void setMonsterField(int monsterId, int fieldIndex, int value);
+    void setMonsterHostileByGroup(int group, bool hostile);
+    void setMonsterHostileByIndex(int index, bool hostile);
+    void replaceMonsterType(int oldMonsterId, int newMonsterId);
+    void setMonsterAiByType(int monsterId, MonsterInstance::AIState state);
+    void setMonsterAiByGroup(int group, MonsterInstance::AIState state);
+
   private:
     void updateMonsterAI(MonsterInstance& monster, float deltaMs);
     void monsterAttack(MonsterInstance& monster);
@@ -162,6 +188,7 @@ class CombatSystem
     CombatCallbacks callbacks_;
 
     std::unordered_map<int, formats::MonsterEntry> monsterDefs_;
+    std::unordered_map<int, bool> partyHostilityByMonsterId_;
     std::vector<MonsterInstance> monsters_;
     bool inCombat_ = false;
 };

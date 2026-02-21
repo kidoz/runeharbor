@@ -7,8 +7,14 @@
 #include "../engine/map_scene.hpp"
 #include "camera.hpp"
 #include "sdl_renderer.hpp"
+#include "visibility.hpp"
 
 struct SDL_Texture;
+
+namespace runeharbor::game
+{
+struct RuntimeConfig;
+}
 
 namespace runeharbor::graphics
 {
@@ -22,11 +28,21 @@ class OutdoorRenderer
     ~OutdoorRenderer();
 
     void setTextureLookup(TextureLookup lookup);
-    void render(const engine::MapScene& scene, const Camera& camera);
+    void render(const engine::MapScene& scene, const Camera& camera,
+                const game::RuntimeConfig* runtimeConfig = nullptr, float nightBlend = 0.0f,
+                const Frustum* frustumOverride = nullptr);
 
   private:
-    void renderTerrain(const formats::ODMMapData& odmData, const Camera& camera);
-    void renderBuildings(const formats::ODMMapData& odmData, const Camera& camera);
+    void renderSky(const game::RuntimeConfig* runtimeConfig, float nightBlend);
+    void renderTerrain(const formats::ODMMapData& odmData, const Camera& camera,
+                       const game::RuntimeConfig* runtimeConfig, float nightBlend,
+                       const Frustum* frustumOverride);
+    void renderBuildings(const formats::ODMMapData& odmData, const Camera& camera,
+                         const game::RuntimeConfig* runtimeConfig, float nightBlend,
+                         const Frustum* frustumOverride);
+    void renderSpawnBillboards(const formats::ODMMapData& odmData, const Camera& camera,
+                               const game::RuntimeConfig* runtimeConfig, float nightBlend,
+                               const Frustum* frustumOverride);
 
     SDLRenderer& renderer;
     util::ILogger& logger;

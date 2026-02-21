@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "party.hpp"
 
+#include <algorithm>
+
 #include <cassert>
 
 namespace runeharbor::game
@@ -81,6 +83,11 @@ int Party::consciousCount() const
     return count;
 }
 
+void Party::setActiveMemberIndex(int index)
+{
+    activeMemberIndex_ = std::clamp(index, -1, kPartySize - 1);
+}
+
 void Party::setWorldPosition(float x, float y, float z)
 {
     worldX_ = x;
@@ -112,7 +119,6 @@ void Party::initDefault()
         {"Alexis", CharacterClass::Cleric, 12, {7, 13, 14, 9, 9, 7, 14}},
     };
 
-
     for (int i = 0; i < kPartySize; i++)
     {
         auto& ch = members_[static_cast<size_t>(i)];
@@ -134,6 +140,15 @@ void Party::initDefault()
     alignment_ = Alignment::Neutral;
     reputation_ = 0;
     gameTime_ = 0;
+    activeMemberIndex_ = 0;
+
+    // Emerald Island starting position (MM7 default new-game spawn)
+    worldX_ = 12552.0f;
+    worldY_ = 1816.0f;
+    worldZ_ = 512.0f;
+    yaw_ = 0.0f;
+    pitch_ = 0.0f;
+    currentMap_ = "out01.odm";
 }
 
 void Party::recalculateAll()

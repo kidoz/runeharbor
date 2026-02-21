@@ -117,6 +117,10 @@ int AudioSystem::playSound(const std::string& name, float volume)
     {
         return -1;
     }
+    if (maxChannels_ <= 0)
+    {
+        return -1;
+    }
 
     auto it = sounds_.find(name);
     if (it == sounds_.end())
@@ -161,8 +165,20 @@ int AudioSystem::playSound(const std::string& name, float volume)
     // Resume playback
     SDL_ResumeAudioStreamDevice(stream);
 
-    // Find or create an instance slot
+    // Find or create an instance slot.
+    // If channel budget is saturated, reclaim the oldest active slot first.
     cleanupFinished();
+    if (activeSoundCount() >= maxChannels_)
+    {
+        for (size_t i = 0; i < instances_.size(); i++)
+        {
+            if (instances_[i].active)
+            {
+                stopSound(static_cast<int>(i));
+                break;
+            }
+        }
+    }
     int instanceId = -1;
     for (size_t i = 0; i < instances_.size(); i++)
     {
@@ -215,6 +231,34 @@ void AudioSystem::setMasterVolume(float vol)
         if (inst.active && inst.stream)
         {
             SDL_SetAudioStreamGain(inst.stream, inst.volume * masterVolume_);
+        }
+    }
+}
+
+void AudioSystem::setMaxChannels(int channels)
+{
+    maxChannels_ = std::clamp(channels, 0, 64);
+    if (maxChannels_ == 0)
+    {
+        stopAll();
+        return;
+    }
+
+    while (activeSoundCount() > maxChannels_)
+    {
+        bool reclaimed = false;
+        for (size_t i = 0; i < instances_.size(); i++)
+        {
+            if (instances_[i].active)
+            {
+                stopSound(static_cast<int>(i));
+                reclaimed = true;
+                break;
+            }
+        }
+        if (!reclaimed)
+        {
+            break;
         }
     }
 }

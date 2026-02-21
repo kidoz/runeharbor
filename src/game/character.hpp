@@ -291,10 +291,7 @@ struct Character
         conditionTimestamps[static_cast<size_t>(c)] = gameTime;
     }
 
-    void clearCondition(ConditionIndex c)
-    {
-        conditionTimestamps[static_cast<size_t>(c)] = 0;
-    }
+    void clearCondition(ConditionIndex c) { conditionTimestamps[static_cast<size_t>(c)] = 0; }
 
     bool isAlive() const
     {

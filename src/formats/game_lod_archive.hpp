@@ -17,37 +17,42 @@ namespace runeharbor::formats
 /**
  * GAMES.LOD Archive Format
  *
- * Contains map files (.blv, .odm, .dlv, .ddm):
- * - .blv = Indoor maps (Building Level Volume)
- * - .odm = Outdoor maps
- * - .dlv = Dungeon level state/save data
- * - .ddm = Dungeon dynamic data
+ * Standard LOD container holding map files (.blv, .odm, .dlv, .ddm).
+ * Uses the same 256-byte header and 32-byte directory entry format as
+ * all other LOD archives (Events.lod, BITMAPS.LOD, etc.).
  *
- * Directory entry format (32 bytes):
- * - 12 bytes: filename (null-padded)
- * - 4 bytes: attributes/flags
- * - 4 bytes: data offset (absolute position in file)
- * - 4 bytes: unknown (possibly decompressed size)
- * - 4 bytes: compressed size
- * - 4 bytes: reserved (zeros)
+ * Directory entry (32 bytes):
+ *   0x00  name[16]          Null-terminated filename
+ *   0x10  offset(u32)       Absolute byte offset to data block
+ *   0x14  size(u32)         Total data block size (8-byte header + payload)
+ *   0x18  decompressedSize  Uncompressed size (0 = not compressed)
+ *   0x1C  reserved(u32)     Padding / flags
+ *
+ * Each data block starts with an 8-byte metadata header:
+ *   [4 bytes: uncompressed size][4 bytes: flags]
+ * followed by the payload (zlib-compressed or raw).
  */
 
 #pragma pack(push, 1)
 struct GameLODHeader
 {
-    char magic[4];  // "LOD\0"
-    char gameId[4]; // "Game" for GAMES.LOD
-    uint8_t unknown[248];
+    char magic[4];          // 0x000: "LOD\0"
+    char gameId[4];         // 0x004: "MMVII" etc.
+    char description[80];   // 0x008: human-readable
+    char chapterName[80];   // 0x058: default chapter name
+    uint32_t fileSize;      // 0x0A8: total file size (may be 0)
+    uint32_t dataStart;     // 0x0AC: byte offset where data section begins
+    uint32_t numDirEntries; // 0x0B0: number of top-level directory entries
+    uint8_t reserved[76];   // 0x0B4: padding
 };
 
 struct GameLODDirectoryEntry
 {
-    char name[8];         // Filename (null-padded, 8 bytes)
-    uint32_t attributes;  // Attributes/flags
-    uint32_t unknown1;    // Unknown (same for all BLV: 0x610200)
-    uint32_t offset;      // Data offset relative to data section start
-    uint32_t size;        // File size in bytes
-    uint32_t reserved[2]; // Reserved (zeros)
+    char name[16];             // 0x00: null-terminated filename
+    uint32_t offset;           // 0x10: absolute byte offset to data block
+    uint32_t size;             // 0x14: total data block size
+    uint32_t decompressedSize; // 0x18: uncompressed size (0 = raw)
+    uint32_t reserved;         // 0x1C: padding / flags
 };
 #pragma pack(pop)
 
@@ -72,20 +77,20 @@ class GameLODArchive
 
     std::vector<std::string> listFiles() const;
     std::optional<std::vector<uint8_t>> extractFile(const std::string& filename);
-    std::optional<GameLODDirectoryEntry> getFileInfo(const std::string& filename) const;
 
   private:
     bool readHeader();
     bool readDirectory();
-    std::string buildFilename(const GameLODDirectoryEntry& entry) const;
+
+    static std::string entryName(const GameLODDirectoryEntry& entry);
 
     util::ILogger& logger;
     std::ifstream file;
     std::filesystem::path archivePath;
     bool opened = false;
 
+    GameLODHeader header_{};
     std::vector<GameLODDirectoryEntry> entries;
-    std::streamoff dataSectionStart = 0;
 };
 
 } // namespace runeharbor::formats

@@ -5,7 +5,11 @@
 #include <charconv>
 #include <cstdlib>
 #include <random>
+#include <string_view>
 
+#include <cmath>
+
+#include "../util/string_utils.hpp"
 #include "game_world.hpp"
 
 namespace runeharbor::game
@@ -25,6 +29,58 @@ int randomInt(int min, int max)
     std::uniform_int_distribution<int> dist(min, max);
     return dist(rng());
 }
+
+int pickFirstConscious(const Party& party)
+{
+    for (int i = 0; i < kPartySize; i++)
+    {
+        if (party.member(i).isConscious())
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool isStateRecoverable(MonsterInstance::AIState state)
+{
+    return state == MonsterInstance::AIState::Paralyzed ||
+           state == MonsterInstance::AIState::Stunned || state == MonsterInstance::AIState::Stoned;
+}
+
+bool isAggressiveState(MonsterInstance::AIState state)
+{
+    return state == MonsterInstance::AIState::Pursuing ||
+           state == MonsterInstance::AIState::Attacking ||
+           state == MonsterInstance::AIState::AttackingMelee2 ||
+           state == MonsterInstance::AIState::AttackingRanged ||
+           state == MonsterInstance::AIState::CastingSpell1 ||
+           state == MonsterInstance::AIState::CastingSpell2 ||
+           state == MonsterInstance::AIState::CastingSpell3;
+}
+
+MonsterInstance::Personality parsePersonality(std::string_view aiTypeRaw)
+{
+    const std::string aiType = util::toLower(std::string(aiTypeRaw));
+    if (aiType.find("wimp") != std::string::npos)
+    {
+        return MonsterInstance::Personality::Wimp;
+    }
+    if (aiType.find("aggress") != std::string::npos)
+    {
+        return MonsterInstance::Personality::Aggressive;
+    }
+    if (aiType.find("suicid") != std::string::npos)
+    {
+        return MonsterInstance::Personality::Suicidal;
+    }
+    if (aiType.find("friend") != std::string::npos || aiType.find("civil") != std::string::npos)
+    {
+        return MonsterInstance::Personality::Friendly;
+    }
+    return MonsterInstance::Personality::Normal;
+}
+
 } // namespace
 
 CombatSystem::CombatSystem(util::ILogger& logger) : logger_(logger) {}
@@ -39,7 +95,30 @@ void CombatSystem::loadMonsterData(const std::vector<formats::MonsterEntry>& mon
     logger_.info("Loaded " + std::to_string(monsters.size()) + " monster definitions");
 }
 
-int CombatSystem::spawnMonster(int monsterId, float x, float y, float z)
+void CombatSystem::setPartyHostilityByMonsterId(std::unordered_map<int, bool> hostilityByMonsterId)
+{
+    partyHostilityByMonsterId_ = std::move(hostilityByMonsterId);
+
+    for (auto& monster : monsters_)
+    {
+        if (!monster.isAlive())
+        {
+            continue;
+        }
+        if (auto it = partyHostilityByMonsterId_.find(monster.monsterId);
+            it != partyHostilityByMonsterId_.end())
+        {
+            monster.hostile = it->second;
+            if (!monster.hostile)
+            {
+                monster.aiState = MonsterInstance::AIState::Standing;
+                monster.targetCharacter = -1;
+            }
+        }
+    }
+}
+
+int CombatSystem::spawnMonster(int monsterId, float x, float y, float z, int group)
 {
     auto it = monsterDefs_.find(monsterId);
     if (it == monsterDefs_.end())
@@ -62,7 +141,20 @@ int CombatSystem::spawnMonster(int monsterId, float x, float y, float z)
     inst.x = x;
     inst.y = y;
     inst.z = z;
+    inst.group = group;
     inst.aiState = MonsterInstance::AIState::Standing;
+    inst.personality = parsePersonality(def.aiType);
+    inst.hostile = (inst.personality != MonsterInstance::Personality::Friendly);
+    if (auto itHostility = partyHostilityByMonsterId_.find(monsterId);
+        itHostility != partyHostilityByMonsterId_.end())
+    {
+        inst.hostile = itHostility->second;
+    }
+    if (inst.personality == MonsterInstance::Personality::Aggressive ||
+        inst.personality == MonsterInstance::Personality::Suicidal)
+    {
+        inst.aggroRange *= 1.5f;
+    }
 
     inst.resistFire = def.resistFire;
     inst.resistAir = def.resistAir;
@@ -98,6 +190,12 @@ void CombatSystem::update(float deltaMs)
     if (!inCombat_ || !gameWorld_)
         return;
 
+    if (gameWorld_->runtimeConfig().noMonsters)
+    {
+        inCombat_ = false;
+        return;
+    }
+
     for (auto& monster : monsters_)
     {
         if (!monster.isAlive())
@@ -109,6 +207,15 @@ void CombatSystem::update(float deltaMs)
             monster.recoveryTime -= static_cast<int>(deltaMs);
             if (monster.recoveryTime < 0)
                 monster.recoveryTime = 0;
+            if (monster.recoveryTime > 0)
+            {
+                continue;
+            }
+        }
+
+        if (isStateRecoverable(monster.aiState))
+        {
+            monster.aiState = MonsterInstance::AIState::Standing;
             continue;
         }
 
@@ -297,10 +404,14 @@ int CombatSystem::calculateDamage(int baseDamage, DamageElement type,
     return std::max(1, reduced); // Always at least 1 damage on a hit
 }
 
-int CombatSystem::calculateMonsterDamage(int baseDamage, DamageElement type, int characterIndex) const
+int CombatSystem::calculateMonsterDamage(int baseDamage, DamageElement type,
+                                         int characterIndex) const
 {
     if (!gameWorld_ || characterIndex < 0 || characterIndex >= kPartySize)
         return baseDamage;
+
+    if (gameWorld_->runtimeConfig().noDamage)
+        return 0;
 
     const auto& ch = gameWorld_->party().member(characterIndex);
     int resistance = 0;
@@ -358,49 +469,372 @@ int CombatSystem::aliveMonsterCount() const
     return count;
 }
 
-void CombatSystem::updateMonsterAI(MonsterInstance& monster, float /*deltaMs*/)
+void CombatSystem::setMonsterTopic(int monsterIndex, uint16_t topic)
+{
+    auto* monster = getMonster(monsterIndex);
+    if (!monster)
+    {
+        return;
+    }
+    monster->topic = topic;
+}
+
+void CombatSystem::setMonsterField(int monsterId, int fieldIndex, int value)
+{
+    if (fieldIndex < 0 || fieldIndex >= 8)
+    {
+        return;
+    }
+
+    for (auto& monster : monsters_)
+    {
+        if (monster.monsterId != monsterId)
+        {
+            continue;
+        }
+        monster.scriptFields[static_cast<size_t>(fieldIndex)] = value;
+    }
+}
+
+void CombatSystem::setMonsterHostileByGroup(int group, bool hostile)
+{
+    bool changed = false;
+    for (auto& monster : monsters_)
+    {
+        if (!monster.isAlive() || monster.group != group)
+        {
+            continue;
+        }
+        monster.hostile = hostile;
+        monster.aiState =
+            hostile ? MonsterInstance::AIState::Pursuing : MonsterInstance::AIState::Standing;
+        if (hostile)
+        {
+            monster.targetCharacter = 0;
+            for (int i = 0; i < kPartySize; i++)
+            {
+                if (gameWorld_ && gameWorld_->party().member(i).isConscious())
+                {
+                    monster.targetCharacter = i;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            monster.targetCharacter = -1;
+        }
+        changed = true;
+    }
+
+    if (changed && hostile)
+    {
+        inCombat_ = true;
+    }
+}
+
+void CombatSystem::setMonsterHostileByIndex(int index, bool hostile)
+{
+    auto* monster = getMonster(index);
+    if (!monster || !monster->isAlive())
+    {
+        return;
+    }
+
+    monster->hostile = hostile;
+    monster->aiState =
+        hostile ? MonsterInstance::AIState::Pursuing : MonsterInstance::AIState::Standing;
+    if (hostile)
+    {
+        monster->targetCharacter = 0;
+        for (int i = 0; i < kPartySize; i++)
+        {
+            if (gameWorld_ && gameWorld_->party().member(i).isConscious())
+            {
+                monster->targetCharacter = i;
+                break;
+            }
+        }
+        inCombat_ = true;
+    }
+    else
+    {
+        monster->targetCharacter = -1;
+    }
+}
+
+void CombatSystem::replaceMonsterType(int oldMonsterId, int newMonsterId)
+{
+    auto defIt = monsterDefs_.find(newMonsterId);
+    if (defIt == monsterDefs_.end())
+    {
+        logger_.warning("ReplaceMonster ignored: unknown new monster ID " +
+                        std::to_string(newMonsterId));
+        return;
+    }
+
+    const auto& def = defIt->second;
+    for (auto& monster : monsters_)
+    {
+        if (!monster.isAlive() || monster.monsterId != oldMonsterId)
+        {
+            continue;
+        }
+
+        const float hpRatio = (monster.maxHP > 0) ? static_cast<float>(monster.currentHP) /
+                                                        static_cast<float>(monster.maxHP)
+                                                  : 1.0f;
+        monster.monsterId = newMonsterId;
+        monster.name = def.name;
+        monster.maxHP = std::max(1, def.hitPoints);
+        monster.currentHP = std::max(1, static_cast<int>(monster.maxHP * hpRatio));
+        monster.armorClass = def.armorClass;
+        monster.level = def.level;
+        monster.experience = def.experience;
+        monster.speed = def.speed;
+        monster.personality = parsePersonality(def.aiType);
+        if (auto itHostility = partyHostilityByMonsterId_.find(newMonsterId);
+            itHostility != partyHostilityByMonsterId_.end())
+        {
+            monster.hostile = itHostility->second;
+        }
+        else
+        {
+            monster.hostile = (monster.personality != MonsterInstance::Personality::Friendly);
+        }
+        if (!monster.hostile)
+        {
+            monster.aiState = MonsterInstance::AIState::Standing;
+            monster.targetCharacter = -1;
+        }
+        monster.resistFire = def.resistFire;
+        monster.resistAir = def.resistAir;
+        monster.resistWater = def.resistWater;
+        monster.resistEarth = def.resistEarth;
+        monster.resistMind = def.resistMind;
+        monster.resistSpirit = def.resistSpirit;
+        monster.resistBody = def.resistBody;
+        monster.resistLight = def.resistLight;
+        monster.resistDark = def.resistDark;
+        monster.resistPhysical = def.resistPhysical;
+    }
+}
+
+void CombatSystem::setMonsterAiByType(int monsterId, MonsterInstance::AIState state)
+{
+    for (auto& monster : monsters_)
+    {
+        if (!monster.isAlive() || monster.monsterId != monsterId)
+        {
+            continue;
+        }
+        monster.aiState = state;
+        if (isAggressiveState(state))
+        {
+            monster.hostile = true;
+        }
+        if (state == MonsterInstance::AIState::Pursuing ||
+            state == MonsterInstance::AIState::Attacking ||
+            state == MonsterInstance::AIState::AttackingRanged)
+        {
+            inCombat_ = true;
+        }
+    }
+}
+
+void CombatSystem::setMonsterAiByGroup(int group, MonsterInstance::AIState state)
+{
+    for (auto& monster : monsters_)
+    {
+        if (!monster.isAlive() || monster.group != group)
+        {
+            continue;
+        }
+        monster.aiState = state;
+        if (isAggressiveState(state))
+        {
+            monster.hostile = true;
+        }
+        if (state == MonsterInstance::AIState::Pursuing ||
+            state == MonsterInstance::AIState::Attacking ||
+            state == MonsterInstance::AIState::AttackingRanged)
+        {
+            inCombat_ = true;
+        }
+    }
+}
+
+void CombatSystem::updateMonsterAI(MonsterInstance& monster, float deltaMs)
 {
     if (!gameWorld_)
         return;
 
     auto& party = gameWorld_->party();
+    if (party.consciousCount() <= 0)
+    {
+        monster.aiState = MonsterInstance::AIState::Standing;
+        monster.targetCharacter = -1;
+        return;
+    }
+
+    const float partyX = party.worldX();
+    const float partyY = party.worldY();
+    const float partyZ = party.worldZ();
+    const float dx = partyX - monster.x;
+    const float dy = partyY - monster.y;
+    const float dz = partyZ - monster.z;
+    const float distSq = dx * dx + dy * dy + dz * dz;
+
+    const float visibilityRange = gameWorld_->isIndoorMap() ? 10239.0f : 5631.0f;
+    const float visibilitySq = visibilityRange * visibilityRange;
+    if (monster.aiState != MonsterInstance::AIState::Fleeing && distSq > visibilitySq)
+    {
+        monster.aiState = MonsterInstance::AIState::Standing;
+        monster.targetCharacter = -1;
+        return;
+    }
+
+    if (monster.personality == MonsterInstance::Personality::Wimp && monster.maxHP > 0 &&
+        monster.currentHP * 4 <= monster.maxHP)
+    {
+        monster.aiState = MonsterInstance::AIState::Fleeing;
+    }
+
+    if (!monster.hostile && isAggressiveState(monster.aiState))
+    {
+        monster.aiState = MonsterInstance::AIState::Standing;
+        monster.targetCharacter = -1;
+    }
 
     switch (monster.aiState)
     {
     case MonsterInstance::AIState::Standing:
+    case MonsterInstance::AIState::Guarding:
+    case MonsterInstance::AIState::Fidgeting:
+    case MonsterInstance::AIState::Wandering:
     {
-        // Check distance to party
-        float dx = monster.x - party.worldX();
-        float dy = monster.y - party.worldY();
-        float distSq = dx * dx + dy * dy;
+        if (!monster.hostile)
+        {
+            if (monster.aiState == MonsterInstance::AIState::Wandering ||
+                monster.aiState == MonsterInstance::AIState::Fidgeting)
+            {
+                const float moveUnits =
+                    std::max(4.0f, static_cast<float>(monster.speed) * (deltaMs / 1000.0f));
+                const float randX = static_cast<float>(randomInt(-100, 100)) / 100.0f;
+                const float randY = static_cast<float>(randomInt(-100, 100)) / 100.0f;
+                monster.x += randX * moveUnits;
+                monster.y += randY * moveUnits;
+            }
+            break;
+        }
+
         if (distSq < monster.aggroRange * monster.aggroRange)
         {
             monster.aiState = MonsterInstance::AIState::Pursuing;
-            // Pick random conscious target
-            std::vector<int> targets;
-            for (int i = 0; i < kPartySize; i++)
+            int target = party.activeMemberIndex();
+            if (target < 0 || target >= kPartySize || !party.member(target).isConscious())
             {
-                if (party.member(i).isConscious())
-                    targets.push_back(i);
+                target = pickFirstConscious(party);
             }
-            if (!targets.empty())
+            if (target >= 0)
             {
-                monster.targetCharacter = targets[static_cast<size_t>(
-                    randomInt(0, static_cast<int>(targets.size()) - 1))];
+                monster.targetCharacter = target;
             }
+
+            if (monster.group != 0 && target >= 0)
+            {
+                for (auto& ally : monsters_)
+                {
+                    if (&ally == &monster || !ally.isAlive() || ally.group != monster.group)
+                    {
+                        continue;
+                    }
+
+                    ally.hostile = true;
+                    if (ally.aiState == MonsterInstance::AIState::Standing ||
+                        ally.aiState == MonsterInstance::AIState::Guarding ||
+                        ally.aiState == MonsterInstance::AIState::Fidgeting ||
+                        ally.aiState == MonsterInstance::AIState::Wandering)
+                    {
+                        ally.aiState = MonsterInstance::AIState::Pursuing;
+                    }
+                    ally.targetCharacter = target;
+                }
+            }
+            inCombat_ = true;
+        }
+        else if (monster.aiState == MonsterInstance::AIState::Wandering ||
+                 monster.aiState == MonsterInstance::AIState::Fidgeting)
+        {
+            const float moveUnits =
+                std::max(4.0f, static_cast<float>(monster.speed) * (deltaMs / 1000.0f));
+            const float randX = static_cast<float>(randomInt(-100, 100)) / 100.0f;
+            const float randY = static_cast<float>(randomInt(-100, 100)) / 100.0f;
+            monster.x += randX * moveUnits;
+            monster.y += randY * moveUnits;
         }
         break;
     }
     case MonsterInstance::AIState::Pursuing:
-        // For now, immediately attack when in pursuit
-        monster.aiState = MonsterInstance::AIState::Attacking;
+    {
+        if (monster.targetCharacter < 0 || monster.targetCharacter >= kPartySize ||
+            !party.member(monster.targetCharacter).isConscious())
+        {
+            monster.targetCharacter = pickFirstConscious(party);
+            if (monster.targetCharacter < 0)
+            {
+                monster.aiState = MonsterInstance::AIState::Standing;
+                return;
+            }
+        }
+
+        const float dist2d = std::sqrt(dx * dx + dy * dy);
+        constexpr float kMeleeRange = 220.0f;
+        if (dist2d <= kMeleeRange)
+        {
+            monster.aiState = MonsterInstance::AIState::Attacking;
+            break;
+        }
+
+        const float unitsPerSecond = std::max(75.0f, static_cast<float>(monster.speed) * 16.0f);
+        const float moveAmount = unitsPerSecond * (deltaMs / 1000.0f);
+        if (dist2d > 0.001f)
+        {
+            const float inv = 1.0f / dist2d;
+            monster.x += dx * inv * moveAmount;
+            monster.y += dy * inv * moveAmount;
+        }
         break;
+    }
 
     case MonsterInstance::AIState::Attacking:
+    case MonsterInstance::AIState::AttackingMelee2:
+    case MonsterInstance::AIState::AttackingRanged:
         monsterAttack(monster);
         break;
 
     case MonsterInstance::AIState::Fleeing:
+    {
+        const float dist2d = std::sqrt(dx * dx + dy * dy);
+        const float fleeRange = visibilityRange * 1.5f;
+        if (dist2d > fleeRange)
+        {
+            monster.aiState = MonsterInstance::AIState::Dead;
+            monster.currentHP = 0;
+            break;
+        }
+
+        const float unitsPerSecond = std::max(80.0f, static_cast<float>(monster.speed) * 12.0f);
+        const float moveAmount = unitsPerSecond * (deltaMs / 1000.0f);
+        if (dist2d > 0.001f)
+        {
+            const float inv = 1.0f / dist2d;
+            monster.x -= dx * inv * moveAmount;
+            monster.y -= dy * inv * moveAmount;
+        }
+        break;
+    }
+
     case MonsterInstance::AIState::Dead:
         break;
 
@@ -473,8 +907,15 @@ void CombatSystem::monsterAttack(MonsterInstance& monster)
         }
         else
         {
-            result.description = monster.name + " hits " + target.name + " for " +
-                                 std::to_string(result.damage) + " damage";
+            if (result.damage <= 0)
+            {
+                result.description = monster.name + " hits " + target.name + " but deals no damage";
+            }
+            else
+            {
+                result.description = monster.name + " hits " + target.name + " for " +
+                                     std::to_string(result.damage) + " damage";
+            }
         }
     }
 

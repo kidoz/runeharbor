@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <format>
 
+#include <cctype>
+
 #include "../../graphics/debug_text.hpp"
 #include "../../graphics/irenderer.hpp"
 #include "../../util/ilogger.hpp"
@@ -56,11 +58,12 @@ void LoadingState::setFallbackBackground(void* tex, int w, int h)
 }
 
 void LoadingState::setAnimationFrames(std::vector<void*>* frames, std::vector<int>* widths,
-                                      std::vector<int>* heights)
+                                      std::vector<int>* heights, std::vector<int>* frameNumbers)
 {
     animFrames = frames;
     animWidths = widths;
     animHeights = heights;
+    animFrameNumbers = frameNumbers;
 }
 
 void LoadingState::enter()
@@ -144,11 +147,29 @@ void LoadingState::render()
     if (animFrames && !animFrames->empty() && animWidths && animHeights)
     {
         size_t frameIndex = 0;
-        if (animFrames->size() > 1 && loadProgress)
+
+        // MM7 can request numbered loading screens (loadingN.pcx) for certain transitions.
+        bool forcedFrame = false;
+        if (ctx.shared && ctx.shared->loadingScreenIndex > 0 && animFrameNumbers &&
+            animFrameNumbers->size() == animFrames->size())
+        {
+            const int requested = ctx.shared->loadingScreenIndex;
+            for (size_t i = 0; i < animFrameNumbers->size(); i++)
+            {
+                if ((*animFrameNumbers)[i] == requested)
+                {
+                    frameIndex = i;
+                    forcedFrame = true;
+                    break;
+                }
+            }
+        }
+
+        if (!forcedFrame && animFrames->size() > 1 && loadProgress)
         {
             frameIndex = static_cast<size_t>(progress * static_cast<float>(animFrames->size() - 1));
         }
-        else
+        else if (!forcedFrame)
         {
             uint64_t now = SDL_GetTicks();
             frameIndex = static_cast<size_t>((now - enterTicks) / 100) % animFrames->size();

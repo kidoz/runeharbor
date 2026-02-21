@@ -65,7 +65,7 @@ test-verbose: build
 
 # Run specific test by name
 test-filter PATTERN: build
-    meson test -C {{build_dir}} --verbose {{PATTERN}}
+    ./{{build_dir}}/tests/runeharbor_tests "{{PATTERN}},[{{PATTERN}}],*{{PATTERN}}*"
 
 # Run tests and show coverage (requires gcov setup)
 test-coverage: build
@@ -79,6 +79,11 @@ test-coverage: build
 # Run clang static analyzer (scan-build)
 analyze:
     @echo "Running Clang Static Analyzer..."
+    @if ! command -v scan-build >/dev/null 2>&1; then \
+        echo "Error: scan-build is not installed or not on PATH."; \
+        echo "Install LLVM/clang analyzer tools, then rerun: just analyze"; \
+        exit 1; \
+    fi
     @rm -rf {{build_dir}}-analyze
     scan-build -o {{build_dir}}-analyze/report meson setup {{build_dir}}-analyze --buildtype=debug
     scan-build -o {{build_dir}}-analyze/report ninja -C {{build_dir}}-analyze
@@ -88,6 +93,11 @@ analyze:
 # Run clang-tidy on all source files
 tidy:
     @echo "Running clang-tidy..."
+    @if ! command -v clang-tidy >/dev/null 2>&1; then \
+        echo "Error: clang-tidy is not installed or not on PATH."; \
+        echo "Install clang-tidy, then rerun: just tidy"; \
+        exit 1; \
+    fi
     find src -name "*.cpp" | xargs clang-tidy -p {{build_dir}} --
 
 # Run all static analysis tools

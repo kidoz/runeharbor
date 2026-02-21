@@ -3,11 +3,147 @@
 
 #include <algorithm>
 #include <format>
+#include <limits>
+#include <optional>
 
 #include <cstring>
 
 namespace runeharbor::formats
 {
+namespace
+{
+constexpr uint32_t kMaxSpawnCount = 1000;
+constexpr int32_t kMaxPlausibleSpawnCoord = 1'000'000;
+constexpr uint16_t kMaxPlausibleSpawnRadius = 8192;
+constexpr size_t kGridSize = ODMMapData::TERRAIN_SIZE * ODMMapData::TERRAIN_SIZE;
+constexpr size_t kTerrainBytesCompact = kGridSize * 3;                          // u8 + u8 + u8
+constexpr size_t kTerrainBytesWide = kGridSize * 2 + kGridSize * 4 + kGridSize; // u16 + u32 + u8
+constexpr size_t kTerrainCmapBytes = 0x20000 + 0x10000;
+
+bool looksLikeTerrainNormalsSection(const std::vector<uint8_t>& data, size_t offset)
+{
+    if (offset + 4 + kTerrainCmapBytes > data.size())
+    {
+        return false;
+    }
+
+    uint32_t normalCount = 0;
+    std::memcpy(&normalCount, data.data() + offset, sizeof(normalCount));
+    if (normalCount > 100000)
+    {
+        return false;
+    }
+
+    const size_t normalsBytes = static_cast<size_t>(normalCount) * 12;
+    return offset + 4 + kTerrainCmapBytes + normalsBytes <= data.size();
+}
+
+double terrainLayoutScore(const std::vector<HeightmapCell>& cells)
+{
+    if (cells.size() < 2)
+    {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    double diffSum = 0.0;
+    for (size_t i = 1; i < cells.size(); i++)
+    {
+        diffSum +=
+            std::abs(static_cast<int>(cells[i].height) - static_cast<int>(cells[i - 1].height));
+    }
+
+    return diffSum / static_cast<double>(cells.size() - 1);
+}
+
+bool isPlausibleSpawn(const ODMSpawnPoint& spawn)
+{
+    if (std::abs(spawn.x) > kMaxPlausibleSpawnCoord ||
+        std::abs(spawn.y) > kMaxPlausibleSpawnCoord || std::abs(spawn.z) > kMaxPlausibleSpawnCoord)
+    {
+        return false;
+    }
+
+    if (spawn.radius > kMaxPlausibleSpawnRadius)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool parseSpawnBlockAt(const std::vector<uint8_t>& data, size_t startOffset,
+                       std::vector<ODMSpawnPoint>& outSpawns, size_t& outEndOffset)
+{
+    if (startOffset + 4 > data.size())
+    {
+        return false;
+    }
+
+    uint32_t spawnCount = 0;
+    std::memcpy(&spawnCount, data.data() + startOffset, 4);
+    if (spawnCount == 0 || spawnCount > kMaxSpawnCount)
+    {
+        return false;
+    }
+
+    const size_t recordsSize = static_cast<size_t>(spawnCount) * sizeof(ODMSpawnPoint);
+    const size_t endOffset = startOffset + 4 + recordsSize;
+    if (endOffset > data.size())
+    {
+        return false;
+    }
+
+    std::vector<ODMSpawnPoint> parsed;
+    parsed.reserve(spawnCount);
+    bool hasNonZeroEntry = false;
+    for (uint32_t i = 0; i < spawnCount; i++)
+    {
+        ODMSpawnPoint spawn{};
+        std::memcpy(&spawn, data.data() + startOffset + 4 + i * sizeof(ODMSpawnPoint),
+                    sizeof(ODMSpawnPoint));
+        if (!isPlausibleSpawn(spawn))
+        {
+            return false;
+        }
+        if (spawn.x != 0 || spawn.y != 0 || spawn.z != 0 || spawn.radius != 0 ||
+            spawn.objectType != 0 || spawn.objectIndex != 0 || spawn.attributes != 0 ||
+            spawn.group != 0)
+        {
+            hasNonZeroEntry = true;
+        }
+        parsed.push_back(spawn);
+    }
+
+    if (!hasNonZeroEntry)
+    {
+        return false;
+    }
+
+    outSpawns = std::move(parsed);
+    outEndOffset = endOffset;
+    return true;
+}
+
+std::optional<size_t> findSpawnBlockOffset(const std::vector<uint8_t>& data, size_t startOffset)
+{
+    if (startOffset + 4 + sizeof(ODMSpawnPoint) > data.size())
+    {
+        return std::nullopt;
+    }
+
+    std::vector<ODMSpawnPoint> scratch;
+    size_t scratchEnd = 0;
+    for (size_t candidate = startOffset; candidate + 4 + sizeof(ODMSpawnPoint) <= data.size();
+         candidate += 4)
+    {
+        if (parseSpawnBlockAt(data, candidate, scratch, scratchEnd))
+        {
+            return candidate;
+        }
+    }
+    return std::nullopt;
+}
+} // namespace
 
 ODMMap::ODMMap(util::ILogger& logger) : logger(logger) {}
 
@@ -94,41 +230,123 @@ bool ODMMap::parseHeader(const std::vector<uint8_t>& data)
 
 bool ODMMap::parseHeightmap(const std::vector<uint8_t>& data, size_t& offset)
 {
-    constexpr size_t gridSize = ODMMapData::TERRAIN_SIZE * ODMMapData::TERRAIN_SIZE; // 16384
-
-    // Heightmap: 128x128 uint8 values, world height = value * 32
-    if (offset + gridSize * 3 > data.size())
+    auto parseCompact = [&](size_t startOffset, std::vector<HeightmapCell>& outCells) -> bool
     {
-        logger.warning("Not enough data for heightmap + tilemap + attrmap");
-        mapData.heightmap.resize(gridSize);
+        if (startOffset + kTerrainBytesCompact > data.size())
+        {
+            return false;
+        }
+
+        outCells.resize(kGridSize);
+        const uint8_t* heights = data.data() + startOffset;
+        for (size_t i = 0; i < kGridSize; i++)
+        {
+            outCells[i].height = static_cast<int16_t>(heights[i]) * 32;
+        }
+        startOffset += kGridSize;
+
+        const uint8_t* tiles = data.data() + startOffset;
+        for (size_t i = 0; i < kGridSize; i++)
+        {
+            outCells[i].tileIndex = tiles[i];
+        }
+        startOffset += kGridSize;
+
+        const uint8_t* attrs = data.data() + startOffset;
+        for (size_t i = 0; i < kGridSize; i++)
+        {
+            outCells[i].attributes = attrs[i];
+        }
+        return true;
+    };
+
+    auto parseWide = [&](size_t startOffset, std::vector<HeightmapCell>& outCells) -> bool
+    {
+        if (startOffset + kTerrainBytesWide > data.size())
+        {
+            return false;
+        }
+
+        outCells.resize(kGridSize);
+        for (size_t i = 0; i < kGridSize; i++)
+        {
+            uint16_t rawHeight = 0;
+            std::memcpy(&rawHeight, data.data() + startOffset + i * sizeof(uint16_t),
+                        sizeof(rawHeight));
+            const uint16_t clamped =
+                std::min<uint16_t>(rawHeight, std::numeric_limits<int16_t>::max());
+            outCells[i].height = static_cast<int16_t>(clamped);
+        }
+        startOffset += kGridSize * sizeof(uint16_t);
+
+        for (size_t i = 0; i < kGridSize; i++)
+        {
+            uint32_t tileEntry = 0;
+            std::memcpy(&tileEntry, data.data() + startOffset + i * sizeof(uint32_t),
+                        sizeof(tileEntry));
+            outCells[i].tileIndex = static_cast<uint8_t>(tileEntry & 0xFFu);
+        }
+        startOffset += kGridSize * sizeof(uint32_t);
+
+        const uint8_t* attrs = data.data() + startOffset;
+        for (size_t i = 0; i < kGridSize; i++)
+        {
+            outCells[i].attributes = attrs[i];
+        }
+        return true;
+    };
+
+    std::vector<HeightmapCell> parsedCompact;
+    std::vector<HeightmapCell> parsedWide;
+    const bool compactPossible = (offset + kTerrainBytesCompact <= data.size());
+    const bool widePossible = (offset + kTerrainBytesWide <= data.size());
+
+    if (!compactPossible && !widePossible)
+    {
+        logger.warning("Not enough data for any known terrain section layout");
+        mapData.heightmap.resize(kGridSize);
         return false;
     }
 
-    mapData.heightmap.resize(gridSize);
+    const bool compactLooksValid =
+        compactPossible && looksLikeTerrainNormalsSection(data, offset + kTerrainBytesCompact);
+    const bool wideLooksValid =
+        widePossible && looksLikeTerrainNormalsSection(data, offset + kTerrainBytesWide);
 
-    // Read heights (uint8, multiply by 32 for world units)
-    const uint8_t* heights = data.data() + offset;
-    for (size_t i = 0; i < gridSize; i++)
+    const bool compactParsed = compactPossible && parseCompact(offset, parsedCompact);
+    const bool wideParsed = widePossible && parseWide(offset, parsedWide);
+    if (!compactParsed && !wideParsed)
     {
-        mapData.heightmap[i].height = static_cast<int16_t>(heights[i]) * 32;
+        logger.warning("Failed to parse terrain section");
+        mapData.heightmap.resize(kGridSize);
+        return false;
     }
-    offset += gridSize;
 
-    // Read tilemap (uint8 tile indices)
-    const uint8_t* tiles = data.data() + offset;
-    for (size_t i = 0; i < gridSize; i++)
+    bool usedWideLayout = false;
+    if (compactParsed && wideParsed)
     {
-        mapData.heightmap[i].tileIndex = tiles[i];
+        if (wideLooksValid && !compactLooksValid)
+        {
+            usedWideLayout = true;
+        }
+        else if (!wideLooksValid && compactLooksValid)
+        {
+            usedWideLayout = false;
+        }
+        else
+        {
+            const double compactScore = terrainLayoutScore(parsedCompact);
+            const double wideScore = terrainLayoutScore(parsedWide);
+            usedWideLayout = (wideScore < compactScore);
+        }
     }
-    offset += gridSize;
+    else
+    {
+        usedWideLayout = wideParsed;
+    }
 
-    // Read attribute map (uint8)
-    const uint8_t* attrs = data.data() + offset;
-    for (size_t i = 0; i < gridSize; i++)
-    {
-        mapData.heightmap[i].attributes = attrs[i];
-    }
-    offset += gridSize;
+    mapData.heightmap = usedWideLayout ? std::move(parsedWide) : std::move(parsedCompact);
+    offset += usedWideLayout ? kTerrainBytesWide : kTerrainBytesCompact;
 
     // Calculate height statistics
     int16_t minH = mapData.heightmap[0].height;
@@ -139,8 +357,8 @@ bool ODMMap::parseHeightmap(const std::vector<uint8_t>& data, size_t& offset)
         maxH = std::max(maxH, cell.height);
     }
 
-    logger.debug(
-        std::format("Parsed heightmap: {} cells, height range [{}, {}]", gridSize, minH, maxH));
+    logger.debug(std::format("Parsed terrain grid: {} cells, height range [{}, {}], layout={}",
+                             kGridSize, minH, maxH, usedWideLayout ? "wide" : "compact"));
 
     return true;
 }
@@ -172,13 +390,12 @@ bool ODMMap::skipTerrainNormals(const std::vector<uint8_t>& data, size_t& offset
     offset += 4;
 
     // CMAP1 + CMAP2
-    constexpr size_t cmapSize = 0x20000 + 0x10000; // 196608 bytes
-    if (offset + cmapSize > data.size())
+    if (offset + kTerrainCmapBytes > data.size())
     {
         logger.debug("Not enough data for terrain CMAPs");
         return false;
     }
-    offset += cmapSize;
+    offset += kTerrainCmapBytes;
 
     // Normal vectors (normalCount * 12 bytes)
     size_t normalsSize = static_cast<size_t>(normalCount) * 12;
@@ -190,7 +407,7 @@ bool ODMMap::skipTerrainNormals(const std::vector<uint8_t>& data, size_t& offset
     offset += normalsSize;
 
     logger.debug(std::format("Skipped terrain normals: {} normals, {} bytes total", normalCount,
-                             4 + cmapSize + normalsSize));
+                             4 + kTerrainCmapBytes + normalsSize));
 
     return true;
 }
@@ -215,6 +432,7 @@ bool ODMMap::parseBuildings(const std::vector<uint8_t>& data, size_t& offset)
     if (modelCount == 0)
     {
         logger.debug("No models in ODM");
+        offset += 4;
         return true;
     }
 
@@ -375,6 +593,8 @@ ParsedFace ODMMap::convertFace(const ODMFaceOnDisk& df, const std::string& texNa
     face.textureName = texName;
     face.sectorId = 0; // No sectors in outdoor
     face.otherSectorId = 0;
+    face.eventId = df.eventId;
+    face.eventTriggerType = df.eventTriggerType;
 
     // Per-vertex data (copy only the used vertices)
     uint8_t nv = df.numVertices;
@@ -414,40 +634,53 @@ ParsedFace ODMMap::convertFace(const ODMFaceOnDisk& df, const std::string& texNa
 bool ODMMap::parseSpawns(const std::vector<uint8_t>& data, size_t& offset)
 {
     // Spawns follow models (after sprites, IDList, OMAP sections)
-    // Try to find spawn data by scanning forward
+    // Try direct parse first, then scan forward for a plausible spawn block.
     if (offset + 4 > data.size())
     {
         return false;
     }
 
-    uint32_t spawnCount = 0;
-    std::memcpy(&spawnCount, data.data() + offset, 4);
-
-    if (spawnCount > 1000)
+    std::vector<ODMSpawnPoint> parsedSpawns;
+    size_t parsedEndOffset = offset;
+    if (parseSpawnBlockAt(data, offset, parsedSpawns, parsedEndOffset))
     {
-        return false;
-    }
-
-    if (spawnCount == 0)
-    {
+        mapData.spawns = std::move(parsedSpawns);
+        offset = parsedEndOffset;
+        logger.debug(std::format("Parsed {} spawns", mapData.spawns.size()));
         return true;
     }
 
-    offset += 4;
-
-    mapData.spawns.reserve(spawnCount);
-
-    for (uint32_t i = 0; i < spawnCount && offset + sizeof(ODMSpawnPoint) <= data.size(); i++)
+    uint32_t directCount = 0;
+    std::memcpy(&directCount, data.data() + offset, 4);
+    if (directCount == 0)
     {
-        ODMSpawnPoint spawn;
-        std::memcpy(&spawn, data.data() + offset, sizeof(ODMSpawnPoint));
-        mapData.spawns.push_back(spawn);
-        offset += sizeof(ODMSpawnPoint);
+        if (auto foundOffset = findSpawnBlockOffset(data, offset + 4); foundOffset.has_value())
+        {
+            if (parseSpawnBlockAt(data, *foundOffset, parsedSpawns, parsedEndOffset))
+            {
+                mapData.spawns = std::move(parsedSpawns);
+                offset = parsedEndOffset;
+                logger.debug(std::format("Parsed {} spawns (scanned forward from offset {})",
+                                         mapData.spawns.size(), *foundOffset));
+                return true;
+            }
+        }
+        return true;
     }
 
-    logger.debug(std::format("Parsed {} spawns", mapData.spawns.size()));
+    if (auto foundOffset = findSpawnBlockOffset(data, offset + 4); foundOffset.has_value())
+    {
+        if (parseSpawnBlockAt(data, *foundOffset, parsedSpawns, parsedEndOffset))
+        {
+            mapData.spawns = std::move(parsedSpawns);
+            offset = parsedEndOffset;
+            logger.debug(std::format("Parsed {} spawns (recovered from offset {})",
+                                     mapData.spawns.size(), *foundOffset));
+            return true;
+        }
+    }
 
-    return true;
+    return false;
 }
 
 int16_t ODMMap::getHeightAt(int x, int y) const

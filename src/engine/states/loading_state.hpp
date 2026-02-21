@@ -34,7 +34,7 @@ class LoadingState : public IGameState
     void setBackground(void* tex, int w, int h);
     void setFallbackBackground(void* tex, int w, int h);
     void setAnimationFrames(std::vector<void*>* frames, std::vector<int>* widths,
-                            std::vector<int>* heights);
+                            std::vector<int>* heights, std::vector<int>* frameNumbers = nullptr);
 
     void enter() override;
     void exit() override;
@@ -62,6 +62,7 @@ class LoadingState : public IGameState
     std::vector<void*>* animFrames = nullptr;
     std::vector<int>* animWidths = nullptr;
     std::vector<int>* animHeights = nullptr;
+    std::vector<int>* animFrameNumbers = nullptr;
 };
 
 } // namespace runeharbor::engine

@@ -1,13 +1,11 @@
-#include "../util/string_utils.hpp"
 // SPDX-License-Identifier: MIT
-#include <algorithm>
+#include "game_lod_archive.hpp"
+
 #include <format>
 
 #include <cctype>
 #include <cstring>
 #include <zlib.h>
-
-#include "game_lod_archive.hpp"
 
 namespace runeharbor::formats
 {
@@ -70,9 +68,8 @@ bool GameLODArchive::isOpen() const
 
 bool GameLODArchive::readHeader()
 {
-    GameLODHeader header;
     file.seekg(0, std::ios::beg);
-    file.read(reinterpret_cast<char*>(&header), sizeof(GameLODHeader));
+    file.read(reinterpret_cast<char*>(&header_), sizeof(GameLODHeader));
 
     if (!file.good())
     {
@@ -80,84 +77,59 @@ bool GameLODArchive::readHeader()
         return false;
     }
 
-    if (std::strncmp(header.magic, "LOD", 3) != 0)
+    if (std::strncmp(header_.magic, "LOD", 3) != 0)
     {
         logger.error(std::format("Invalid LOD magic: expected 'LOD', got '{}'",
-                                 std::string(header.magic, 3)));
+                                 std::string(header_.magic, 3)));
         return false;
     }
 
-    std::string gameId(header.gameId, 4);
-    logger.debug(std::format("Game LOD archive game ID: {}", gameId));
-
+    logger.debug(std::format("Game LOD: dataStart=0x{:X}, numEntries={}", header_.dataStart,
+                             header_.numDirEntries));
     return true;
 }
 
 bool GameLODArchive::readDirectory()
 {
-    // Directory starts at offset 0x100 (256 bytes)
-    constexpr std::streamoff directoryOffset = 0x100;
-    file.seekg(directoryOffset, std::ios::beg);
+    // Directory starts right after the 256-byte header
+    constexpr std::streamoff kDirOffset = 0x100;
+    file.seekg(kDirOffset, std::ios::beg);
 
-    // First entry is metadata (like "maps")
-    // Format: name(8) + fields(24) where last field (reserved[1]) is file count
-    GameLODDirectoryEntry metaEntry;
-    file.read(reinterpret_cast<char*>(&metaEntry), sizeof(GameLODDirectoryEntry));
+    // Use the entry count from the header; fall back to scanning if zero
+    uint32_t count = header_.numDirEntries;
+    if (count == 0 || count > 10000)
+    {
+        // Scan for null-terminated directory
+        logger.debug("numDirEntries unreliable, scanning directory");
+        count = 0;
+        while (file.good() && count < 10000)
+        {
+            GameLODDirectoryEntry probe;
+            file.read(reinterpret_cast<char*>(&probe), sizeof(probe));
+            if (!file.good() || probe.name[0] == '\0')
+            {
+                break;
+            }
+            count++;
+        }
+        file.seekg(kDirOffset, std::ios::beg);
+    }
+
+    entries.resize(count);
+    file.read(reinterpret_cast<char*>(entries.data()),
+              static_cast<std::streamsize>(count * sizeof(GameLODDirectoryEntry)));
 
     if (!file.good())
     {
-        logger.error("Failed to read game directory metadata");
+        logger.error("Failed to read game directory entries");
+        entries.clear();
         return false;
     }
 
-    logger.debug(std::format("Game archive metadata: {}", buildFilename(metaEntry)));
-
-    // The file count is stored in the last field of metadata entry (reserved[1])
-    // However, it seems unreliable or I'm reading the wrong field.
-    // Let's read until we find an empty name or hit data start.
-
-    // Scan for directory end (null entry)
-    entries.reserve(1000);
-    while (file.good())
-    {
-        std::streamoff entryPos = file.tellg();
-        GameLODDirectoryEntry entry;
-        file.read(reinterpret_cast<char*>(&entry), sizeof(GameLODDirectoryEntry));
-
-        if (!file.good())
-        {
-            break;
-        }
-
-        // Stop if name is empty
-        if (entry.name[0] == '\0')
-        {
-            // Found end of directory
-            // Data section typically starts here or aligned
-            dataSectionStart = entryPos;
-            // Actually, usually there is some padding or it starts immediately.
-            // Let's assume data starts after the null entry?
-            // Or maybe the null entry is part of padding.
-            // In LOD, data starts after directory.
-            // Let's use the current position (after reading empty entry) as data start?
-            // No, usually data start is fixed or we can infer it.
-            // For GAMES.LOD, d01.blv offset 0x1300 implies data start around 0x5000.
-            // If we read 634 entries -> 0x5040.
-            // 0x5040 + 32 = 0x5060.
-            dataSectionStart = entryPos + sizeof(GameLODDirectoryEntry);
-            break;
-        }
-
-        entries.push_back(entry);
-
-        // Safety break
-        if (entries.size() > 10000)
-            break;
-    }
+    // Remove entries with empty names (shouldn't happen, but be safe)
+    std::erase_if(entries, [](const GameLODDirectoryEntry& e) { return e.name[0] == '\0'; });
 
     logger.debug(std::format("Read {} game directory entries", entries.size()));
-    logger.debug(
-        std::format("Data section estimated at 0x{:X}", static_cast<uint64_t>(dataSectionStart)));
 
     if (entries.empty())
     {
@@ -168,27 +140,15 @@ bool GameLODArchive::readDirectory()
     return true;
 }
 
-std::string GameLODArchive::buildFilename(const GameLODDirectoryEntry& entry) const
+std::string GameLODArchive::entryName(const GameLODDirectoryEntry& entry)
 {
-    std::string name;
-    for (int i = 0; i < 8 && entry.name[i] != '\0'; i++)
+    // Extract null-terminated name from 16-byte field
+    size_t len = 0;
+    while (len < sizeof(entry.name) && entry.name[len] != '\0')
     {
-        name += entry.name[i];
+        len++;
     }
-
-    // GAMES.LOD uses 8.3-style names; some entries truncate the final extension
-    // (e.g., out01.od -> out01.odm, out01.dd -> out01.ddm).
-    std::string lower = name;
-    for (char& c : lower)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    if (lower.size() == 7 && lower.rfind("out", 0) == 0 &&
-        (lower.size() >= 3 &&
-         (lower.substr(lower.size() - 3) == ".od" || lower.substr(lower.size() - 3) == ".dd")))
-    {
-        name += "m";
-    }
-
-    return name;
+    return std::string(entry.name, len);
 }
 
 std::vector<std::string> GameLODArchive::listFiles() const
@@ -198,44 +158,10 @@ std::vector<std::string> GameLODArchive::listFiles() const
 
     for (const auto& entry : entries)
     {
-        filenames.push_back(buildFilename(entry));
+        filenames.push_back(entryName(entry));
     }
 
     return filenames;
-}
-
-std::optional<GameLODDirectoryEntry> GameLODArchive::getFileInfo(const std::string& filename) const
-{
-    if (!opened)
-    {
-        return std::nullopt;
-    }
-
-    // Case-insensitive search
-    for (const auto& entry : entries)
-    {
-        std::string entryName = buildFilename(entry);
-
-        if (entryName.size() != filename.size())
-            continue;
-
-        bool match = true;
-        for (size_t j = 0; j < entryName.size(); j++)
-        {
-            if (std::tolower(entryName[j]) != std::tolower(filename[j]))
-            {
-                match = false;
-                break;
-            }
-        }
-
-        if (match)
-        {
-            return entry;
-        }
-    }
-
-    return std::nullopt;
 }
 
 std::optional<std::vector<uint8_t>> GameLODArchive::extractFile(const std::string& filename)
@@ -246,114 +172,129 @@ std::optional<std::vector<uint8_t>> GameLODArchive::extractFile(const std::strin
         return std::nullopt;
     }
 
-    // Find entry index (case-insensitive)
-    size_t targetIndex = 0;
-    bool found = false;
-    for (size_t i = 0; i < entries.size(); i++)
+    // Case-insensitive search
+    const GameLODDirectoryEntry* target = nullptr;
+    for (const auto& entry : entries)
     {
-        std::string entryName = buildFilename(entries[i]);
-
-        if (entryName.size() != filename.size())
-            continue;
-
-        bool match = true;
-        for (size_t j = 0; j < entryName.size(); j++)
+        std::string name = entryName(entry);
+        if (name.size() != filename.size())
         {
-            if (std::tolower(entryName[j]) != std::tolower(filename[j]))
+            continue;
+        }
+        bool match = true;
+        for (size_t j = 0; j < name.size(); j++)
+        {
+            if (std::tolower(static_cast<unsigned char>(name[j])) !=
+                std::tolower(static_cast<unsigned char>(filename[j])))
             {
                 match = false;
                 break;
             }
         }
-
         if (match)
         {
-            targetIndex = i;
-            found = true;
+            target = &entry;
             break;
         }
     }
 
-    if (!found)
+    if (!target)
     {
         logger.debug(std::format("File not found: {}", filename));
         return std::nullopt;
     }
 
-    // Files are stored sequentially, each with 16-byte header + zlib data
-    // Need to skip through previous files to find the target
-    std::streamoff currentPos = dataSectionStart;
-    file.seekg(currentPos, std::ios::beg);
-
-    for (size_t i = 0; i <= targetIndex; i++)
+    if (target->offset == 0 || target->size == 0)
     {
-        // Read 16-byte chunk header
-        uint8_t chunkHeader[16];
-        file.read(reinterpret_cast<char*>(chunkHeader), 16);
+        logger.error(std::format("Invalid entry for '{}': offset=0x{:X}, size={}", filename,
+                                 target->offset, target->size));
+        return std::nullopt;
+    }
+
+    // Seek to the data block at the absolute offset
+    file.seekg(static_cast<std::streamoff>(target->offset), std::ios::beg);
+    if (!file.good())
+    {
+        logger.error(
+            std::format("Failed to seek to offset 0x{:X} for '{}'", target->offset, filename));
+        return std::nullopt;
+    }
+
+    // Check if the file is compressed based on directory entry
+    // Uncompressed files in GAMES.LOD (decompressedSize == 0) typically do NOT have the 8-byte
+    // header. Compressed files usually do.
+    bool hasHeader = (target->decompressedSize > 0);
+
+    std::vector<uint8_t> payload;
+    uint32_t metaUncompressed = 0;
+
+    if (hasHeader)
+    {
+        // Read 8-byte metadata header: [uncompressedSize:4][flags:4]
+        uint32_t metaFlags = 0;
+        file.read(reinterpret_cast<char*>(&metaUncompressed), 4);
+        file.read(reinterpret_cast<char*>(&metaFlags), 4);
         if (!file.good())
         {
-            logger.error(std::format("Failed to read chunk header for file {}", i));
+            logger.error(std::format("Failed to read data header for '{}'", filename));
             return std::nullopt;
         }
 
-        // Parse header: [unknown:4][identifier:4][compressed_size:4][decompressed_size:4]
-        uint32_t compressedSize = *reinterpret_cast<uint32_t*>(chunkHeader + 8);
-        uint32_t decompressedSize = *reinterpret_cast<uint32_t*>(chunkHeader + 12);
-
-        if (i == targetIndex)
+        // Payload follows the 8-byte header
+        uint32_t payloadSize = (target->size > 8) ? (target->size - 8) : 0;
+        if (payloadSize == 0)
         {
-            // This is our file - read and decompress
-            logger.debug(std::format("Extracting: {} (compressed: {}, decompressed: {})", filename,
-                                     compressedSize, decompressedSize));
-
-            std::vector<uint8_t> compressed(compressedSize);
-            file.read(reinterpret_cast<char*>(compressed.data()), compressedSize);
-
-            if (!file.good())
-            {
-                logger.error("Failed to read compressed data");
-                return std::nullopt;
-            }
-
-            // Verify zlib header
-            if (compressed.size() >= 2 && compressed[0] == 0x78)
-            {
-                std::vector<uint8_t> decompressed(decompressedSize);
-                unsigned long destLen = decompressedSize;
-
-                int result =
-                    uncompress(decompressed.data(), &destLen, compressed.data(), compressed.size());
-
-                if (result == Z_OK)
-                {
-                    decompressed.resize(destLen);
-                    logger.debug(
-                        std::format("Decompressed: {} -> {} bytes", compressedSize, destLen));
-                    return decompressed;
-                }
-                else
-                {
-                    logger.error(std::format("zlib decompression failed: {}", result));
-                    return std::nullopt;
-                }
-            }
-            else
-            {
-                // Not compressed, return as-is
-                logger.debug(
-                    std::format("Data not compressed, returning {} bytes", compressedSize));
-                return compressed;
-            }
+            logger.warning(std::format("Zero payload size for '{}'", filename));
+            return std::vector<uint8_t>{};
         }
-        else
-        {
-            // Skip this file's compressed data
-            file.seekg(compressedSize, std::ios::cur);
-        }
+
+        payload.resize(payloadSize);
+        file.read(reinterpret_cast<char*>(payload.data()),
+                  static_cast<std::streamsize>(payloadSize));
+    }
+    else
+    {
+        // Uncompressed: raw data
+        payload.resize(target->size);
+        file.read(reinterpret_cast<char*>(payload.data()),
+                  static_cast<std::streamsize>(target->size));
+        // For uncompressed files, metaUncompressed is effectively the file size (though we don't
+        // use it for decompression)
+        metaUncompressed = target->size;
     }
 
-    logger.error("Unexpected end of extraction loop");
-    return std::nullopt;
+    if (!file.good())
+    {
+        logger.error(
+            std::format("Failed to read {} bytes of data for '{}'", payload.size(), filename));
+        return std::nullopt;
+    }
+
+    // Check for zlib compression (magic byte 0x78)
+    if (payload.size() >= 2 && payload[0] == 0x78)
+    {
+        unsigned long destLen = metaUncompressed > 0
+                                    ? metaUncompressed
+                                    : static_cast<unsigned long>(payload.size() * 4);
+        std::vector<uint8_t> decompressed(destLen);
+
+        int result = uncompress(decompressed.data(), &destLen, payload.data(),
+                                static_cast<uLong>(payload.size()));
+        if (result == Z_OK)
+        {
+            decompressed.resize(destLen);
+            logger.debug(std::format("Extracted '{}': {} -> {} bytes (decompressed)", filename,
+                                     payload.size(), destLen));
+            return decompressed;
+        }
+
+        logger.warning(std::format("zlib decompression failed for '{}' (err={}), returning raw",
+                                   filename, result));
+    }
+
+    // Not compressed — return raw payload
+    logger.debug(std::format("Extracted '{}': {} bytes (raw)", filename, payload.size()));
+    return payload;
 }
 
 } // namespace runeharbor::formats

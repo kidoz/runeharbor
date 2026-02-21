@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "../formats/items_parser.hpp"
@@ -142,6 +144,13 @@ class Inventory
 
     // Give item to first character with space
     bool giveItem(const Item& item);
+
+    // Snapshot/restore full runtime inventories (used by save/load).
+    const std::array<CharacterInventory, 4>& inventories() const { return inventories_; }
+    void setInventories(std::array<CharacterInventory, 4> inventories)
+    {
+        inventories_ = std::move(inventories);
+    }
 
   private:
     EquipType categorizeItem(const formats::ItemEntry& entry) const;

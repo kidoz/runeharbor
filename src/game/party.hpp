@@ -53,6 +53,10 @@ class Party
     int aliveCount() const;
     int consciousCount() const;
 
+    // Active player slot (used by event system mode 4). -1 means "no active member".
+    int activeMemberIndex() const { return activeMemberIndex_; }
+    void setActiveMemberIndex(int index);
+
     // Position in world
     float worldX() const { return worldX_; }
     float worldY() const { return worldY_; }
@@ -93,6 +97,7 @@ class Party
 
     uint64_t gameTime_ = 0;
     std::string currentMap_;
+    int activeMemberIndex_ = 0;
 };
 
 } // namespace runeharbor::game

@@ -29,6 +29,7 @@ class SdlWindow : public IWindow
     void swapBuffers() override;
     SDL_Window* getSDLWindow() override { return window; }
     MouseState getMouseState() const override;
+    std::optional<WindowPosition> getWindowPosition() const override;
     bool wasMouseClicked(MouseButton button = MouseButton::Left) const override;
     bool wasMousePressed(MouseButton button = MouseButton::Left) const override;
     void resetFrameState() override;

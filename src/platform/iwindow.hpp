@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 // Forward declaration
@@ -17,6 +18,8 @@ struct WindowConfig
     uint32_t height = 600;
     bool fullscreen = false;
     bool resizable = true;
+    std::optional<int> windowX;
+    std::optional<int> windowY;
 };
 
 /// Mouse button indices
@@ -37,6 +40,12 @@ struct MouseState
     bool rightButton = false;
 };
 
+struct WindowPosition
+{
+    int x = 0;
+    int y = 0;
+};
+
 class IWindow
 {
   public:
@@ -53,6 +62,9 @@ class IWindow
 
     /// Get the current mouse state (position and button states)
     virtual MouseState getMouseState() const = 0;
+
+    /// Get current top-left window position in screen coordinates.
+    virtual std::optional<WindowPosition> getWindowPosition() const = 0;
 
     /// Check if a mouse button was clicked this frame (pressed and released)
     virtual bool wasMouseClicked(MouseButton button = MouseButton::Left) const = 0;
