@@ -6,6 +6,7 @@
 #include <functional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "../formats/monsters_parser.hpp"
@@ -188,6 +189,7 @@ class CombatSystem
     CombatCallbacks callbacks_;
 
     std::unordered_map<int, formats::MonsterEntry> monsterDefs_;
+    std::unordered_set<int> warnedUnknownMonsterIds_;
     std::unordered_map<int, bool> partyHostilityByMonsterId_;
     std::vector<MonsterInstance> monsters_;
     bool inCombat_ = false;

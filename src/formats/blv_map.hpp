@@ -364,6 +364,14 @@ struct ParsedDecoration
     bool hidden = false;
 };
 
+struct BLVOutlinePoint
+{
+    int32_t x = 0;
+    int32_t y = 0;
+    int32_t z = 0;
+};
+static_assert(sizeof(BLVOutlinePoint) == 12, "BLVOutlinePoint must be 12 bytes");
+
 // Parsed sector (room) with resolved face lists
 struct ParsedSector
 {
@@ -409,6 +417,7 @@ struct BLVMapData
     std::vector<ParsedDoor> doors;
     std::vector<ParsedDecoration> decorations;
     std::vector<BLVSpawnPoint> spawns;
+    std::vector<BLVOutlinePoint> outlines;
 };
 
 class BLVMap
@@ -435,6 +444,7 @@ class BLVMap
     const std::vector<ParsedFace>& getFaces() const { return mapData.faces; }
     const std::vector<ParsedSector>& getSectors() const { return mapData.sectors; }
     const std::vector<BLVLight>& getLights() const { return mapData.lights; }
+    const std::vector<BLVOutlinePoint>& getOutlines() const { return mapData.outlines; }
 
   private:
     bool parseHeader(const std::vector<uint8_t>& data);

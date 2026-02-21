@@ -491,6 +491,37 @@ StartupSettings parseIniSettings(std::string_view iniText, util::ILogger& logger
         settings.viewportHeight = std::max(1, *value);
     }
 
+    constexpr int kGameWidth = 640;
+    constexpr int kGameHeight = 480;
+    constexpr int kDefaultViewportX = 8;
+    constexpr int kDefaultViewportY = 8;
+    constexpr int kDefaultViewportWidth = 468;
+    constexpr int kDefaultViewportHeight = 351;
+    constexpr int kMinSafeViewportWidth = 64;
+    constexpr int kMinSafeViewportHeight = 64;
+
+    settings.viewportX = std::clamp(settings.viewportX, 0, kGameWidth - 1);
+    settings.viewportY = std::clamp(settings.viewportY, 0, kGameHeight - 1);
+    settings.viewportWidth = std::clamp(settings.viewportWidth, 1, kGameWidth);
+    settings.viewportHeight = std::clamp(settings.viewportHeight, 1, kGameHeight);
+
+    settings.viewportWidth = std::min(settings.viewportWidth, kGameWidth - settings.viewportX);
+    settings.viewportHeight = std::min(settings.viewportHeight, kGameHeight - settings.viewportY);
+
+    if (settings.viewportWidth < kMinSafeViewportWidth ||
+        settings.viewportHeight < kMinSafeViewportHeight)
+    {
+        logger.warning(std::format("Viewport {}x{} at ({},{}) is too small; restoring {}x{} at "
+                                   "({}, {})",
+                                   settings.viewportWidth, settings.viewportHeight,
+                                   settings.viewportX, settings.viewportY, kDefaultViewportWidth,
+                                   kDefaultViewportHeight, kDefaultViewportX, kDefaultViewportY));
+        settings.viewportX = kDefaultViewportX;
+        settings.viewportY = kDefaultViewportY;
+        settings.viewportWidth = kDefaultViewportWidth;
+        settings.viewportHeight = kDefaultViewportHeight;
+    }
+
     settings.windowX = readIntSetting(sections, "screen", "window x", logger);
     settings.windowY = readIntSetting(sections, "screen", "window y", logger);
 

@@ -45,11 +45,52 @@ bool MonstersParser::parse(const std::vector<uint8_t>& data)
         R"(#	Name	Picture	LVL	 HP 	AC	 EXP 	Treasure	Quest	Fly	Move	AI Type	Hst	Spd	Rec	Pref	Bonus	Type	Damage	Miss	Att%	Type	Damage	Miss	Use%	"Spl,Mas,Skil"	Use%	"Spl,Mas,Skil"	Fire	Air	Water	Earth	Mind	Spirit	Body	Light	Dark	Phys	Special)";
     if (util::trim(line) != expected_field_header)
     {
-        logger.error(std::format("Malformed field names header: Expected '{}', got '{}'",
-                                 expected_field_header, util::trim(line)));
-        return false;
+        // Some broken extraction paths can prepend binary data before MONSTERS.TXT content.
+        // Recover by searching for the known field header inside the payload when
+        // the prefix clearly looks non-textual.
+        bool hasBinaryPrefix = false;
+        const size_t probeLen = std::min<size_t>(content.size(), 512);
+        for (size_t i = 0; i < probeLen; i++)
+        {
+            const unsigned char c = static_cast<unsigned char>(content[i]);
+            if (c == '\n' || c == '\r' || c == '\t')
+            {
+                continue;
+            }
+            if (c < 0x20 || c >= 0x80)
+            {
+                hasBinaryPrefix = true;
+                break;
+            }
+        }
+
+        if (!hasBinaryPrefix)
+        {
+            logger.error(std::format("Malformed field names header: Expected '{}', got '{}'",
+                                     expected_field_header, util::trim(line)));
+            return false;
+        }
+
+        size_t headerPos = content.find(expected_field_header);
+        if (headerPos == std::string::npos)
+        {
+            logger.error(std::format("Malformed field names header: Expected '{}', got '{}'",
+                                     expected_field_header, util::trim(line)));
+            return false;
+        }
+
+        logger.warning("Monsters payload had binary prefix; recovering from embedded table header");
+        iss.clear();
+        iss.str(content.substr(headerPos));
+
+        // Consume the recovered header line so the data loop starts from the first monster entry.
+        if (!std::getline(iss, line))
+        {
+            logger.error("Failed to recover monsters header line");
+            return false;
+        }
     }
-    logger.debug(std::format("Skipping field names header: {}", line));
+    logger.debug(std::format("Skipping field names header: {}", util::trim(line)));
 
     // Process data lines
     while (std::getline(iss, line))

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "game_lod_archive.hpp"
 
+#include <algorithm>
 #include <format>
 
 #include <cctype>
@@ -9,6 +10,31 @@
 
 namespace runeharbor::formats
 {
+namespace
+{
+#pragma pack(push, 1)
+struct GameLODChunkHeader
+{
+    uint32_t unknown0;
+    uint32_t unknown1;
+    uint32_t compressedSize;
+    uint32_t decompressedSize;
+};
+#pragma pack(pop)
+
+static_assert(sizeof(GameLODChunkHeader) == 16, "GameLODChunkHeader must be 16 bytes");
+
+bool looksLikeZlibData(const std::vector<uint8_t>& data)
+{
+    if (data.size() < 2 || data[0] != 0x78)
+    {
+        return false;
+    }
+
+    const uint16_t header = static_cast<uint16_t>((data[0] << 8) | data[1]);
+    return (header % 31) == 0;
+}
+} // namespace
 
 GameLODArchive::GameLODArchive(util::ILogger& logger) : logger(logger) {}
 
@@ -58,6 +84,8 @@ void GameLODArchive::close()
         logger.debug(std::format("Closed game archive: {}", archivePath.string()));
     }
     entries.clear();
+    directoryMode = DirectoryMode::Standard;
+    mapDataSectionStart = 0;
     opened = false;
 }
 
@@ -84,27 +112,109 @@ bool GameLODArchive::readHeader()
         return false;
     }
 
-    logger.debug(std::format("Game LOD: dataStart=0x{:X}, numEntries={}", header_.dataStart,
-                             header_.numDirEntries));
+    logger.debug(std::format("Game LOD archive game ID: {}",
+                             std::string(header_.gameId, sizeof(header_.gameId))));
     return true;
 }
 
 bool GameLODArchive::readDirectory()
 {
+    if (readMapChapterDirectory())
+    {
+        return true;
+    }
+
+    logger.debug("Map chapter directory not detected, falling back to standard directory");
+    return readStandardDirectory();
+}
+
+bool GameLODArchive::readMapChapterDirectory()
+{
     // Directory starts right after the 256-byte header
     constexpr std::streamoff kDirOffset = 0x100;
+    file.clear();
     file.seekg(kDirOffset, std::ios::beg);
 
-    // Use the entry count from the header; fall back to scanning if zero
+    GameLODDirectoryEntry chapterEntry{};
+    file.read(reinterpret_cast<char*>(&chapterEntry), sizeof(chapterEntry));
+    if (!file.good())
+    {
+        return false;
+    }
+
+    const std::string chapterName = entryName(chapterEntry);
+    if (!equalsIgnoreCase(chapterName, "maps"))
+    {
+        return false;
+    }
+
+    uint32_t count = chapterEntry.reserved;
+    if ((count == 0 || count > 10000) && (chapterEntry.reserved & 0xFFFFu) != 0)
+    {
+        count = chapterEntry.reserved & 0xFFFFu;
+    }
+
+    const uint32_t subdirOffset = chapterEntry.offset;
+    if (count == 0 || count > 10000 || subdirOffset < 0x120)
+    {
+        return false;
+    }
+
+    file.clear();
+    file.seekg(0, std::ios::end);
+    const std::streamoff fileSize = file.tellg();
+    if (!file.good() || fileSize <= 0)
+    {
+        return false;
+    }
+
+    const std::streamoff subdirEnd = static_cast<std::streamoff>(subdirOffset) +
+                                     static_cast<std::streamoff>(count) *
+                                         static_cast<std::streamoff>(sizeof(GameLODDirectoryEntry));
+    if (static_cast<std::streamoff>(subdirOffset) >= fileSize || subdirEnd > fileSize)
+    {
+        return false;
+    }
+
+    file.clear();
+    file.seekg(static_cast<std::streamoff>(subdirOffset), std::ios::beg);
+
+    entries.resize(count);
+    file.read(reinterpret_cast<char*>(entries.data()),
+              static_cast<std::streamsize>(count * sizeof(GameLODDirectoryEntry)));
+    if (!file.good())
+    {
+        entries.clear();
+        return false;
+    }
+
+    std::erase_if(entries, [](const GameLODDirectoryEntry& e) { return e.name[0] == '\0'; });
+
+    directoryMode = DirectoryMode::MapChapter;
+    mapDataSectionStart = subdirEnd;
+
+    logger.debug(std::format("Game archive metadata: {}", chapterName));
+    logger.debug(std::format("Expected {} file entries", count));
+    logger.debug(
+        std::format("Data section starts at 0x{:X}", static_cast<uint64_t>(mapDataSectionStart)));
+    logger.debug(std::format("Read {} game directory entries", entries.size()));
+    return !entries.empty();
+}
+
+bool GameLODArchive::readStandardDirectory()
+{
+    constexpr std::streamoff kDirOffset = 0x100;
+    file.clear();
+    file.seekg(kDirOffset, std::ios::beg);
+
     uint32_t count = header_.numDirEntries;
     if (count == 0 || count > 10000)
     {
-        // Scan for null-terminated directory
         logger.debug("numDirEntries unreliable, scanning directory");
         count = 0;
-        while (file.good() && count < 10000)
+        while (count < 10000)
         {
-            GameLODDirectoryEntry probe;
+            GameLODDirectoryEntry probe{};
             file.read(reinterpret_cast<char*>(&probe), sizeof(probe));
             if (!file.good() || probe.name[0] == '\0')
             {
@@ -112,7 +222,14 @@ bool GameLODArchive::readDirectory()
             }
             count++;
         }
+        file.clear();
         file.seekg(kDirOffset, std::ios::beg);
+    }
+
+    if (count == 0)
+    {
+        logger.error("No files found in game archive directory");
+        return false;
     }
 
     entries.resize(count);
@@ -126,11 +243,9 @@ bool GameLODArchive::readDirectory()
         return false;
     }
 
-    // Remove entries with empty names (shouldn't happen, but be safe)
     std::erase_if(entries, [](const GameLODDirectoryEntry& e) { return e.name[0] == '\0'; });
-
-    logger.debug(std::format("Read {} game directory entries", entries.size()));
-
+    directoryMode = DirectoryMode::Standard;
+    mapDataSectionStart = 0;
     if (entries.empty())
     {
         logger.error("No files found in game archive directory");
@@ -149,6 +264,38 @@ std::string GameLODArchive::entryName(const GameLODDirectoryEntry& entry)
         len++;
     }
     return std::string(entry.name, len);
+}
+
+bool GameLODArchive::equalsIgnoreCase(std::string_view lhs, std::string_view rhs)
+{
+    if (lhs.size() != rhs.size())
+    {
+        return false;
+    }
+
+    for (size_t i = 0; i < lhs.size(); i++)
+    {
+        if (std::tolower(static_cast<unsigned char>(lhs[i])) !=
+            std::tolower(static_cast<unsigned char>(rhs[i])))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+std::optional<size_t> GameLODArchive::findEntryIndex(const std::string& filename) const
+{
+    for (size_t i = 0; i < entries.size(); i++)
+    {
+        if (equalsIgnoreCase(entryName(entries[i]), filename))
+        {
+            return i;
+        }
+    }
+
+    return std::nullopt;
 }
 
 std::vector<std::string> GameLODArchive::listFiles() const
@@ -172,65 +319,129 @@ std::optional<std::vector<uint8_t>> GameLODArchive::extractFile(const std::strin
         return std::nullopt;
     }
 
-    // Case-insensitive search
-    const GameLODDirectoryEntry* target = nullptr;
-    for (const auto& entry : entries)
-    {
-        std::string name = entryName(entry);
-        if (name.size() != filename.size())
-        {
-            continue;
-        }
-        bool match = true;
-        for (size_t j = 0; j < name.size(); j++)
-        {
-            if (std::tolower(static_cast<unsigned char>(name[j])) !=
-                std::tolower(static_cast<unsigned char>(filename[j])))
-            {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-        {
-            target = &entry;
-            break;
-        }
-    }
-
-    if (!target)
+    const auto entryIndex = findEntryIndex(filename);
+    if (!entryIndex.has_value())
     {
         logger.debug(std::format("File not found: {}", filename));
         return std::nullopt;
     }
 
-    if (target->offset == 0 || target->size == 0)
+    if (directoryMode == DirectoryMode::MapChapter)
     {
-        logger.error(std::format("Invalid entry for '{}': offset=0x{:X}, size={}", filename,
-                                 target->offset, target->size));
+        return extractMapChapterFile(*entryIndex, filename);
+    }
+
+    return extractStandardFile(entries[*entryIndex], filename);
+}
+
+std::optional<std::vector<uint8_t>>
+GameLODArchive::extractMapChapterFile(size_t entryIndex, const std::string& filename)
+{
+    if (mapDataSectionStart <= 0)
+    {
+        logger.error("Invalid map data section start");
         return std::nullopt;
     }
 
-    // Seek to the data block at the absolute offset
-    file.seekg(static_cast<std::streamoff>(target->offset), std::ios::beg);
+    file.clear();
+    file.seekg(mapDataSectionStart, std::ios::beg);
+    if (!file.good())
+    {
+        logger.error(std::format("Failed to seek to map data section for '{}'", filename));
+        return std::nullopt;
+    }
+
+    for (size_t i = 0; i <= entryIndex; i++)
+    {
+        GameLODChunkHeader chunkHeader{};
+        file.read(reinterpret_cast<char*>(&chunkHeader), sizeof(chunkHeader));
+        if (!file.good())
+        {
+            logger.error(std::format("Failed to read chunk header for '{}'", filename));
+            return std::nullopt;
+        }
+
+        if (chunkHeader.compressedSize == 0)
+        {
+            logger.error(std::format("Invalid compressed size for '{}'", filename));
+            return std::nullopt;
+        }
+
+        if (i != entryIndex)
+        {
+            file.seekg(static_cast<std::streamoff>(chunkHeader.compressedSize), std::ios::cur);
+            if (!file.good())
+            {
+                logger.error(std::format("Failed to skip chunk payload for '{}'", filename));
+                return std::nullopt;
+            }
+            continue;
+        }
+
+        std::vector<uint8_t> compressed(chunkHeader.compressedSize);
+        file.read(reinterpret_cast<char*>(compressed.data()),
+                  static_cast<std::streamsize>(compressed.size()));
+        if (!file.good())
+        {
+            logger.error(std::format("Failed to read compressed payload for '{}'", filename));
+            return std::nullopt;
+        }
+
+        if (chunkHeader.decompressedSize > 0 || looksLikeZlibData(compressed))
+        {
+            const uLongf targetSize = chunkHeader.decompressedSize > 0
+                                          ? static_cast<uLongf>(chunkHeader.decompressedSize)
+                                          : static_cast<uLongf>(compressed.size() * 8);
+            std::vector<uint8_t> decompressed(targetSize);
+            uLongf destLen = targetSize;
+            const int result = uncompress(decompressed.data(), &destLen, compressed.data(),
+                                          static_cast<uLong>(compressed.size()));
+            if (result == Z_OK)
+            {
+                decompressed.resize(destLen);
+                logger.debug(std::format("Extracting: {} (compressed: {}, decompressed: {})",
+                                         filename, chunkHeader.compressedSize, destLen));
+                return decompressed;
+            }
+
+            logger.warning(std::format("zlib decompression failed for '{}' (err={}), returning raw",
+                                       filename, result));
+        }
+
+        logger.debug(std::format("Extracted '{}': {} bytes (raw)", filename, compressed.size()));
+        return compressed;
+    }
+
+    logger.error(std::format("Failed to locate map chunk for '{}'", filename));
+    return std::nullopt;
+}
+
+std::optional<std::vector<uint8_t>>
+GameLODArchive::extractStandardFile(const GameLODDirectoryEntry& entry, const std::string& filename)
+{
+    if (entry.offset == 0 || entry.size == 0)
+    {
+        logger.error(std::format("Invalid entry for '{}': offset=0x{:X}, size={}", filename,
+                                 entry.offset, entry.size));
+        return std::nullopt;
+    }
+
+    file.clear();
+    file.seekg(static_cast<std::streamoff>(entry.offset), std::ios::beg);
     if (!file.good())
     {
         logger.error(
-            std::format("Failed to seek to offset 0x{:X} for '{}'", target->offset, filename));
+            std::format("Failed to seek to offset 0x{:X} for '{}'", entry.offset, filename));
         return std::nullopt;
     }
 
-    // Check if the file is compressed based on directory entry
-    // Uncompressed files in GAMES.LOD (decompressedSize == 0) typically do NOT have the 8-byte
-    // header. Compressed files usually do.
-    bool hasHeader = (target->decompressedSize > 0);
+    const bool hasHeader = (entry.decompressedSize > 0);
 
     std::vector<uint8_t> payload;
     uint32_t metaUncompressed = 0;
 
     if (hasHeader)
     {
-        // Read 8-byte metadata header: [uncompressedSize:4][flags:4]
         uint32_t metaFlags = 0;
         file.read(reinterpret_cast<char*>(&metaUncompressed), 4);
         file.read(reinterpret_cast<char*>(&metaFlags), 4);
@@ -240,8 +451,7 @@ std::optional<std::vector<uint8_t>> GameLODArchive::extractFile(const std::strin
             return std::nullopt;
         }
 
-        // Payload follows the 8-byte header
-        uint32_t payloadSize = (target->size > 8) ? (target->size - 8) : 0;
+        const uint32_t payloadSize = (entry.size > 8) ? (entry.size - 8) : 0;
         if (payloadSize == 0)
         {
             logger.warning(std::format("Zero payload size for '{}'", filename));
@@ -254,13 +464,10 @@ std::optional<std::vector<uint8_t>> GameLODArchive::extractFile(const std::strin
     }
     else
     {
-        // Uncompressed: raw data
-        payload.resize(target->size);
+        payload.resize(entry.size);
         file.read(reinterpret_cast<char*>(payload.data()),
-                  static_cast<std::streamsize>(target->size));
-        // For uncompressed files, metaUncompressed is effectively the file size (though we don't
-        // use it for decompression)
-        metaUncompressed = target->size;
+                  static_cast<std::streamsize>(entry.size));
+        metaUncompressed = entry.size;
     }
 
     if (!file.good())
@@ -270,16 +477,13 @@ std::optional<std::vector<uint8_t>> GameLODArchive::extractFile(const std::strin
         return std::nullopt;
     }
 
-    // Check for zlib compression (magic byte 0x78)
     if (payload.size() >= 2 && payload[0] == 0x78)
     {
-        unsigned long destLen = metaUncompressed > 0
-                                    ? metaUncompressed
-                                    : static_cast<unsigned long>(payload.size() * 4);
+        uLongf destLen = metaUncompressed > 0 ? static_cast<uLongf>(metaUncompressed)
+                                              : static_cast<uLongf>(payload.size() * 4);
         std::vector<uint8_t> decompressed(destLen);
-
-        int result = uncompress(decompressed.data(), &destLen, payload.data(),
-                                static_cast<uLong>(payload.size()));
+        const int result = uncompress(decompressed.data(), &destLen, payload.data(),
+                                      static_cast<uLong>(payload.size()));
         if (result == Z_OK)
         {
             decompressed.resize(destLen);
@@ -292,7 +496,6 @@ std::optional<std::vector<uint8_t>> GameLODArchive::extractFile(const std::strin
                                    filename, result));
     }
 
-    // Not compressed — return raw payload
     logger.debug(std::format("Extracted '{}': {} bytes (raw)", filename, payload.size()));
     return payload;
 }

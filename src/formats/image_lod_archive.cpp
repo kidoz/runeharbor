@@ -10,6 +10,35 @@
 
 namespace runeharbor::formats
 {
+namespace
+{
+bool isPlausibleImageHeader(const ImageFileHeader& header, uint32_t entrySize)
+{
+    if (header.width == 0 || header.height == 0)
+    {
+        return false;
+    }
+
+    if (header.width > 4096 || header.height > 4096)
+    {
+        return false;
+    }
+
+    if (header.compressedSize == 0 || header.compressedSize > entrySize)
+    {
+        return false;
+    }
+
+    const uint64_t minPixels =
+        static_cast<uint64_t>(header.width) * static_cast<uint64_t>(header.height);
+    if (header.decompressedSize != 0 && header.decompressedSize < minPixels)
+    {
+        return false;
+    }
+
+    return true;
+}
+} // namespace
 
 ImageLODArchive::ImageLODArchive(util::ILogger& logger) : logger(logger) {}
 
@@ -262,6 +291,34 @@ std::streamoff ImageLODArchive::calculateDataOffset(const ImageLODDirectoryEntry
 std::optional<std::vector<uint8_t>>
 ImageLODArchive::extractExternal(const ImageLODDirectoryEntry& entry, const std::string& filename)
 {
+    // Mixed BITMAPS.LOD "External" entries often store raw indexed payload directly at
+    // entry.offset, without a 48-byte ImageFileHeader.
+    if (!externalOnly)
+    {
+        const std::streamoff rawOffset =
+            static_cast<std::streamoff>(entry.offset) + static_cast<std::streamoff>(offsetDelta);
+        file.clear();
+        file.seekg(rawOffset, std::ios::beg);
+        if (!file.good())
+        {
+            logger.error(std::format("Failed to seek to 0x{:X} for '{}'",
+                                     static_cast<uint64_t>(rawOffset), filename));
+            return std::nullopt;
+        }
+
+        std::vector<uint8_t> raw(entry.size);
+        file.read(reinterpret_cast<char*>(raw.data()), static_cast<std::streamsize>(raw.size()));
+        if (!file.good())
+        {
+            logger.error(std::format("Failed to read {} bytes for '{}'", raw.size(), filename));
+            return std::nullopt;
+        }
+
+        logger.debug(
+            std::format("Extracted '{}': {} bytes (mixed-external raw)", filename, raw.size()));
+        return raw;
+    }
+
     // External-only archive format (ICONS.LOD):
     // Actual position = entry.offset + offsetDelta
     // Data layout: [48-byte ImageFileHeader][zlib compressed pixel data]
@@ -286,6 +343,12 @@ ImageLODArchive::extractExternal(const ImageLODDirectoryEntry& entry, const std:
     if (!file.good())
     {
         logger.error(std::format("Failed to read image header for '{}'", filename));
+        return std::nullopt;
+    }
+
+    if (!isPlausibleImageHeader(imgHeader, entry.size))
+    {
+        logger.error(std::format("Invalid image header for '{}'", filename));
         return std::nullopt;
     }
 
@@ -549,17 +612,15 @@ std::optional<ImageFileHeader> ImageLODArchive::getFileInfo(const std::string& f
         return imgHeader;
     }
 
-    // For mixed archives with Custom format, read the 48-byte header
-    std::streamoff dataOffset;
+    // Mixed BITMAPS external entries do not have reliable ImageFileHeader metadata.
     if (entryType == ImageEntryType::ExternalFormat)
     {
-        dataOffset = static_cast<std::streamoff>(targetEntry->offset) +
-                     static_cast<std::streamoff>(offsetDelta);
+        return std::nullopt;
     }
-    else
-    {
-        dataOffset = calculateDataOffset(*targetEntry);
-    }
+
+    // For mixed archives with Custom format, read the 48-byte header.
+    std::streamoff dataOffset;
+    dataOffset = calculateDataOffset(*targetEntry);
 
     file.clear();
     file.seekg(dataOffset, std::ios::beg);
@@ -571,6 +632,11 @@ std::optional<ImageFileHeader> ImageLODArchive::getFileInfo(const std::string& f
     ImageFileHeader imgHeader;
     file.read(reinterpret_cast<char*>(&imgHeader), sizeof(ImageFileHeader));
     if (!file.good())
+    {
+        return std::nullopt;
+    }
+
+    if (!isPlausibleImageHeader(imgHeader, targetEntry->size))
     {
         return std::nullopt;
     }
@@ -620,6 +686,10 @@ std::optional<std::vector<uint8_t>> ImageLODArchive::extractPalette(const std::s
     ImageEntryType entryType = detectEntryType(*targetEntry);
     if (externalOnly || entryType == ImageEntryType::ExternalFormat)
     {
+        if (!externalOnly)
+        {
+            return std::nullopt;
+        }
         actualOffset = static_cast<std::streamoff>(targetEntry->offset) +
                        static_cast<std::streamoff>(offsetDelta);
     }
@@ -643,15 +713,18 @@ std::optional<std::vector<uint8_t>> ImageLODArchive::extractPalette(const std::s
         return std::nullopt;
     }
 
-    // Data layout: ImageFileHeader(48B) + compressed_pixels(compressedSize) + palette(768B)
-    // The palette starts at offset: actualOffset + 48 + compressedSize
-    uint32_t remainingAfterPixels =
-        targetEntry->size - sizeof(ImageFileHeader) - imgHeader.compressedSize;
-    if (remainingAfterPixels < 768)
+    if (!isPlausibleImageHeader(imgHeader, targetEntry->size))
     {
-        return std::nullopt; // No embedded palette
+        return std::nullopt;
     }
 
+    if (targetEntry->size < sizeof(ImageFileHeader) + imgHeader.compressedSize + 768)
+    {
+        return std::nullopt;
+    }
+
+    // Data layout: ImageFileHeader(48B) + compressed_pixels(compressedSize) + palette(768B)
+    // The palette starts at offset: actualOffset + 48 + compressedSize
     std::streamoff paletteOffset =
         actualOffset +
         static_cast<std::streamoff>(sizeof(ImageFileHeader) + imgHeader.compressedSize);

@@ -88,6 +88,7 @@ CombatSystem::CombatSystem(util::ILogger& logger) : logger_(logger) {}
 void CombatSystem::loadMonsterData(const std::vector<formats::MonsterEntry>& monsters)
 {
     monsterDefs_.clear();
+    warnedUnknownMonsterIds_.clear();
     for (const auto& m : monsters)
     {
         monsterDefs_[m.id] = m;
@@ -121,29 +122,51 @@ void CombatSystem::setPartyHostilityByMonsterId(std::unordered_map<int, bool> ho
 int CombatSystem::spawnMonster(int monsterId, float x, float y, float z, int group)
 {
     auto it = monsterDefs_.find(monsterId);
-    if (it == monsterDefs_.end())
+    const formats::MonsterEntry* def = nullptr;
+    if (it != monsterDefs_.end())
     {
-        logger_.warning("Unknown monster ID: " + std::to_string(monsterId));
-        return -1;
+        def = &it->second;
+    }
+    else
+    {
+        if (warnedUnknownMonsterIds_.insert(monsterId).second)
+        {
+            logger_.warning("Unknown monster ID: " + std::to_string(monsterId) +
+                            " (using fallback definition)");
+        }
     }
 
-    const auto& def = it->second;
+    formats::MonsterEntry fallback;
+    if (!def)
+    {
+        fallback.id = monsterId;
+        fallback.name = "Unknown " + std::to_string(monsterId);
+        fallback.level = std::max(1, monsterId);
+        fallback.hitPoints = std::max(10, 15 + fallback.level * 2);
+        fallback.armorClass = std::max(0, fallback.level / 2);
+        fallback.experience = fallback.level * 8;
+        fallback.speed = 120;
+        fallback.recovery = 100;
+        fallback.aiType = "Aggress";
+        def = &fallback;
+    }
+
     MonsterInstance inst;
     inst.monsterId = monsterId;
-    inst.name = def.name;
-    inst.currentHP = def.hitPoints;
-    inst.maxHP = def.hitPoints;
-    inst.armorClass = def.armorClass;
-    inst.level = def.level;
-    inst.experience = def.experience;
-    inst.speed = def.speed;
+    inst.name = def->name;
+    inst.currentHP = def->hitPoints;
+    inst.maxHP = def->hitPoints;
+    inst.armorClass = def->armorClass;
+    inst.level = def->level;
+    inst.experience = def->experience;
+    inst.speed = def->speed;
     inst.recoveryTime = 0;
     inst.x = x;
     inst.y = y;
     inst.z = z;
     inst.group = group;
     inst.aiState = MonsterInstance::AIState::Standing;
-    inst.personality = parsePersonality(def.aiType);
+    inst.personality = parsePersonality(def->aiType);
     inst.hostile = (inst.personality != MonsterInstance::Personality::Friendly);
     if (auto itHostility = partyHostilityByMonsterId_.find(monsterId);
         itHostility != partyHostilityByMonsterId_.end())
@@ -156,16 +179,16 @@ int CombatSystem::spawnMonster(int monsterId, float x, float y, float z, int gro
         inst.aggroRange *= 1.5f;
     }
 
-    inst.resistFire = def.resistFire;
-    inst.resistAir = def.resistAir;
-    inst.resistWater = def.resistWater;
-    inst.resistEarth = def.resistEarth;
-    inst.resistMind = def.resistMind;
-    inst.resistSpirit = def.resistSpirit;
-    inst.resistBody = def.resistBody;
-    inst.resistLight = def.resistLight;
-    inst.resistDark = def.resistDark;
-    inst.resistPhysical = def.resistPhysical;
+    inst.resistFire = def->resistFire;
+    inst.resistAir = def->resistAir;
+    inst.resistWater = def->resistWater;
+    inst.resistEarth = def->resistEarth;
+    inst.resistMind = def->resistMind;
+    inst.resistSpirit = def->resistSpirit;
+    inst.resistBody = def->resistBody;
+    inst.resistLight = def->resistLight;
+    inst.resistDark = def->resistDark;
+    inst.resistPhysical = def->resistPhysical;
 
     int index = static_cast<int>(monsters_.size());
     monsters_.push_back(std::move(inst));

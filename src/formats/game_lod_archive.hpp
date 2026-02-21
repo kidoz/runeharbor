@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <fstream>
@@ -15,22 +16,16 @@ namespace runeharbor::formats
 {
 
 /**
- * GAMES.LOD Archive Format
- *
- * Standard LOD container holding map files (.blv, .odm, .dlv, .ddm).
- * Uses the same 256-byte header and 32-byte directory entry format as
- * all other LOD archives (Events.lod, BITMAPS.LOD, etc.).
+ * Game/archive LOD format used for:
+ * - map container files (e.g. GAMES.LOD with "maps" chapter + sequential chunks)
+ * - save archives (save###.mm7 with standard LOD directory and per-file data headers)
  *
  * Directory entry (32 bytes):
  *   0x00  name[16]          Null-terminated filename
- *   0x10  offset(u32)       Absolute byte offset to data block
- *   0x14  size(u32)         Total data block size (8-byte header + payload)
- *   0x18  decompressedSize  Uncompressed size (0 = not compressed)
- *   0x1C  reserved(u32)     Padding / flags
- *
- * Each data block starts with an 8-byte metadata header:
- *   [4 bytes: uncompressed size][4 bytes: flags]
- * followed by the payload (zlib-compressed or raw).
+ *   0x10  offset(u32)       Entry offset (semantics depend on archive mode)
+ *   0x14  size(u32)         Stored data size metadata
+ *   0x18  decompressedSize  Uncompressed size hint
+ *   0x1C  reserved(u32)     Flags / counters (mode-dependent)
  */
 
 #pragma pack(push, 1)
@@ -79,10 +74,25 @@ class GameLODArchive
     std::optional<std::vector<uint8_t>> extractFile(const std::string& filename);
 
   private:
+    enum class DirectoryMode
+    {
+        Standard,
+        MapChapter,
+    };
+
     bool readHeader();
     bool readDirectory();
+    bool readStandardDirectory();
+    bool readMapChapterDirectory();
 
     static std::string entryName(const GameLODDirectoryEntry& entry);
+    static bool equalsIgnoreCase(std::string_view lhs, std::string_view rhs);
+
+    std::optional<size_t> findEntryIndex(const std::string& filename) const;
+    std::optional<std::vector<uint8_t>> extractStandardFile(const GameLODDirectoryEntry& entry,
+                                                            const std::string& filename);
+    std::optional<std::vector<uint8_t>> extractMapChapterFile(size_t entryIndex,
+                                                              const std::string& filename);
 
     util::ILogger& logger;
     std::ifstream file;
@@ -91,6 +101,8 @@ class GameLODArchive
 
     GameLODHeader header_{};
     std::vector<GameLODDirectoryEntry> entries;
+    DirectoryMode directoryMode = DirectoryMode::Standard;
+    std::streamoff mapDataSectionStart = 0;
 };
 
 } // namespace runeharbor::formats

@@ -79,26 +79,44 @@ test-coverage: build
 # Run clang static analyzer (scan-build)
 analyze:
     @echo "Running Clang Static Analyzer..."
-    @if ! command -v scan-build >/dev/null 2>&1; then \
-        echo "Error: scan-build is not installed or not on PATH."; \
-        echo "Install LLVM/clang analyzer tools, then rerun: just analyze"; \
+    @analyzer="$(command -v scan-build 2>/dev/null || true)"; \
+    if [ -z "$analyzer" ]; then \
+        analyzer="$(xcrun --find scan-build 2>/dev/null || true)"; \
+    fi; \
+    if [ -z "$analyzer" ]; then \
+        llvm_prefix="$(brew --prefix llvm 2>/dev/null || true)"; \
+        if [ -n "$llvm_prefix" ] && [ -x "$llvm_prefix/bin/scan-build" ]; then \
+            analyzer="$llvm_prefix/bin/scan-build"; \
+        fi; \
+    fi; \
+    if [ -z "$analyzer" ]; then \
+        echo "Error: scan-build is not installed or not discoverable via xcrun."; \
+        echo "Install LLVM tools, then rerun: just analyze"; \
+        echo "Hint (Homebrew): brew install llvm"; \
         exit 1; \
-    fi
-    @rm -rf {{build_dir}}-analyze
-    scan-build -o {{build_dir}}-analyze/report meson setup {{build_dir}}-analyze --buildtype=debug
-    scan-build -o {{build_dir}}-analyze/report ninja -C {{build_dir}}-analyze
+    fi; \
+    rm -rf {{build_dir}}-analyze; \
+    "$analyzer" -o {{build_dir}}-analyze/report meson setup {{build_dir}}-analyze --buildtype=debug; \
+    "$analyzer" -o {{build_dir}}-analyze/report ninja -C {{build_dir}}-analyze src/runeharbor tests/runeharbor_tests
     @echo ""
     @echo "Analysis complete. Check {{build_dir}}-analyze/report/ for results"
 
 # Run clang-tidy on all source files
 tidy:
     @echo "Running clang-tidy..."
-    @if ! command -v clang-tidy >/dev/null 2>&1; then \
-        echo "Error: clang-tidy is not installed or not on PATH."; \
+    @tidy_bin="$(command -v clang-tidy 2>/dev/null || true)"; \
+    if [ -z "$tidy_bin" ]; then \
+        llvm_prefix="$(brew --prefix llvm 2>/dev/null || true)"; \
+        if [ -n "$llvm_prefix" ] && [ -x "$llvm_prefix/bin/clang-tidy" ]; then \
+            tidy_bin="$llvm_prefix/bin/clang-tidy"; \
+        fi; \
+    fi; \
+    if [ -z "$tidy_bin" ]; then \
+        echo "Error: clang-tidy is not installed or not discoverable."; \
         echo "Install clang-tidy, then rerun: just tidy"; \
         exit 1; \
     fi
-    find src -name "*.cpp" | xargs clang-tidy -p {{build_dir}} --
+    find src -name "*.cpp" | xargs "$tidy_bin" -p {{build_dir}} --
 
 # Run all static analysis tools
 analyze-all: analyze tidy

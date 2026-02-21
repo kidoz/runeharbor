@@ -2033,6 +2033,8 @@ void Application::finalizeLoadingTask()
     {
         logger.info("finalizeLoadingTask: success, transitioning to InGame");
         mapScene = std::move(loadedScene);
+        // Keep state context in sync before the first InGame render to avoid stale pointers.
+        updateStateContext();
         mapLoaded = true;
         configureCameraForMap();
         wireUpMapTextures();
@@ -3962,11 +3964,38 @@ void Application::setBootConfig(const BootConfig& config)
 
     if (sharedData)
     {
+        constexpr int kDefaultViewportX = 8;
+        constexpr int kDefaultViewportY = 8;
+        constexpr int kDefaultViewportWidth = 468;
+        constexpr int kDefaultViewportHeight = 351;
+        constexpr int kMinSafeViewportWidth = 64;
+        constexpr int kMinSafeViewportHeight = 64;
+
+        int worldVpX = std::clamp(config.viewportX, 0, kGameWidth - 1);
+        int worldVpY = std::clamp(config.viewportY, 0, kGameHeight - 1);
+        int worldVpW = std::clamp(config.viewportWidth, 1, kGameWidth);
+        int worldVpH = std::clamp(config.viewportHeight, 1, kGameHeight);
+
+        worldVpW = std::min(worldVpW, kGameWidth - worldVpX);
+        worldVpH = std::min(worldVpH, kGameHeight - worldVpY);
+        if (worldVpW < kMinSafeViewportWidth || worldVpH < kMinSafeViewportHeight)
+        {
+            logger.warning(std::format("Boot viewport {}x{} at ({},{}) is too small; restoring "
+                                       "{}x{} at ({},{})",
+                                       worldVpW, worldVpH, worldVpX, worldVpY,
+                                       kDefaultViewportWidth, kDefaultViewportHeight,
+                                       kDefaultViewportX, kDefaultViewportY));
+            worldVpX = kDefaultViewportX;
+            worldVpY = kDefaultViewportY;
+            worldVpW = kDefaultViewportWidth;
+            worldVpH = kDefaultViewportHeight;
+        }
+
         sharedData->showFrameRate = config.showFr;
-        sharedData->worldViewportX = std::max(0, config.viewportX);
-        sharedData->worldViewportY = std::max(0, config.viewportY);
-        sharedData->worldViewportWidth = std::max(1, config.viewportWidth);
-        sharedData->worldViewportHeight = std::max(1, config.viewportHeight);
+        sharedData->worldViewportX = worldVpX;
+        sharedData->worldViewportY = worldVpY;
+        sharedData->worldViewportWidth = worldVpW;
+        sharedData->worldViewportHeight = worldVpH;
     }
 
     graphics::TerrainLOD::configureFromGridBands(config.gridBand1, config.gridBand2,

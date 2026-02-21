@@ -734,9 +734,32 @@ bool BLVMap::parseTrailingData(const std::vector<uint8_t>& data, size_t& offset)
         }
     }
 
-    // 17. Map outlines (count-prefixed, 12 bytes each) - skip
-    uint32_t outlineCount = 0;
-    skipCountPrefixed(data, offset, 12, outlineCount);
+    // 17. Map outlines (count-prefixed, 12 bytes each)
+    if (offset + 4 > data.size())
+    {
+        logger.debug("No space for outline count");
+        return true;
+    }
+
+    const uint32_t outlineCount = *reinterpret_cast<const uint32_t*>(data.data() + offset);
+    offset += 4;
+    constexpr size_t outlineSize = sizeof(BLVOutlinePoint);
+    const size_t outlinesSize = static_cast<size_t>(outlineCount) * outlineSize;
+
+    if (offset + outlinesSize > data.size())
+    {
+        logger.warning(std::format("Outline data exceeds file: count={}, need={} bytes at 0x{:X}",
+                                   outlineCount, outlinesSize, offset));
+        return true;
+    }
+
+    mapData.outlines.resize(outlineCount);
+    if (outlineCount > 0)
+    {
+        std::memcpy(mapData.outlines.data(), data.data() + offset, outlinesSize);
+        offset += outlinesSize;
+    }
+    logger.debug(std::format("Parsed {} outline points", outlineCount));
 
     return true;
 }
