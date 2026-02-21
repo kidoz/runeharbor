@@ -775,6 +775,15 @@ bool SmackerDecoder::decodeVideoData(BitReader& bits, bool /*hasKeyframe*/)
         return true;
     }
 
+    // Run length lookup table (per FFmpeg): indices 0-58 are sequential,
+    // indices 59-63 jump to powers of two for large block runs
+    static constexpr uint32_t blockRuns[64] = {
+        1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,   16,
+        17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,   32,
+        33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,   48,
+        49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,  128, 256, 512, 1024, 2048,
+    };
+
     uint32_t blocksWide = (header_.width + 3) / 4;
     uint32_t originalHeight = doubleHigh_ ? header_.height / 2 : header_.height;
     uint32_t blocksHigh = (originalHeight + 3) / 4;
@@ -784,12 +793,12 @@ bool SmackerDecoder::decodeVideoData(BitReader& bits, bool /*hasKeyframe*/)
     while (blockIdx < totalBlocks)
     {
         uint16_t typeDesc = typeTree_->decode(bits);
-        // Type descriptor format per libsmacker:
+        // Type descriptor format:
         // - bits 0-1: block type (0-3)
-        // - bits 2-7: run length - 1 (6 bits)
-        // - bits 8-15: type data (8 bits, used as fill color for SOLID blocks)
+        // - bits 2-7: run index (6 bits, lookup in blockRuns[])
+        // - bits 8-15: type data (8 bits, used as fill color for FILL blocks)
         BlockType blockType = static_cast<BlockType>(typeDesc & 3);
-        uint32_t runLength = ((typeDesc >> 2) & 0x3F) + 1;
+        uint32_t runLength = blockRuns[(typeDesc >> 2) & 0x3F];
         uint8_t typeData = static_cast<uint8_t>((typeDesc >> 8) & 0xFF);
 
         for (uint32_t r = 0; r < runLength && blockIdx < totalBlocks; r++, blockIdx++)
@@ -807,13 +816,8 @@ bool SmackerDecoder::decodeVideoData(BitReader& bits, bool /*hasKeyframe*/)
 
             case BLOCK_FILL:
             {
-                // SOLID/FILL blocks
-                if (isV4_)
-                {
-                    // In v4, fill color usually comes from MMAP tree
-                    uint16_t val = mmapTree_ ? mmapTree_->decode(bits) : 0;
-                    typeData = static_cast<uint8_t>(val & 0xFF);
-                }
+                // SOLID/FILL: color comes from type descriptor high byte
+                // Same for both SMK2 and SMK4 (per FFmpeg reference)
                 decodeBlockFill(x, y, typeData);
                 break;
             }
@@ -945,86 +949,166 @@ void SmackerDecoder::decodeBlockFull(BitReader& bits, uint32_t x, uint32_t y)
         return;
     }
 
-    // Per libsmacker/FFmpeg: "The 4x4 block is divided into 4 2x2 blocks."
-    for (int i = 0; i < 4; i++)
+    // Determine v4 mode from bitstream (per FFmpeg reference):
+    //   if SMK4: bit1=1 → mode 1 (solid); bit1=0 & bit2=1 → mode 2 (two-color); else mode 0
+    //   if SMK2: always mode 0
+    int mode = 0;
+    if (isV4_)
     {
-        uint32_t subX = x + (i & 1) * 2;
-        uint32_t subY = y + (i >> 1) * 2 * (doubleHigh_ ? 2 : 1);
-
-        bool isSolid = false;
-        if (isV4_)
+        if (bits.readBit())
         {
-            isSolid = bits.readBit();
+            mode = 1;
         }
-
-        if (isSolid)
+        else if (bits.readBit())
         {
-            // v4 Solid sub-block
-            uint16_t val = mclrTree_ ? mclrTree_->decode(bits) : 0;
-            uint8_t color = static_cast<uint8_t>(val & 0xFF);
-            // uint8_t colorHi = static_cast<uint8_t>(val >> 8);
-            // Note: libsmacker uses low byte. Some sources say high byte is another color?
-            // FFmpeg says: val = get_vlc2(... mclr ...); *p++ = val; *p++ = val; ...
-            // So it fills with the value.
-            // But wait, mclrTree returns 16-bit.
-            // In v4 mono blocks, it returns 2 colors (low/high).
-            // Here, it seems to be just one color for solid fill.
-            // Let's assume low byte.
+            mode = 2;
+        }
+    }
 
-            uint32_t targetY = subY;
-            if (targetY < header_.height)
+    uint32_t yStep = doubleHigh_ ? 2 : 1;
+
+    if (mode == 0)
+    {
+        // Mode 0 (SMK2 default): Row-by-row, 2 reads per row, right pair first
+        // Per FFmpeg: for each of 4 rows, read right pair then left pair
+        for (int row = 0; row < 4; row++)
+        {
+            uint16_t pixRight = fullTree_->decode(bits);
+            uint16_t pixLeft = fullTree_->decode(bits);
+
+            uint32_t targetY = y + static_cast<uint32_t>(row) * yStep;
+            if (targetY >= header_.height)
             {
-                frameBuffer_[targetY * header_.width + subX] = color;
-                frameBuffer_[targetY * header_.width + subX + 1] = color;
-                if (doubleHigh_ && (targetY + 1) < header_.height)
-                {
-                    frameBuffer_[(targetY + 1) * header_.width + subX] = color;
-                    frameBuffer_[(targetY + 1) * header_.width + subX + 1] = color;
-                }
+                continue;
             }
 
-            targetY = subY + (doubleHigh_ ? 2 : 1);
-            if (targetY < header_.height)
+            size_t rowBase = targetY * header_.width;
+
+            // Left pair: pixLeft low byte → x+0, pixLeft high byte → x+1
+            if (x < header_.width)
             {
-                frameBuffer_[targetY * header_.width + subX] = color;
-                frameBuffer_[targetY * header_.width + subX + 1] = color;
-                if (doubleHigh_ && (targetY + 1) < header_.height)
+                frameBuffer_[rowBase + x] = static_cast<uint8_t>(pixLeft & 0xFF);
+            }
+            if (x + 1 < header_.width)
+            {
+                frameBuffer_[rowBase + x + 1] = static_cast<uint8_t>(pixLeft >> 8);
+            }
+
+            // Right pair: pixRight low byte → x+2, pixRight high byte → x+3
+            if (x + 2 < header_.width)
+            {
+                frameBuffer_[rowBase + x + 2] = static_cast<uint8_t>(pixRight & 0xFF);
+            }
+            if (x + 3 < header_.width)
+            {
+                frameBuffer_[rowBase + x + 3] = static_cast<uint8_t>(pixRight >> 8);
+            }
+
+            // Duplicate row for doubleHigh_
+            if (doubleHigh_ && (targetY + 1) < header_.height)
+            {
+                size_t dupBase = (targetY + 1) * header_.width;
+                if (x < header_.width)
                 {
-                    frameBuffer_[(targetY + 1) * header_.width + subX] = color;
-                    frameBuffer_[(targetY + 1) * header_.width + subX + 1] = color;
+                    frameBuffer_[dupBase + x] = static_cast<uint8_t>(pixLeft & 0xFF);
+                }
+                if (x + 1 < header_.width)
+                {
+                    frameBuffer_[dupBase + x + 1] = static_cast<uint8_t>(pixLeft >> 8);
+                }
+                if (x + 2 < header_.width)
+                {
+                    frameBuffer_[dupBase + x + 2] = static_cast<uint8_t>(pixRight & 0xFF);
+                }
+                if (x + 3 < header_.width)
+                {
+                    frameBuffer_[dupBase + x + 3] = static_cast<uint8_t>(pixRight >> 8);
                 }
             }
         }
-        else
+    }
+    else if (mode == 1)
+    {
+        // Mode 1 (SMK4 solid): 2 reads from full tree, each fills 4×2 stripe
+        // First value → rows 0-1, second value → rows 2-3
+        // Low byte fills columns 0-1, high byte fills columns 2-3
+        for (int half = 0; half < 2; half++)
         {
-            // Standard pixel decoding (2 pairs of pixels)
-            for (int j = 0; j < 2; j++)
+            uint16_t pix = fullTree_->decode(bits);
+            auto lo = static_cast<uint8_t>(pix & 0xFF);
+            auto hi = static_cast<uint8_t>(pix >> 8);
+
+            for (int row = 0; row < 2; row++)
             {
-                uint16_t val = fullTree_->decode(bits);
-                uint8_t p0 = static_cast<uint8_t>(val & 0xFF);
-                uint8_t p1 = static_cast<uint8_t>((val >> 8) & 0xFF);
-
-                uint32_t px = subX + j;
-                if (px < header_.width)
+                uint32_t targetY = y + static_cast<uint32_t>(half * 2 + row) * yStep;
+                if (targetY >= header_.height)
                 {
-                    if (subY < header_.height)
-                    {
-                        frameBuffer_[subY * header_.width + px] = p0;
-                        if (doubleHigh_ && (subY + 1) < header_.height)
-                        {
-                            frameBuffer_[(subY + 1) * header_.width + px] = p0;
-                        }
-                    }
+                    continue;
+                }
 
-                    uint32_t targetY1 = subY + (doubleHigh_ ? 2 : 1);
-                    if (targetY1 < header_.height)
-                    {
-                        frameBuffer_[targetY1 * header_.width + px] = p1;
-                        if (doubleHigh_ && (targetY1 + 1) < header_.height)
-                        {
-                            frameBuffer_[(targetY1 + 1) * header_.width + px] = p1;
-                        }
-                    }
+                size_t rowBase = targetY * header_.width;
+                if (x < header_.width)
+                    frameBuffer_[rowBase + x] = lo;
+                if (x + 1 < header_.width)
+                    frameBuffer_[rowBase + x + 1] = lo;
+                if (x + 2 < header_.width)
+                    frameBuffer_[rowBase + x + 2] = hi;
+                if (x + 3 < header_.width)
+                    frameBuffer_[rowBase + x + 3] = hi;
+
+                if (doubleHigh_ && (targetY + 1) < header_.height)
+                {
+                    size_t dupBase = (targetY + 1) * header_.width;
+                    if (x < header_.width)
+                        frameBuffer_[dupBase + x] = lo;
+                    if (x + 1 < header_.width)
+                        frameBuffer_[dupBase + x + 1] = lo;
+                    if (x + 2 < header_.width)
+                        frameBuffer_[dupBase + x + 2] = hi;
+                    if (x + 3 < header_.width)
+                        frameBuffer_[dupBase + x + 3] = hi;
+                }
+            }
+        }
+    }
+    else
+    {
+        // Mode 2 (SMK4 two-color): 2 pairs of reads, each pair fills 2 rows
+        // Per FFmpeg: read right pair then left pair, replicate across 2 rows
+        for (int half = 0; half < 2; half++)
+        {
+            uint16_t pixRight = fullTree_->decode(bits);
+            uint16_t pixLeft = fullTree_->decode(bits);
+
+            for (int row = 0; row < 2; row++)
+            {
+                uint32_t targetY = y + static_cast<uint32_t>(half * 2 + row) * yStep;
+                if (targetY >= header_.height)
+                {
+                    continue;
+                }
+
+                size_t rowBase = targetY * header_.width;
+                if (x < header_.width)
+                    frameBuffer_[rowBase + x] = static_cast<uint8_t>(pixLeft & 0xFF);
+                if (x + 1 < header_.width)
+                    frameBuffer_[rowBase + x + 1] = static_cast<uint8_t>(pixLeft >> 8);
+                if (x + 2 < header_.width)
+                    frameBuffer_[rowBase + x + 2] = static_cast<uint8_t>(pixRight & 0xFF);
+                if (x + 3 < header_.width)
+                    frameBuffer_[rowBase + x + 3] = static_cast<uint8_t>(pixRight >> 8);
+
+                if (doubleHigh_ && (targetY + 1) < header_.height)
+                {
+                    size_t dupBase = (targetY + 1) * header_.width;
+                    if (x < header_.width)
+                        frameBuffer_[dupBase + x] = static_cast<uint8_t>(pixLeft & 0xFF);
+                    if (x + 1 < header_.width)
+                        frameBuffer_[dupBase + x + 1] = static_cast<uint8_t>(pixLeft >> 8);
+                    if (x + 2 < header_.width)
+                        frameBuffer_[dupBase + x + 2] = static_cast<uint8_t>(pixRight & 0xFF);
+                    if (x + 3 < header_.width)
+                        frameBuffer_[dupBase + x + 3] = static_cast<uint8_t>(pixRight >> 8);
                 }
             }
         }

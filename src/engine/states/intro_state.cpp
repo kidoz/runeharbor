@@ -17,6 +17,7 @@ IntroState::~IntroState() = default;
 void IntroState::setPlaylist(std::vector<media::VideoClip> pl)
 {
     playlist = std::move(pl);
+    hasVideo = !playlist.empty();
 }
 
 void IntroState::enter()

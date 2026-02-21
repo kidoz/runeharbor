@@ -14,11 +14,6 @@ namespace
 {
 bool isPlausibleImageHeader(const ImageFileHeader& header, uint32_t entrySize)
 {
-    if (header.width == 0 || header.height == 0)
-    {
-        return false;
-    }
-
     if (header.width > 4096 || header.height > 4096)
     {
         return false;
