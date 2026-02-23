@@ -208,13 +208,13 @@ struct Huff8Tree
 
             if (bits.readBit())
             {
-                // Left branch (next entry)
-                index++;
+                // Right branch
+                index = tree[index] & HUFF8_LEAF_MASK;
             }
             else
             {
-                // Right branch
-                index = tree[index] & HUFF8_LEAF_MASK;
+                // Left branch (next entry)
+                index++;
             }
         }
 
@@ -863,6 +863,7 @@ void SmackerDecoder::decodePalette(const uint8_t* data, size_t size)
 {
     size_t srcPos = 0;
     size_t palIdx = 0;
+    std::vector<uint8_t> oldPalette = palette_;
 
     while (srcPos < size && palIdx < 256)
     {
@@ -887,11 +888,11 @@ void SmackerDecoder::decodePalette(const uint8_t* data, size_t size)
             {
                 size_t src = (static_cast<size_t>(srcIdx) + i) * 3;
                 size_t dst = palIdx * 3;
-                if (src + 2 < palette_.size() && dst + 2 < palette_.size())
+                if (src + 2 < oldPalette.size() && dst + 2 < palette_.size())
                 {
-                    palette_[dst + 0] = palette_[src + 0];
-                    palette_[dst + 1] = palette_[src + 1];
-                    palette_[dst + 2] = palette_[src + 2];
+                    palette_[dst + 0] = oldPalette[src + 0];
+                    palette_[dst + 1] = oldPalette[src + 1];
+                    palette_[dst + 2] = oldPalette[src + 2];
                 }
             }
         }
