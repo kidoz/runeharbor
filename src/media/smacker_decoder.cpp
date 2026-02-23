@@ -134,21 +134,29 @@ struct Huff8Tree
         return true;
     }
 
-    bool build(BitReader& bits)
+    bool build(BitReader& bits, bool checkPresence = true)
     {
         tree.clear();
         leafValues.clear();
         size = 0;
         leafCursor = 0;
 
-        // Check presence bit
-        if (!bits.readBit())
+        if (checkPresence)
         {
-            // Empty tree - single leaf with value 0
-            tree.push_back(0);
-            leafValues.push_back(0);
-            size = 1;
-            return true;
+            // Check presence bit
+            if (!bits.readBit())
+            {
+                // Empty tree - single leaf with value 0
+                tree.push_back(0);
+                leafValues.push_back(0);
+                size = 1;
+                return true;
+            }
+        }
+        else
+        {
+            // Skip dummy bit
+            bits.skipBits(1);
         }
 
         // Build tree recursively
@@ -157,8 +165,16 @@ struct Huff8Tree
             return false;
         }
 
-        // Consume terminator bit
-        bits.readBit();
+        if (checkPresence)
+        {
+            // Consume terminator bit
+            bits.readBit();
+        }
+        else
+        {
+            // Skip trailing dummy bit
+            bits.skipBits(1);
+        }
 
         return true;
     }
@@ -192,13 +208,13 @@ struct Huff8Tree
 
             if (bits.readBit())
             {
-                // Right branch
-                index = tree[index] & HUFF8_LEAF_MASK;
+                // Left branch (next entry)
+                index++;
             }
             else
             {
-                // Left branch (next entry)
-                index++;
+                // Right branch
+                index = tree[index] & HUFF8_LEAF_MASK;
             }
         }
 
@@ -1491,6 +1507,9 @@ bool SmackerDecoder::decodeAudioTrack(const uint8_t* data, size_t size, int trac
         return false;
     }
 
+    for (size_t i = 0; i < std::min(size, size_t(16)); i++) {
+    }
+
     outAudio.sampleRate = info.sampleRate;
     outAudio.channels = info.isStereo ? 2 : 1;
     outAudio.is16Bit = info.is16Bit;
@@ -1551,7 +1570,7 @@ bool SmackerDecoder::decodeAudioTrack(const uint8_t* data, size_t size, int trac
     std::vector<Huff8Tree> audioTrees(numTrees);
     for (int i = 0; i < numTrees; i++)
     {
-        if (!audioTrees[i].build(bits))
+        if (!audioTrees[i].build(bits, false))
         {
             return false;
         }
@@ -1562,16 +1581,23 @@ bool SmackerDecoder::decodeAudioTrack(const uint8_t* data, size_t size, int trac
 
     if (is16Bit)
     {
-        // 16-bit: base values are read as 16 bits (LSB first)
+        // 16-bit: high byte first, then low byte
         // Right channel first if stereo, then left
         if (isStereo)
         {
-            bases[1] = static_cast<int16_t>(bits.readBits(16));
-            bases[0] = static_cast<int16_t>(bits.readBits(16));
+            int16_t rightHi = static_cast<int16_t>(bits.readBits(8));
+            int16_t rightLo = static_cast<int16_t>(bits.readBits(8));
+            bases[1] = static_cast<int16_t>((rightHi << 8) | rightLo);
+
+            int16_t leftHi = static_cast<int16_t>(bits.readBits(8));
+            int16_t leftLo = static_cast<int16_t>(bits.readBits(8));
+            bases[0] = static_cast<int16_t>((leftHi << 8) | leftLo);
         }
         else
         {
-            bases[0] = static_cast<int16_t>(bits.readBits(16));
+            int16_t hi = static_cast<int16_t>(bits.readBits(8));
+            int16_t lo = static_cast<int16_t>(bits.readBits(8));
+            bases[0] = static_cast<int16_t>((hi << 8) | lo);
         }
     }
     else
@@ -1611,8 +1637,8 @@ bool SmackerDecoder::decodeAudioTrack(const uint8_t* data, size_t size, int trac
             {
                 // Decode low byte delta, then high byte delta.
                 // Smacker relies on wraparound arithmetic, not clamping.
-                int treeIdxLo = static_cast<int>(ch);
-                int treeIdxHi = static_cast<int>(ch + channelCount);
+                int treeIdxLo = static_cast<int>(ch * 2);
+                int treeIdxHi = static_cast<int>(ch * 2 + 1);
 
                 uint16_t deltaLo = static_cast<uint16_t>(audioTrees[treeIdxLo].lookup(bits));
                 uint16_t deltaHi = static_cast<uint16_t>(audioTrees[treeIdxHi].lookup(bits));
