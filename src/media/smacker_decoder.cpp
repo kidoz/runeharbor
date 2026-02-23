@@ -409,11 +409,11 @@ struct SmackerDecoder::BigHuffmanTree
 
     void resetCache()
     {
-        // Reset cache to original values read during tree building
-        // This is required at the start of each frame
-        cache[0] = originalCache[0];
-        cache[1] = originalCache[1];
-        cache[2] = originalCache[2];
+        // Reset cache to 0 at the start of each frame
+        // This matches FFmpeg's last_reset behavior
+        cache[0] = 0;
+        cache[1] = 0;
+        cache[2] = 0;
     }
 };
 
@@ -778,10 +778,10 @@ bool SmackerDecoder::decodeVideoData(BitReader& bits, bool /*hasKeyframe*/)
     // Run length lookup table (per FFmpeg): indices 0-58 are sequential,
     // indices 59-63 jump to powers of two for large block runs
     static constexpr uint32_t blockRuns[64] = {
-        1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,   16,
-        17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,   32,
-        33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,   48,
-        49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,  128, 256, 512, 1024, 2048,
+        1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12,  13,  14,  15,   16,
+        17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,  29,  30,  31,   32,
+        33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,  45,  46,  47,   48,
+        49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 128, 256, 512, 1024, 2048,
     };
 
     uint32_t blocksWide = (header_.width + 3) / 4;
@@ -1562,23 +1562,16 @@ bool SmackerDecoder::decodeAudioTrack(const uint8_t* data, size_t size, int trac
 
     if (is16Bit)
     {
-        // 16-bit: high byte first, then low byte
+        // 16-bit: base values are read as 16 bits (LSB first)
         // Right channel first if stereo, then left
         if (isStereo)
         {
-            int16_t rightHi = static_cast<int16_t>(bits.readBits(8));
-            int16_t rightLo = static_cast<int16_t>(bits.readBits(8));
-            bases[1] = static_cast<int16_t>((rightHi << 8) | rightLo);
-
-            int16_t leftHi = static_cast<int16_t>(bits.readBits(8));
-            int16_t leftLo = static_cast<int16_t>(bits.readBits(8));
-            bases[0] = static_cast<int16_t>((leftHi << 8) | leftLo);
+            bases[1] = static_cast<int16_t>(bits.readBits(16));
+            bases[0] = static_cast<int16_t>(bits.readBits(16));
         }
         else
         {
-            int16_t hi = static_cast<int16_t>(bits.readBits(8));
-            int16_t lo = static_cast<int16_t>(bits.readBits(8));
-            bases[0] = static_cast<int16_t>((hi << 8) | lo);
+            bases[0] = static_cast<int16_t>(bits.readBits(16));
         }
     }
     else
@@ -1618,8 +1611,8 @@ bool SmackerDecoder::decodeAudioTrack(const uint8_t* data, size_t size, int trac
             {
                 // Decode low byte delta, then high byte delta.
                 // Smacker relies on wraparound arithmetic, not clamping.
-                int treeIdxLo = static_cast<int>(ch * 2);
-                int treeIdxHi = static_cast<int>(ch * 2 + 1);
+                int treeIdxLo = static_cast<int>(ch);
+                int treeIdxHi = static_cast<int>(ch + channelCount);
 
                 uint16_t deltaLo = static_cast<uint16_t>(audioTrees[treeIdxLo].lookup(bits));
                 uint16_t deltaHi = static_cast<uint16_t>(audioTrees[treeIdxHi].lookup(bits));
