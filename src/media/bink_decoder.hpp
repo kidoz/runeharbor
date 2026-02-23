@@ -172,12 +172,12 @@ class BinkBundle
   public:
     void reset();
     void buildTree(BinkBitReader& bits, BinkBundleType type);
-    bool readBlockTypes(BinkBitReader& bits);
-    bool readColors(BinkBitReader& bits);
-    bool readPatterns(BinkBitReader& bits);
-    bool readMotionValues(BinkBitReader& bits);
-    bool readDCs(BinkBitReader& bits, int startBits, bool hasSign);
-    bool readRuns(BinkBitReader& bits);
+    bool readBlockTypes(BinkBitReader& bits, int lenBits);
+    bool readColors(BinkBitReader& bits, int lenBits);
+    bool readPatterns(BinkBitReader& bits, int lenBits);
+    bool readMotionValues(BinkBitReader& bits, int lenBits);
+    bool readDCs(BinkBitReader& bits, int lenBits, int startBits, bool hasSign);
+    bool readRuns(BinkBitReader& bits, int lenBits);
     int getValue();
 
   private:

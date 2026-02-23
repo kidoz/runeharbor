@@ -393,11 +393,11 @@ int BinkBundle::getValue()
     return 0;
 }
 
-bool BinkBundle::readBlockTypes(BinkBitReader& bits)
+bool BinkBundle::readBlockTypes(BinkBitReader& bits, int lenBits)
 {
     data_.clear();
     readPos_ = 0;
-    int t = bits.readBits(13);
+    int t = bits.readBits(lenBits);
     if (!t) return true;
     
     if (bits.readBit()) {
@@ -419,11 +419,11 @@ bool BinkBundle::readBlockTypes(BinkBitReader& bits)
     return true;
 }
 
-bool BinkBundle::readColors(BinkBitReader& bits)
+bool BinkBundle::readColors(BinkBitReader& bits, int lenBits)
 {
     data_.clear();
     readPos_ = 0;
-    int t = bits.readBits(13);
+    int t = bits.readBits(lenBits);
     if (!t) return true;
     
     if (bits.readBit()) {
@@ -452,11 +452,11 @@ bool BinkBundle::readColors(BinkBitReader& bits)
     return true;
 }
 
-bool BinkBundle::readPatterns(BinkBitReader& bits)
+bool BinkBundle::readPatterns(BinkBitReader& bits, int lenBits)
 {
     data_.clear();
     readPos_ = 0;
-    int t = bits.readBits(13);
+    int t = bits.readBits(lenBits);
     if (!t) return true;
     
     while (data_.size() < (size_t)t) {
@@ -467,11 +467,11 @@ bool BinkBundle::readPatterns(BinkBitReader& bits)
     return true;
 }
 
-bool BinkBundle::readMotionValues(BinkBitReader& bits)
+bool BinkBundle::readMotionValues(BinkBitReader& bits, int lenBits)
 {
     data_.clear();
     readPos_ = 0;
-    int t = bits.readBits(13);
+    int t = bits.readBits(lenBits);
     if (!t) return true;
     
     if (bits.readBit()) {
@@ -494,11 +494,11 @@ bool BinkBundle::readMotionValues(BinkBitReader& bits)
     return true;
 }
 
-bool BinkBundle::readDCs(BinkBitReader& bits, int startBits, bool hasSign)
+bool BinkBundle::readDCs(BinkBitReader& bits, int lenBits, int startBits, bool hasSign)
 {
     data_.clear();
     readPos_ = 0;
-    int t = bits.readBits(13);
+    int t = bits.readBits(lenBits);
     if (!t) return true;
     
     int v = bits.readBits(startBits - hasSign);
@@ -531,11 +531,11 @@ bool BinkBundle::readDCs(BinkBitReader& bits, int startBits, bool hasSign)
     return true;
 }
 
-bool BinkBundle::readRuns(BinkBitReader& bits)
+bool BinkBundle::readRuns(BinkBitReader& bits, int lenBits)
 {
     data_.clear();
     readPos_ = 0;
-    int t = bits.readBits(13);
+    int t = bits.readBits(lenBits);
     if (!t) return true;
     
     if (bits.readBit()) {
@@ -884,17 +884,30 @@ bool BinkDecoder::decodePlane(BinkBitReader& bits, uint8_t* plane, uint8_t* prev
     int bw = width / 8;
     int bh = height / 8;
 
+    auto ilog2 = [](uint32_t v) {
+        int r = 0;
+        while (v >>= 1) r++;
+        return r;
+    };
+    uint32_t alignedWidth = width;
+    int bt_len = ilog2((alignedWidth >> 3) + 511) + 1;
+    int sbt_len = ilog2((alignedWidth >> 4) + 511) + 1;
+    int col_len = ilog2(bw * 64 + 511) + 1;
+    int dc_len = ilog2((alignedWidth >> 3) + 511) + 1;
+    int pat_len = ilog2((bw << 3) + 511) + 1;
+    int run_len = ilog2(bw * 48 + 511) + 1;
+
     for (int by = 0; by < bh; by++)
     {
-        bundles_[static_cast<int>(BinkBundleType::BlockTypes)].readBlockTypes(bits);
-        bundles_[static_cast<int>(BinkBundleType::SubBlockTypes)].readBlockTypes(bits);
-        bundles_[static_cast<int>(BinkBundleType::Colors)].readColors(bits);
-        bundles_[static_cast<int>(BinkBundleType::Pattern)].readPatterns(bits);
-        bundles_[static_cast<int>(BinkBundleType::MotionX)].readMotionValues(bits);
-        bundles_[static_cast<int>(BinkBundleType::MotionY)].readMotionValues(bits);
-        bundles_[static_cast<int>(BinkBundleType::IntraDC)].readDCs(bits, isChroma ? 10 : 11, false);
-        bundles_[static_cast<int>(BinkBundleType::InterDC)].readDCs(bits, isChroma ? 10 : 11, true);
-        bundles_[static_cast<int>(BinkBundleType::Run)].readRuns(bits);
+        bundles_[static_cast<int>(BinkBundleType::BlockTypes)].readBlockTypes(bits, bt_len);
+        bundles_[static_cast<int>(BinkBundleType::SubBlockTypes)].readBlockTypes(bits, sbt_len);
+        bundles_[static_cast<int>(BinkBundleType::Colors)].readColors(bits, col_len);
+        bundles_[static_cast<int>(BinkBundleType::Pattern)].readPatterns(bits, pat_len);
+        bundles_[static_cast<int>(BinkBundleType::MotionX)].readMotionValues(bits, dc_len);
+        bundles_[static_cast<int>(BinkBundleType::MotionY)].readMotionValues(bits, dc_len);
+        bundles_[static_cast<int>(BinkBundleType::IntraDC)].readDCs(bits, dc_len, isChroma ? 10 : 11, false);
+        bundles_[static_cast<int>(BinkBundleType::InterDC)].readDCs(bits, dc_len, isChroma ? 10 : 11, true);
+        bundles_[static_cast<int>(BinkBundleType::Run)].readRuns(bits, run_len);
 
         uint8_t* dst = plane + by * 8 * stride;
         const uint8_t* prevPtr = prev + by * 8 * stride;
@@ -1552,118 +1565,97 @@ bool BinkDecoder::decodeAudioTrack(BinkBitReader& bits, uint32_t track, BinkAudi
     size_t outPos = 0;
     size_t remaining = sampleCount * trackInfo.channels;
 
+    auto get_float = [&bits]() -> float {
+        int power = bits.readBits(5);
+        float f = std::ldexp(static_cast<float>(bits.readBits(23)), power - 23);
+        if (bits.readBit()) f = -f;
+        return f;
+    };
+    
+    static const uint8_t rle_length_tab[16] = {
+        2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64
+    };
+
     while (remaining > 0 && !bits.atEnd())
     {
+        if (trackInfo.isDCT) bits.skipBits(2); // Unused for RDFT, skip 2 bits for DCT
+        
         for (uint16_t ch = 0; ch < trackInfo.channels; ch++)
         {
-            if (bits.atEnd())
-                break;
+            if (bits.atEnd()) break;
 
-            // Clear coefficients
             std::fill(coeffs.begin(), coeffs.end(), 0.0f);
+            
+            // Read first two coefficients explicitly
+            coeffs[0] = get_float() * (trackInfo.isDCT ? (1.0f / frameLen) : (2.0f / (std::sqrt(static_cast<float>(frameLen)) * 32768.0f)));
+            coeffs[1] = get_float() * (trackInfo.isDCT ? (1.0f / frameLen) : (2.0f / (std::sqrt(static_cast<float>(frameLen)) * 32768.0f)));
 
-            // Read coded flag: 1 bit indicating if this block has coded audio
-            bool coded = bits.readBit();
-            if (!coded)
+            std::vector<float> quant(numBands);
+            for (size_t i = 0; i < numBands; i++)
             {
-                // All-zero block, skip to overlap-add with zeros
-                goto apply_transform;
+                uint32_t q = bits.readBits(8);
+                quant[i] = binkQuantTable[std::min(q, 95u)];
             }
 
+            size_t k = 0;
+            float q = quant[0];
+            
+            size_t i = 2;
+            while (i < frameLen)
             {
-                // Read quantizer for each band (8-bit index into quant table)
-                std::vector<float> quant(numBands);
-                for (size_t i = 0; i < numBands; i++)
-                {
-                    uint32_t q = bits.readBits(8);
-                    if (q < 96)
-                    {
-                        quant[i] = binkQuantTable[q];
-                    }
-                    else
-                    {
-                        // Clamp to max table entry
-                        quant[i] = binkQuantTable[95];
-                    }
+                size_t j = i + 8;
+                if (bits.readBit()) {
+                    uint32_t v = bits.readBits(4);
+                    j = i + rle_length_tab[v] * 8;
                 }
-
-                // Read coefficients per-bin for each band
-                for (size_t band = 0; band < numBands; band++)
-                {
-                    size_t startBin = bandBins[band];
-                    size_t endBin = bandBins[band + 1];
-
-                    for (size_t bin = startBin; bin < endBin; bin++)
-                    {
-                        if (bits.atEnd())
-                            break;
-
-                        if (quant[band] == 0.0f)
-                        {
-                            coeffs[bin] = 0.0f;
-                            continue;
+                
+                j = std::min(j, frameLen);
+                
+                uint32_t w = bits.readBits(4);
+                if (w == 0) {
+                    std::fill(coeffs.begin() + i, coeffs.begin() + j, 0.0f);
+                    i = j;
+                    while (k < numBands && bandBins[k] < i) q = quant[k++];
+                } else {
+                    while (i < j) {
+                        while (k < numBands && bandBins[k] <= i) q = quant[k++];
+                        uint32_t coeff = bits.readBits(w);
+                        if (coeff) {
+                            if (bits.readBit()) coeffs[i] = -q * coeff;
+                            else coeffs[i] = q * coeff;
+                        } else {
+                            coeffs[i] = 0.0f;
                         }
-
-                        // Read 1 bit: non-zero flag
-                        if (bits.readBit())
-                        {
-                            // Non-zero coefficient: read sign bit
-                            bool negative = bits.readBit();
-                            coeffs[bin] = negative ? -quant[band] : quant[band];
-                        }
-                        else
-                        {
-                            coeffs[bin] = 0.0f;
-                        }
+                        i++;
                     }
                 }
             }
 
-        apply_transform:
-            // Apply inverse transform
-            if (trackInfo.isDCT)
-            {
-                dct(coeffs.data(), frameLen, true);
-            }
-            else
-            {
-                rdft(coeffs.data(), frameLen, true);
-            }
+            if (trackInfo.isDCT) dct(coeffs.data(), frameLen, true);
+            else rdft(coeffs.data(), frameLen, true);
 
-            // Apply window and overlap-add
             size_t overlapOffset = ch * overlapLen;
-            for (size_t i = 0; i < frameLen && outPos + i < remaining; i++)
+            for (size_t idx = 0; idx < frameLen && outPos + idx < remaining; idx++)
             {
-                float sample = coeffs[i] * window[i];
-
-                // Add overlap from previous frame
-                if (i < overlapLen)
-                {
-                    sample += audioOverlap_[overlapOffset + i];
-                }
-
-                // Store output (convert to 16-bit)
+                float sample = coeffs[idx] * window[idx];
+                if (idx < overlapLen) sample += audioOverlap_[overlapOffset + idx];
+                
                 float scaled = sample * 32767.0f;
                 scaled = std::clamp(scaled, -32768.0f, 32767.0f);
 
-                size_t idx = outPos + i * trackInfo.channels + ch;
-                if (idx < outAudio.samples.size())
-                {
-                    outAudio.samples[idx] = static_cast<int16_t>(scaled);
-                }
+                size_t outIndex = outPos + idx * trackInfo.channels + ch;
+                if (outIndex < outAudio.samples.size()) outAudio.samples[outIndex] = static_cast<int16_t>(scaled);
             }
 
-            // Save overlap for next frame
-            for (size_t i = 0; i < overlapLen; i++)
+            for (size_t idx = 0; idx < overlapLen; idx++)
             {
-                size_t srcIdx = frameLen - overlapLen + i;
-                audioOverlap_[overlapOffset + i] = coeffs[srcIdx] * window[srcIdx];
+                size_t srcIdx = frameLen - overlapLen + idx;
+                audioOverlap_[overlapOffset + idx] = coeffs[srcIdx] * window[srcIdx];
             }
         }
 
         outPos += (frameLen - overlapLen) * trackInfo.channels;
-        if (outPos >= remaining)
-            break;
+        if (outPos >= remaining) break;
     }
 
     // Fill any remaining with silence
