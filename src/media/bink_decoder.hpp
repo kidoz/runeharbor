@@ -178,6 +178,8 @@ class BinkBundle
     std::vector<int> data_;
     size_t readPos_ = 0;
     BinkTree tree_;
+    BinkTree treeHigh_[16];
+    int lastColorHigh_ = 0;
 };
 
 /**
