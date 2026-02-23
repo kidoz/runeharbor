@@ -46,9 +46,14 @@ static const uint8_t binkTreeLens[16][16] = {
 
 // Scan order for DCT (zigzag)
 static const uint8_t binkScan[64] = {
-    0,  1,  8,  16, 9,  2,  3,  10, 17, 24, 32, 25, 18, 11, 4,  5,  12, 19, 26, 33, 40, 48,
-    41, 34, 27, 20, 13, 6,  7,  14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23,
-    30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
+     0,  1,  8,  9,  2,  3, 10, 11,
+     4,  5, 12, 13,  6,  7, 14, 15,
+    20, 21, 28, 29, 22, 23, 30, 31,
+    16, 17, 24, 25, 32, 33, 40, 41,
+    34, 35, 42, 43, 48, 49, 56, 57,
+    50, 51, 58, 59, 18, 19, 26, 27,
+    36, 37, 44, 45, 38, 39, 46, 47,
+    52, 53, 60, 61, 54, 55, 62, 63
 };
 
 // Quantization table for DCT (reserved for future use)
@@ -363,19 +368,8 @@ void BinkBundle::reset()
     readPos_ = 0;
 }
 
-bool BinkBundle::decode(BinkBitReader& bits, BinkBundleType type)
+void BinkBundle::buildTree(BinkBitReader& bits, BinkBundleType type)
 {
-    reset();
-
-    // Read count of values
-    uint32_t count = bits.readBits(13);
-    if (count == 0)
-    {
-        return true;
-    }
-
-    data_.reserve(count);
-
     if (type == BinkBundleType::Colors)
     {
         for (int i = 0; i < 16; i++)
@@ -384,65 +378,10 @@ bool BinkBundle::decode(BinkBitReader& bits, BinkBundleType type)
         }
         lastColorHigh_ = 0;
     }
-
     if (type != BinkBundleType::IntraDC && type != BinkBundleType::InterDC)
     {
-        // Build tree for this bundle
         tree_.build(bits, 4);
     }
-
-    // Decode values based on bundle type
-    for (uint32_t i = 0; i < count && !bits.atEnd(); i++)
-    {
-        int val = 0;
-        if (type == BinkBundleType::Colors)
-        {
-            int high = treeHigh_[lastColorHigh_].decode(bits);
-            lastColorHigh_ = high;
-            int low = tree_.decode(bits);
-            val = (high << 4) | low;
-        }
-        else if (type != BinkBundleType::IntraDC && type != BinkBundleType::InterDC)
-        {
-            val = tree_.decode(bits);
-        }
-        else
-        {
-            // IntraDC / InterDC use raw values instead of trees in Bink
-            // In a full implementation, they use a different mechanism.
-            // For now, this fallback prevents crashes but is not fully correct for DC.
-            // Bink uses special DC decoding (10 bits, etc).
-            // A simplified read for the stub:
-            val = bits.readBits(8);
-        }
-
-        // Handle RLE for some bundle types
-        if (type == BinkBundleType::BlockTypes || type == BinkBundleType::SubBlockTypes || type == BinkBundleType::Colors)
-        {
-            // Bink RLE limit depends on bundle type.
-            // For BlockTypes/SubBlockTypes it's >= 12. For Colors it's >= 14 (I'll just ignore complex RLE for now if it doesn't match).
-            // Actually, wait, Colors bundle doesn't use standard RLE in the same way.
-            // Let's implement basic RLE as was originally there for Block/SubBlock.
-        }
-
-        if ((type == BinkBundleType::BlockTypes || type == BinkBundleType::SubBlockTypes) && val >= 12)
-        {
-            // RLE run
-            int runLen = (val >= 12) ? (1 << (val - 11)) : 1;
-            int runVal = tree_.decode(bits);
-            for (int j = 0; j < runLen && i + j < count; j++)
-            {
-                data_.push_back(runVal);
-            }
-            i += runLen - 1;
-        }
-        else
-        {
-            data_.push_back(val);
-        }
-    }
-
-    return true;
 }
 
 int BinkBundle::getValue()
@@ -452,6 +391,162 @@ int BinkBundle::getValue()
         return data_[readPos_++];
     }
     return 0;
+}
+
+bool BinkBundle::readBlockTypes(BinkBitReader& bits)
+{
+    data_.clear();
+    readPos_ = 0;
+    int t = bits.readBits(13);
+    if (!t) return true;
+    
+    if (bits.readBit()) {
+        int v = bits.readBits(4);
+        for (int i=0; i<t; i++) data_.push_back(v);
+    } else {
+        while (data_.size() < (size_t)t) {
+            int v = tree_.decode(bits);
+            if (v < 12) {
+                data_.push_back(v);
+            } else {
+                static const uint8_t rlelens[4] = { 4, 8, 12, 32 };
+                int run = rlelens[v - 12];
+                int last = data_.empty() ? 0 : data_.back();
+                for (int i=0; i<run; i++) data_.push_back(last);
+            }
+        }
+    }
+    return true;
+}
+
+bool BinkBundle::readColors(BinkBitReader& bits)
+{
+    data_.clear();
+    readPos_ = 0;
+    int t = bits.readBits(13);
+    if (!t) return true;
+    
+    if (bits.readBit()) {
+        lastColorHigh_ = treeHigh_[lastColorHigh_].decode(bits);
+        int v = tree_.decode(bits);
+        v = (lastColorHigh_ << 4) | v;
+        
+        int sign = ((int8_t)v) >> 7;
+        v = ((v & 0x7F) ^ sign) - sign;
+        v += 0x80;
+        
+        for (int i=0; i<t; i++) data_.push_back(v);
+    } else {
+        while (data_.size() < (size_t)t) {
+            lastColorHigh_ = treeHigh_[lastColorHigh_].decode(bits);
+            int v = tree_.decode(bits);
+            v = (lastColorHigh_ << 4) | v;
+            
+            int sign = ((int8_t)v) >> 7;
+            v = ((v & 0x7F) ^ sign) - sign;
+            v += 0x80;
+            
+            data_.push_back(v);
+        }
+    }
+    return true;
+}
+
+bool BinkBundle::readPatterns(BinkBitReader& bits)
+{
+    data_.clear();
+    readPos_ = 0;
+    int t = bits.readBits(13);
+    if (!t) return true;
+    
+    while (data_.size() < (size_t)t) {
+        int v = tree_.decode(bits);
+        v |= (tree_.decode(bits) << 4);
+        data_.push_back(v);
+    }
+    return true;
+}
+
+bool BinkBundle::readMotionValues(BinkBitReader& bits)
+{
+    data_.clear();
+    readPos_ = 0;
+    int t = bits.readBits(13);
+    if (!t) return true;
+    
+    if (bits.readBit()) {
+        int v = bits.readBits(4);
+        if (v) {
+            int sign = -bits.readBit();
+            v = (v ^ sign) - sign;
+        }
+        for (int i=0; i<t; i++) data_.push_back(v);
+    } else {
+        while (data_.size() < (size_t)t) {
+            int v = tree_.decode(bits);
+            if (v) {
+                int sign = -bits.readBit();
+                v = (v ^ sign) - sign;
+            }
+            data_.push_back(v);
+        }
+    }
+    return true;
+}
+
+bool BinkBundle::readDCs(BinkBitReader& bits, int startBits, bool hasSign)
+{
+    data_.clear();
+    readPos_ = 0;
+    int t = bits.readBits(13);
+    if (!t) return true;
+    
+    int v = bits.readBits(startBits - hasSign);
+    if (v && hasSign) {
+        int sign = -bits.readBit();
+        v = (v ^ sign) - sign;
+    }
+    data_.push_back(v);
+    int len = t - 1;
+    
+    for (int i = 0; i < len; i += 8) {
+        int len2 = std::min(len - i, 8);
+        int bsize = bits.readBits(4);
+        if (bsize) {
+            for (int j = 0; j < len2; j++) {
+                int v2 = bits.readBits(bsize);
+                if (v2) {
+                    int sign = -bits.readBit();
+                    v2 = (v2 ^ sign) - sign;
+                }
+                v += v2;
+                data_.push_back(v);
+            }
+        } else {
+            for (int j = 0; j < len2; j++) {
+                data_.push_back(v);
+            }
+        }
+    }
+    return true;
+}
+
+bool BinkBundle::readRuns(BinkBitReader& bits)
+{
+    data_.clear();
+    readPos_ = 0;
+    int t = bits.readBits(13);
+    if (!t) return true;
+    
+    if (bits.readBit()) {
+        int v = bits.readBits(4);
+        for (int i=0; i<t; i++) data_.push_back(v);
+    } else {
+        while (data_.size() < (size_t)t) {
+            data_.push_back(tree_.decode(bits));
+        }
+    }
+    return true;
 }
 
 // ============================================================================
@@ -768,44 +863,52 @@ bool BinkDecoder::decodeFrameInternal(uint32_t frameIndex)
 }
 
 bool BinkDecoder::decodePlane(BinkBitReader& bits, uint8_t* plane, uint8_t* prev, uint32_t width,
-                              uint32_t height, bool /*isChroma*/)
+                              uint32_t height, bool isChroma)
 {
-    // Bink plane data starts with 9 bundle lengths (32-bit each)
-    uint32_t bundleLengths[static_cast<int>(BinkBundleType::Count)];
-    for (int i = 0; i < static_cast<int>(BinkBundleType::Count); i++)
-    {
-        bundleLengths[i] = bits.readBits(32);
+    // Bink plane data starts with lengths (but we just align)
+    if (header_.magic[3] >= 'i') {
+        bits.skipBits(32);
+    }
+    for (int i = 0; i < 6; i++) {
+        bits.readBits(32);
+    }
+    if (header_.magic[3] >= 'i') {
+        bits.skipBits(32);
     }
 
-    // Reset and read bundles that have non-zero length
-    for (int i = 0; i < static_cast<int>(BinkBundleType::Count); i++)
-    {
-        bundles_[i].reset();
-        if (bundleLengths[i] > 0)
-        {
-            readBundle(bits, static_cast<BinkBundleType>(i));
-            // Each bundle is 32-bit aligned
-            bits.align32();
-        }
+    for (int i = 0; i < static_cast<int>(BinkBundleType::Count); i++) {
+        bundles_[i].buildTree(bits, static_cast<BinkBundleType>(i));
     }
 
     int stride = static_cast<int>(width);
+    int bw = width / 8;
+    int bh = height / 8;
 
-    // Process 8x8 blocks
-
-    for (uint32_t by = 0; by < height; by += 8)
-
+    for (int by = 0; by < bh; by++)
     {
+        bundles_[static_cast<int>(BinkBundleType::BlockTypes)].readBlockTypes(bits);
+        bundles_[static_cast<int>(BinkBundleType::SubBlockTypes)].readBlockTypes(bits);
+        bundles_[static_cast<int>(BinkBundleType::Colors)].readColors(bits);
+        bundles_[static_cast<int>(BinkBundleType::Pattern)].readPatterns(bits);
+        bundles_[static_cast<int>(BinkBundleType::MotionX)].readMotionValues(bits);
+        bundles_[static_cast<int>(BinkBundleType::MotionY)].readMotionValues(bits);
+        bundles_[static_cast<int>(BinkBundleType::IntraDC)].readDCs(bits, isChroma ? 10 : 11, false);
+        bundles_[static_cast<int>(BinkBundleType::InterDC)].readDCs(bits, isChroma ? 10 : 11, true);
+        bundles_[static_cast<int>(BinkBundleType::Run)].readRuns(bits);
 
-        for (uint32_t bx = 0; bx < width; bx += 8)
+        uint8_t* dst = plane + by * 8 * stride;
+        const uint8_t* prevPtr = prev + by * 8 * stride;
 
+        for (int bx = 0; bx < bw; bx++, dst += 8, prevPtr += 8)
         {
-
-            uint8_t* dst = plane + by * width + bx;
-
-            const uint8_t* prevPtr = prev + by * width + bx;
-
             int blockType = bundles_[static_cast<int>(BinkBundleType::BlockTypes)].getValue();
+
+            if (((by & 1) || (bx & 1)) && blockType == BINK_BLOCK_SCALED) {
+                bx++;
+                dst += 8;
+                prevPtr += 8;
+                continue;
+            }
 
             switch (blockType)
             {
@@ -813,22 +916,19 @@ bool BinkDecoder::decodePlane(BinkBitReader& bits, uint8_t* plane, uint8_t* prev
                 decodeBlockSkip(dst, prevPtr, stride);
                 break;
 
-            case BINK_BLOCK_FILL:
-            {
-                int color = bundles_[static_cast<int>(BinkBundleType::Colors)].getValue();
-                decodeBlockFill(dst, stride, static_cast<uint8_t>(color));
+            case BINK_BLOCK_SCALED:
+                decodeBlockScaled(dst, prevPtr, stride, bits, width, height);
+                bx++;
+                dst += 8;
+                prevPtr += 8;
                 break;
-            }
 
             case BINK_BLOCK_MOTION:
             {
                 int mvX = bundles_[static_cast<int>(BinkBundleType::MotionX)].getValue();
                 int mvY = bundles_[static_cast<int>(BinkBundleType::MotionY)].getValue();
-                // Sign extend
-                if (mvX >= 8)
-                    mvX -= 16;
-                if (mvY >= 8)
-                    mvY -= 16;
+                if (mvX >= 8) mvX -= 16;
+                if (mvY >= 8) mvY -= 16;
                 decodeBlockMotion(dst, prevPtr, stride, mvX, mvY, width, height);
                 break;
             }
@@ -862,45 +962,39 @@ bool BinkDecoder::decodePlane(BinkBitReader& bits, uint8_t* plane, uint8_t* prev
             {
                 int mvX = bundles_[static_cast<int>(BinkBundleType::MotionX)].getValue();
                 int mvY = bundles_[static_cast<int>(BinkBundleType::MotionY)].getValue();
-                if (mvX >= 8)
-                    mvX -= 16;
-                if (mvY >= 8)
-                    mvY -= 16;
+                if (mvX >= 8) mvX -= 16;
+                if (mvY >= 8) mvY -= 16;
                 int dc = bundles_[static_cast<int>(BinkBundleType::InterDC)].getValue();
                 decodeBlockInterDCT(dst, prevPtr, stride, bits, mvX, mvY, dc, width, height);
                 break;
             }
 
-            case BINK_BLOCK_SCALED:
-                decodeBlockScaled(dst, prevPtr, stride, bits, width, height);
+            case BINK_BLOCK_FILL:
+            {
+                int color = bundles_[static_cast<int>(BinkBundleType::Colors)].getValue();
+                decodeBlockFill(dst, stride, static_cast<uint8_t>(color));
                 break;
+            }
 
             case BINK_BLOCK_RESIDUE:
             {
                 int mvX = bundles_[static_cast<int>(BinkBundleType::MotionX)].getValue();
                 int mvY = bundles_[static_cast<int>(BinkBundleType::MotionY)].getValue();
-                if (mvX >= 8)
-                    mvX -= 16;
-                if (mvY >= 8)
-                    mvY -= 16;
+                if (mvX >= 8) mvX -= 16;
+                if (mvY >= 8) mvY -= 16;
                 decodeBlockResidue(dst, prevPtr, stride, bits, mvX, mvY, width, height);
                 break;
             }
 
             default:
-                // Unknown block type - skip
                 decodeBlockSkip(dst, prevPtr, stride);
                 break;
             }
         }
     }
 
+    bits.align32();
     return true;
-}
-
-bool BinkDecoder::readBundle(BinkBitReader& bits, BinkBundleType type)
-{
-    return bundles_[static_cast<int>(type)].decode(bits, type);
 }
 
 // ============================================================================
@@ -1127,78 +1221,61 @@ void BinkDecoder::readDCTCoeffs(BinkBitReader& /*bits*/, int* block)
 
 void BinkDecoder::idct8x8(int* block)
 {
-    // A more accurate integer-based IDCT implementation (approximate fixed-point)
-    // Based on standard IDCT algorithms.
-
-    // Horizontal pass
-    for (int i = 0; i < 8; i++)
-    {
-        int* b = block + i * 8;
-
-        int a0 = (b[0] + b[4]) << 11;
-        int a1 = (b[0] - b[4]) << 11;
-        int a2 = (b[2] * 15137 - b[6] * 6270);
-        int a3 = (b[2] * 6270 + b[6] * 15137);
-
-        int t0 = a0 + a3;
-        int t1 = a1 + a2;
-        int t2 = a1 - a2;
-        int t3 = a0 - a3;
-
-        int a4 = (b[1] * 21407 + b[7] * 4242);
-        int a5 = (b[3] * 17523 + b[5] * 11585);
-        int a6 = (b[3] * 11585 - b[5] * 17523);
-        int a7 = (b[1] * 4242 - b[7] * 21407);
-
-        int t4 = a4 + a5;
-        int t5 = a6 + a7;
-        int t6 = a4 - a5;
-        int t7 = a7 - a6;
-
-        b[0] = (t0 + t4) >> 11;
-        b[1] = (t1 + t5) >> 11;
-        b[2] = (t2 + t6) >> 11;
-        b[3] = (t3 + t7) >> 11;
-        b[4] = (t3 - t7) >> 11;
-        b[5] = (t2 - t6) >> 11;
-        b[6] = (t1 - t5) >> 11;
-        b[7] = (t0 - t4) >> 11;
+    int i;
+    int temp[64];
+    for (i = 0; i < 8; i++) {
+        int a0 = block[i*8 + 0] + block[i*8 + 4];
+        int a1 = block[i*8 + 0] - block[i*8 + 4];
+        int a2 = block[i*8 + 2] + block[i*8 + 6];
+        int a3 = block[i*8 + 2] - block[i*8 + 6];
+        int a4 = block[i*8 + 1] + block[i*8 + 5];
+        int a5 = block[i*8 + 1] - block[i*8 + 5];
+        int a6 = block[i*8 + 3] + block[i*8 + 7];
+        int a7 = block[i*8 + 3] - block[i*8 + 7];
+        int b0 = a0 + a2;
+        int b1 = a1 + a3;
+        int b2 = a1 - a3;
+        int b3 = a0 - a2;
+        int b4 = a4 + a6;
+        int b5 = a5 + a7;
+        int b6 = a5 - a7;
+        int b7 = a4 - a6;
+        temp[i*8 + 0] = b0 + b4;
+        temp[i*8 + 1] = b1 + b5;
+        temp[i*8 + 2] = b2 + b6;
+        temp[i*8 + 3] = b3 + b7;
+        temp[i*8 + 4] = b3 - b7;
+        temp[i*8 + 5] = b2 - b6;
+        temp[i*8 + 6] = b1 - b5;
+        temp[i*8 + 7] = b0 - b4;
     }
-
-    // Vertical pass
-    for (int i = 0; i < 8; i++)
-    {
-        int a0 = (block[i + 0] + block[i + 32]) << 11;
-        int a1 = (block[i + 0] - block[i + 32]) << 11;
-        int a2 = (block[i + 16] * 15137 - block[i + 48] * 6270);
-        int a3 = (block[i + 16] * 6270 + block[i + 48] * 15137);
-
-        int t0 = a0 + a3;
-        int t1 = a1 + a2;
-        int t2 = a1 - a2;
-        int t3 = a0 - a3;
-
-        int a4 = (block[i + 8] * 21407 + block[i + 56] * 4242);
-        int a5 = (block[i + 24] * 17523 + block[i + 40] * 11585);
-        int a6 = (block[i + 24] * 11585 - block[i + 40] * 17523);
-        int a7 = (block[i + 8] * 4242 - block[i + 56] * 21407);
-
-        int t4 = a4 + a5;
-        int t5 = a6 + a7;
-        int t6 = a4 - a5;
-        int t7 = a7 - a6;
-
-        block[i + 0] = (t0 + t4) >> 15;
-        block[i + 8] = (t1 + t5) >> 15;
-        block[i + 16] = (t2 + t6) >> 15;
-        block[i + 24] = (t3 + t7) >> 15;
-        block[i + 32] = (t3 - t7) >> 15;
-        block[i + 40] = (t2 - t6) >> 15;
-        block[i + 48] = (t1 - t5) >> 15;
-        block[i + 56] = (t0 - t4) >> 15;
+    for (i = 0; i < 8; i++) {
+        int a0 = temp[0*8 + i] + temp[4*8 + i];
+        int a1 = temp[0*8 + i] - temp[4*8 + i];
+        int a2 = temp[2*8 + i] + temp[6*8 + i];
+        int a3 = temp[2*8 + i] - temp[6*8 + i];
+        int a4 = temp[1*8 + i] + temp[5*8 + i];
+        int a5 = temp[1*8 + i] - temp[5*8 + i];
+        int a6 = temp[3*8 + i] + temp[7*8 + i];
+        int a7 = temp[3*8 + i] - temp[7*8 + i];
+        int b0 = a0 + a2;
+        int b1 = a1 + a3;
+        int b2 = a1 - a3;
+        int b3 = a0 - a2;
+        int b4 = a4 + a6;
+        int b5 = a5 + a7;
+        int b6 = a5 - a7;
+        int b7 = a4 - a6;
+        block[0*8 + i] = b0 + b4;
+        block[1*8 + i] = b1 + b5;
+        block[2*8 + i] = b2 + b6;
+        block[3*8 + i] = b3 + b7;
+        block[4*8 + i] = b3 - b7;
+        block[5*8 + i] = b2 - b6;
+        block[6*8 + i] = b1 - b5;
+        block[7*8 + i] = b0 - b4;
     }
 }
-
 void BinkDecoder::addBlock(uint8_t* dst, int stride, const int* block)
 {
     for (int y = 0; y < 8; y++)

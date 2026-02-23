@@ -171,7 +171,13 @@ class BinkBundle
 {
   public:
     void reset();
-    bool decode(BinkBitReader& bits, BinkBundleType type);
+    void buildTree(BinkBitReader& bits, BinkBundleType type);
+    bool readBlockTypes(BinkBitReader& bits);
+    bool readColors(BinkBitReader& bits);
+    bool readPatterns(BinkBitReader& bits);
+    bool readMotionValues(BinkBitReader& bits);
+    bool readDCs(BinkBitReader& bits, int startBits, bool hasSign);
+    bool readRuns(BinkBitReader& bits);
     int getValue();
 
   private:
