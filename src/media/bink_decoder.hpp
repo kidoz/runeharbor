@@ -130,6 +130,7 @@ class BinkBitReader
     void align32();
     bool atEnd() const;
     size_t bitsRemaining() const;
+    size_t getPos() const { return bitPos_; }
 
   private:
     const uint8_t* data_;
@@ -145,23 +146,13 @@ class BinkTree
   public:
     bool build(BinkBitReader& bits, int maxDepth);
     int decode(BinkBitReader& bits) const;
+    int getSymbol(int i) const { return symbols_[i]; }
+    int getVlcNum() const { return vlcNum_; }
 
   private:
     static constexpr int MAX_SYMBOLS = 16;
     int symbols_[MAX_SYMBOLS];
-    int numSymbols_ = 0;
-
-    // Canonical Huffman data
-    uint16_t firstCode_[17]; // First code for each length
-    int firstSymbolIdx_[17]; // Index into sortedSymbols_ for first symbol of each length
-    uint8_t sortedSymbols_[MAX_SYMBOLS];
-
-    // Fast lookup table for the first 8 bits
-    struct LookupEntry
-    {
-        uint8_t symbol;
-        uint8_t len;
-    } lookup_[256];
+    int vlcNum_ = 0;
 };
 
 /**
@@ -179,10 +170,13 @@ class BinkBundle
     bool readDCs(BinkBitReader& bits, int lenBits, int startBits, bool hasSign);
     bool readRuns(BinkBitReader& bits, int lenBits);
     int getValue();
+    int peekValue(size_t offset) const;
 
   private:
     std::vector<int> data_;
+    size_t dataLen_ = 0;
     size_t readPos_ = 0;
+    bool eof_ = false;
     BinkTree tree_;
     BinkTree treeHigh_[16];
     int lastColorHigh_ = 0;
@@ -279,7 +273,8 @@ class BinkDecoder
     bool decodePlane(BinkBitReader& bits, uint8_t* plane, uint8_t* prev, uint32_t width,
                      uint32_t height, bool isChroma);
     bool readBundle(BinkBitReader& bits, BinkBundleType type);
-    void readDCTCoeffs(BinkBitReader& bits, int* block);
+    int readDCTCoeffs(BinkBitReader& bits, int32_t block[64], int* coefCount, int coefIdx[64], int q);
+    void unquantizeDCTCoeffs(int32_t block[64], const int32_t quant[64], int coefCount, int coefIdx[64]);
 
     // Block decoders
     void decodeBlockSkip(uint8_t* dst, const uint8_t* prev, int stride);
@@ -287,19 +282,19 @@ class BinkDecoder
     void decodeBlockRun(uint8_t* dst, int stride, BinkBitReader& bits);
     void decodeBlockPattern(uint8_t* dst, int stride, uint8_t c0, uint8_t c1, uint8_t pattern);
     void decodeBlockRaw(uint8_t* dst, int stride, BinkBitReader& bits);
-    void decodeBlockMotion(uint8_t* dst, const uint8_t* prev, int stride, int mvX, int mvY,
-                           uint32_t planeWidth, uint32_t planeHeight);
+    void decodeBlockMotion(uint8_t* dst, const uint8_t* prev, int stride, int mvX, int mvY);
     void decodeBlockIntraDCT(uint8_t* dst, int stride, BinkBitReader& bits, int dc);
     void decodeBlockInterDCT(uint8_t* dst, const uint8_t* prev, int stride, BinkBitReader& bits,
-                             int mvX, int mvY, int dc, uint32_t planeWidth, uint32_t planeHeight);
+                             int mvX, int mvY, int dc);
     void decodeBlockScaled(uint8_t* dst, const uint8_t* prev, int stride, BinkBitReader& bits,
                            uint32_t planeWidth, uint32_t planeHeight);
     void decodeBlockResidue(uint8_t* dst, const uint8_t* prev, int stride, BinkBitReader& bits,
-                            int mvX, int mvY, uint32_t planeWidth, uint32_t planeHeight);
+                            int mvX, int mvY);
+    int readResidue(BinkBitReader& bits, int16_t block[64], int masksCount);
 
     // IDCT
-    void idct8x8(int* block);
-    void addBlock(uint8_t* dst, int stride, const int* block);
+    void idctPut(uint8_t* dst, int stride, const int32_t* block);
+    void idctAdd(uint8_t* dst, int stride, const int32_t* block);
 
     // YUV to RGB conversion
     void convertYUVToRGBA(std::vector<uint8_t>& rgba);

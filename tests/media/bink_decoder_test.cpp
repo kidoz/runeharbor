@@ -35,13 +35,11 @@ TEST_CASE("BinkTree decode returns correct symbols", "[bink][huffman]")
 
     // To decode symbol 1 (canonical code 1 at length 4):
     // Bits 0-3: 0000 (tree index 0)
-    // Bit 4: 0 (no shuffle)
-    // Bits 5-7: 000 (first 3 bits of code 0001)
-    // Bit 8: 1 (last bit of code 0001)
-    // Byte 0: 0000 0 000 -> 0x00
-    // Byte 1: 1 0000000 -> 0x01
+    // tree.build returns early if index is 0, no shuffle bit is read.
+    // Bits 4-7: 1000 (code for symbol 1, since binkTreeBits[0][1] == 0x01, read LSB-first)
+    // Byte 0: 0001 0000 -> 0x10
 
-    std::vector<uint8_t> data = {0x00, 0x01};
+    std::vector<uint8_t> data = {0x10};
     BinkBitReader reader(data.data(), data.size());
 
     BinkTree tree;
