@@ -2123,215 +2123,256 @@ bool BinkDecoder::decodeAudio(uint32_t frameIndex, uint32_t track, BinkAudioFram
     return false;
 }
 
-// Bink audio frequency bands (25 critical bands)
-static const uint16_t binkAudioBands[26] = {0,    100,  200,  300,  400,  510,   630,   770,  920,
-                                            1080, 1270, 1480, 1720, 2000, 2320,  2700,  3150, 3700,
-                                            4400, 5300, 6400, 7700, 9500, 12000, 15500, 24000};
+// WMA critical frequencies (from FFmpeg wma_freqs.h)
+static const uint16_t ff_wma_critical_freqs[25] = {
+    100,  200,  300,  400,  510,  630,  770,  920,  1080, 1270, 1480, 1720, 2000,
+    2320, 2700, 3150, 3700, 4400, 5300, 6400, 7700, 9500, 12000, 15500, 24500};
 
-// Bink quantization table (96 entries, matching FFmpeg/RAD spec)
-// Formula: bink_quant[i] = exp(i * 0.15289164788) * 0.066399999708
-static float binkQuantTable[96] = {};
-static bool binkQuantInit = false;
+static const uint8_t rle_length_tab[16] = {2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64};
 
-static void initBinkQuantTable()
+static float get_bink_float(BinkBitReader& bits)
 {
-    if (binkQuantInit)
-        return;
-    for (int i = 0; i < 96; i++)
-    {
-        binkQuantTable[i] = std::exp(static_cast<float>(i) * 0.15289164788f) * 0.066399999708f;
-    }
-    binkQuantInit = true;
-}
-
-// Window coefficients for overlap-add (generated from sine window)
-static float getWindow(size_t i, size_t n)
-{
-    constexpr float PI = 3.14159265358979323846f;
-    return std::sin(PI * (static_cast<float>(i) + 0.5f) / static_cast<float>(n));
+    int power = bits.readBits(5);
+    float f = std::ldexp(static_cast<float>(bits.readBits(23)), power - 23);
+    if (bits.readBit())
+        f = -f;
+    return f;
 }
 
 bool BinkDecoder::decodeAudioTrack(BinkBitReader& bits, uint32_t track, BinkAudioFrame& outAudio)
 {
     if (track >= audioTracks_.size())
-    {
         return false;
-    }
-
-    initBinkQuantTable();
 
     const auto& trackInfo = audioTracks_[track];
     outAudio.sampleRate = trackInfo.sampleRate;
     outAudio.channels = static_cast<uint8_t>(trackInfo.channels);
 
-    // Read sample count
-    uint32_t sampleCount = bits.readBits(32);
-    if (sampleCount == 0 || sampleCount > 10 * 1024 * 1024)
-    {
+    // Read reported output size in bytes (FFmpeg skips this)
+    uint32_t reportedBytes = bits.readBits(32);
+    if (reportedBytes == 0 || reportedBytes > 10 * 1024 * 1024)
         return false;
+
+    // Determine frame_len_bits from sample rate (matching FFmpeg's decode_init)
+    int frameLenBits;
+    if (trackInfo.sampleRate < 22050)
+        frameLenBits = 9;
+    else if (trackInfo.sampleRate < 44100)
+        frameLenBits = 10;
+    else
+        frameLenBits = 11;
+
+    // For RDFT mode, audio is interleaved — adjust frame length and rate
+    int internalChannels;
+    int sampleRateForBands;
+    if (!trackInfo.isDCT)
+    {
+        // RDFT: interleaved stereo in a single transform
+        sampleRateForBands = trackInfo.sampleRate * trackInfo.channels;
+        internalChannels = 1;
+        // av_log2(channels): log2(1)=0, log2(2)=1
+        int chBits = 0;
+        for (int c = trackInfo.channels; c > 1; c >>= 1)
+            chBits++;
+        frameLenBits += chBits;
+    }
+    else
+    {
+        sampleRateForBands = trackInfo.sampleRate;
+        internalChannels = trackInfo.channels;
     }
 
-    // Calculate frame size based on sample rate
-    size_t frameLen = audioFrameSize_;
-    if (frameLen == 0)
-    {
-        if (trackInfo.sampleRate < 22050)
-            frameLen = 2048;
-        else if (trackInfo.sampleRate < 44100)
-            frameLen = 4096;
-        else
-            frameLen = 8192;
-    }
+    int frameLen = 1 << frameLenBits;
+    int overlapLen = frameLen / 16;
+    int sampleRateHalf = (sampleRateForBands + 1) / 2;
 
-    size_t overlapLen = frameLen / 16;
-    size_t halfFrameLen = frameLen / 2;
+    // Compute root scaling factor
+    // FFmpeg RDFT uses scale=0.5 (unnormalized IFFT * 0.5)
+    // Our RDFT divides by N. To compensate: our_root = ffmpeg_root * N/2
+    // FFmpeg root (RDFT) = 2.0 / (sqrt(N) * 32768.0)
+    // Our root = N/2 * 2.0 / (sqrt(N) * 32768.0) = sqrt(N) / 32768.0
+    float root;
+    if (!trackInfo.isDCT)
+        root = std::sqrt(static_cast<float>(frameLen)) / 32768.0f;
+    else
+        root = static_cast<float>(frameLen) /
+               (std::sqrt(static_cast<float>(frameLen)) * 32768.0f);
 
-    // Initialize overlap buffer if needed
-    size_t overlapSize = overlapLen * trackInfo.channels;
-    if (audioOverlap_.size() != overlapSize)
-    {
-        audioOverlap_.resize(overlapSize, 0.0f);
-    }
+    // Build quantization table: quant_table[i] = exp(i * 0.15289...) * root
+    float quantTable[96];
+    for (int i = 0; i < 96; i++)
+        quantTable[i] = std::exp(static_cast<float>(i) * 0.15289164787221953823f) * root;
 
-    // Calculate band boundaries scaled to this sample rate
-    std::vector<size_t> bandBins;
-    bandBins.push_back(0);
-    for (size_t i = 1; i < 26; i++)
-    {
-        size_t bin = static_cast<size_t>(binkAudioBands[i]) * halfFrameLen / 22050;
-        if (bin >= halfFrameLen)
-        {
-            bin = halfFrameLen;
-            bandBins.push_back(bin);
+    // Calculate number of bands (FFmpeg's algorithm)
+    int numBands;
+    for (numBands = 1; numBands < 25; numBands++)
+        if (sampleRateHalf <= ff_wma_critical_freqs[numBands - 1])
             break;
-        }
-        bandBins.push_back(bin);
-    }
-    size_t numBands = bandBins.size() - 1;
 
-    // Allocate output and working buffers
-    outAudio.samples.resize(sampleCount * trackInfo.channels);
-    std::vector<float> coeffs(frameLen);
-    std::vector<float> window(frameLen);
+    // Populate band boundaries
+    uint32_t bands[26];
+    bands[0] = 2;
+    for (int i = 1; i < numBands; i++)
+        bands[i] = (ff_wma_critical_freqs[i - 1] * frameLen / sampleRateHalf) & ~1u;
+    bands[numBands] = static_cast<uint32_t>(frameLen);
 
-    // Pre-compute window
-    for (size_t i = 0; i < frameLen; i++)
+    // Initialize overlap buffer
+    size_t overlapBufSize = static_cast<size_t>(overlapLen) * internalChannels;
+    if (audioOverlap_.size() != overlapBufSize)
     {
-        window[i] = getWindow(i, frameLen);
+        audioOverlap_.resize(overlapBufSize, 0.0f);
+        audioFirst_ = true;
     }
+
+    // Output: reportedBytes is output size in bytes for 16-bit audio
+    size_t totalOutputSamples = reportedBytes / 2;
+    outAudio.samples.resize(totalOutputSamples);
+
+    // Working buffer
+    std::vector<float> coeffs(frameLen + 1, 0.0f);
 
     size_t outPos = 0;
-    size_t remaining = sampleCount * trackInfo.channels;
 
-    auto get_float = [&bits]() -> float {
-        int power = bits.readBits(5);
-        float f = std::ldexp(static_cast<float>(bits.readBits(23)), power - 23);
-        if (bits.readBit()) f = -f;
-        return f;
-    };
-    
-    static const uint8_t rle_length_tab[16] = {
-        2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32, 64
-    };
-
-    while (remaining > 0 && !bits.atEnd())
+    while (outPos < totalOutputSamples && !bits.atEnd())
     {
-        if (trackInfo.isDCT) bits.skipBits(2); // Unused for RDFT, skip 2 bits for DCT
-        
-        for (uint16_t ch = 0; ch < trackInfo.channels; ch++)
+        if (trackInfo.isDCT)
+            bits.skipBits(2);
+
+        for (int ch = 0; ch < internalChannels; ch++)
         {
-            if (bits.atEnd()) break;
+            if (bits.atEnd())
+                break;
 
             std::fill(coeffs.begin(), coeffs.end(), 0.0f);
-            
-            // Read first two coefficients explicitly
-            if (trackInfo.isDCT) {
-                uint32_t c0 = bits.readBits(32);
-                uint32_t c1 = bits.readBits(32);
-                float f0; std::memcpy(&f0, &c0, 4);
-                float f1; std::memcpy(&f1, &c1, 4);
-                coeffs[0] = f0 * (1.0f / frameLen);
-                coeffs[1] = f1 * (1.0f / frameLen);
-            } else {
-                coeffs[0] = get_float() * (2.0f / (std::sqrt(static_cast<float>(frameLen)) * 32768.0f));
-                coeffs[1] = get_float() * (2.0f / (std::sqrt(static_cast<float>(frameLen)) * 32768.0f));
-            }
 
-            std::vector<float> quant(numBands);
-            for (size_t i = 0; i < numBands; i++)
+            // Read DC and Nyquist coefficients
+            coeffs[0] = get_bink_float(bits) * root;
+            coeffs[1] = get_bink_float(bits) * root;
+
+            // Read per-band quantization values
+            float quant[25];
+            for (int i = 0; i < numBands; i++)
             {
                 uint32_t q = bits.readBits(8);
-                quant[i] = binkQuantTable[std::min(q, 95u)];
+                quant[i] = quantTable[std::min(q, 95u)];
             }
 
-            size_t k = 0;
+            // Parse coefficients (matching FFmpeg's decode_block)
+            int k = 0;
             float q = quant[0];
-            
-            size_t i = 2;
+
+            int i = 2;
             while (i < frameLen)
             {
-                size_t j = i + 8;
-                if (bits.readBit()) {
-                    uint32_t v = bits.readBits(4);
+                int j;
+                if (bits.readBit())
+                {
+                    int v = bits.readBits(4);
                     j = i + rle_length_tab[v] * 8;
                 }
-                
+                else
+                {
+                    j = i + 8;
+                }
                 j = std::min(j, frameLen);
-                
-                uint32_t w = bits.readBits(4);
-                if (w == 0) {
+
+                int width = bits.readBits(4);
+                if (width == 0)
+                {
                     std::fill(coeffs.begin() + i, coeffs.begin() + j, 0.0f);
                     i = j;
-                    while (k < numBands && bandBins[k] < i) q = quant[k++];
-                } else {
-                    while (i < j) {
-                        while (k < numBands && bandBins[k] <= i) q = quant[k++];
-                        uint32_t coeff = bits.readBits(w);
-                        if (coeff) {
-                            if (bits.readBit()) coeffs[i] = -q * coeff;
-                            else coeffs[i] = q * coeff;
-                        } else {
-                            coeffs[i] = 0.0f;
+                    while (bands[k] < static_cast<uint32_t>(i))
+                        q = quant[k++];
+                }
+                else
+                {
+                    while (i < j)
+                    {
+                        if (bands[k] == static_cast<uint32_t>(i))
+                            q = quant[k++];
+                        int coeff = bits.readBits(width);
+                        if (coeff)
+                        {
+                            if (bits.readBit())
+                                coeffs[i] = -q * coeff;
+                            else
+                                coeffs[i] = q * coeff;
                         }
                         i++;
                     }
                 }
             }
 
-            if (trackInfo.isDCT) dct(coeffs.data(), frameLen, true);
-            else rdft(coeffs.data(), frameLen, true);
-
-            size_t overlapOffset = ch * overlapLen;
-            for (size_t idx = 0; idx < frameLen && outPos + idx < remaining; idx++)
+            // Apply inverse transform
+            if (trackInfo.isDCT)
             {
-                float sample = coeffs[idx] * window[idx];
-                if (idx < overlapLen) sample += audioOverlap_[overlapOffset + idx];
-                
-                float scaled = sample * 32767.0f;
-                scaled = std::clamp(scaled, -32768.0f, 32767.0f);
+                coeffs[0] /= 0.5f;
+                dct(coeffs.data(), frameLen, true);
+            }
+            else
+            {
+                // Rearrange from Bink format [DC, Nyq, Re1, Im1, Re2, Im2, ...]
+                // to our RDFT format [DC, Re1, Im1, Re2, Im2, ..., Nyq]
+                float nyquist = coeffs[1];
+                std::memmove(&coeffs[1], &coeffs[2],
+                             (frameLen - 2) * sizeof(float));
+                coeffs[frameLen - 1] = nyquist;
 
-                size_t outIndex = outPos + idx * trackInfo.channels + ch;
-                if (outIndex < outAudio.samples.size()) outAudio.samples[outIndex] = static_cast<int16_t>(scaled);
+                // Negate imaginary parts: our RDFT uses e^(-j) convention
+                // and internally negates Im. Pre-negating here produces the
+                // correct double-negation to match FFmpeg's e^(+j) result.
+                for (int idx = 2; idx < frameLen - 1; idx += 2)
+                    coeffs[idx] *= -1.0f;
+
+                rdft(coeffs.data(), frameLen, true);
             }
 
-            for (size_t idx = 0; idx < overlapLen; idx++)
+            // Overlap-add: linear crossfade (matching FFmpeg exactly)
+            // count = overlap_len * channels (internal channels)
+            int count = overlapLen * internalChannels;
+            size_t overlapOffset = static_cast<size_t>(ch) * overlapLen;
+
+            if (!audioFirst_)
             {
-                size_t srcIdx = frameLen - overlapLen + idx;
-                audioOverlap_[overlapOffset + idx] = coeffs[srcIdx] * window[srcIdx];
+                int j = ch;
+                for (int idx = 0; idx < overlapLen; idx++, j += internalChannels)
+                {
+                    coeffs[idx] = (audioOverlap_[overlapOffset + idx] *
+                                       static_cast<float>(count - j) +
+                                   coeffs[idx] * static_cast<float>(j)) /
+                                  static_cast<float>(count);
+                }
+            }
+
+            // Save tail for next block's overlap
+            for (int idx = 0; idx < overlapLen; idx++)
+                audioOverlap_[overlapOffset + idx] = coeffs[frameLen - overlapLen + idx];
+
+            // Write output samples (convert float to int16)
+            // Output is the first (frame_len - overlap_len) samples:
+            //   [0..overlap_len-1] = crossfaded region
+            //   [overlap_len..frame_len-overlap_len-1] = fresh RDFT output
+            // The tail [frame_len-overlap_len..frame_len-1] was saved, not output
+            size_t samplesToWrite =
+                std::min(static_cast<size_t>(frameLen - overlapLen),
+                         totalOutputSamples - outPos);
+            for (size_t idx = 0; idx < samplesToWrite; idx++)
+            {
+                float sample = coeffs[idx] * 32767.0f;
+                sample = std::clamp(sample, -32768.0f, 32767.0f);
+                outAudio.samples[outPos + idx] = static_cast<int16_t>(sample);
             }
         }
 
+        audioFirst_ = false;
         bits.align32();
 
-        outPos += (frameLen - overlapLen) * trackInfo.channels;
-        if (outPos >= remaining) break;
+        outPos += static_cast<size_t>(frameLen - overlapLen);
     }
 
-    // Fill any remaining with silence
+    // Fill remaining with silence
     for (size_t i = outPos; i < outAudio.samples.size(); i++)
-    {
         outAudio.samples[i] = 0;
-    }
 
     return true;
 }

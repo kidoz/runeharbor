@@ -262,10 +262,11 @@ class BinkDecoder
     };
     std::vector<AudioTrackInfo> audioTracks_;
 
-    // Audio decoding state (per channel)
+    // Audio decoding state
     std::vector<float> audioOverlap_;
     size_t audioFrameSize_ = 0;
     size_t audioOverlapSize_ = 0;
+    bool audioFirst_ = true;
 
     bool parseHeader();
     bool parseFrameIndex();
