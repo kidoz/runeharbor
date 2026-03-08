@@ -1154,7 +1154,6 @@ bool BinkDecoder::decodeFrameInternal(uint32_t frameIndex)
     for (uint32_t track = 0; track < header_.audioTrackCount; track++)
     {
         uint32_t audioLen = bits.readBits(32);
-        if (frameIndex == 1) printf("Frame 1 audioLen via readBits: %u\n", audioLen);
         if (audioLen > 0)
         {
             bits.skipBits(audioLen * 8);
@@ -1165,10 +1164,6 @@ bool BinkDecoder::decodeFrameInternal(uint32_t frameIndex)
     if (header_.magic[3] >= 'i')
     {
         bits.skipBits(32);
-    }
-
-    if (frameIndex == 1) {
-        printf("Frame 1 bits remaining before plane Y: %zu, bitPos: %zu\n", bits.bitsRemaining(), bits.getPos());
     }
 
     // Decode Y plane
@@ -1193,15 +1188,18 @@ bool BinkDecoder::decodeFrameInternal(uint32_t frameIndex)
 }
 
 bool BinkDecoder::decodePlane(BinkBitReader& bits, uint8_t* plane, uint8_t* prev, uint32_t width,
-                              uint32_t height, bool /*isChroma*/)
+                              uint32_t height, bool isChroma)
 {
     for (int i = 0; i < static_cast<int>(BinkBundleType::Count); i++) {
         bundles_[i].buildTree(bits, static_cast<BinkBundleType>(i));
     }
 
     int stride = static_cast<int>(width);
-    int bw = width / 8;
-    int bh = height / 8;
+    // Block counts must match FFmpeg: chroma uses (origDim+15)/16, luma uses (origDim+7)/8
+    int bw = isChroma ? static_cast<int>((header_.width + 15) >> 4)
+                      : static_cast<int>((header_.width + 7) >> 3);
+    int bh = isChroma ? static_cast<int>((header_.height + 15) >> 4)
+                      : static_cast<int>((header_.height + 7) >> 3);
 
     auto ilog2 = [](uint32_t v) {
         int r = 0;
@@ -1228,24 +1226,12 @@ bool BinkDecoder::decodePlane(BinkBitReader& bits, uint8_t* plane, uint8_t* prev
         bundles_[static_cast<int>(BinkBundleType::InterDC)].readDCs(bits, dc_len, 11, true);
         bundles_[static_cast<int>(BinkBundleType::Run)].readRuns(bits, run_len);
 
-        if (by == 0 && width == 320) {
-            printf("Frame/Plane Row 0 BlockTypes: ");
-            for(int k=0; k<10; k++) {
-               printf("%d ", bundles_[static_cast<int>(BinkBundleType::BlockTypes)].peekValue(k));
-            }
-            printf("\n");
-        }
-
         uint8_t* dst = plane + by * 8 * stride;
         const uint8_t* prevPtr = prev + by * 8 * stride;
 
         for (int bx = 0; bx < bw; bx++, dst += 8, prevPtr += 8)
         {
             int blockType = bundles_[static_cast<int>(BinkBundleType::BlockTypes)].getValue();
-            
-            // DEBUG PRINT
-            // if (isChroma == false && by == 0 && bx < 10) printf("%d ", blockType);
-
             if (((by & 1) || (bx & 1)) && blockType == BINK_BLOCK_SCALED) {
                 bx++;
                 dst += 8;
@@ -1893,7 +1879,7 @@ void BinkDecoder::unquantizeDCTCoeffs(int32_t block[64], const int32_t quant[64]
     }
 }
 
-#define A1  2893
+#define A1  2896
 #define A2  2217
 #define A3  3784
 #define A4 -5352
