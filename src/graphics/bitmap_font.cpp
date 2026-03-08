@@ -10,12 +10,18 @@
 namespace runeharbor::graphics
 {
 
-// .fnt file layout:
-//   Header (4 bytes): firstChar(u8), lastChar(u8), field3(u8)=8, height(u8)
-//   Reserved (28 bytes)
+// .fnt file layout (MM7 binary font format):
+//   Header (32 bytes):
+//     offset 0: firstChar(u8)
+//     offset 1: lastChar(u8)
+//     offset 2: bitsPerPixel(u8) = 8
+//     offset 3: reserved(u8) = 0
+//     offset 4: reserved(u8) = 0
+//     offset 5: fontHeight(u8)
+//     offset 6-31: reserved(26 bytes, zeroed)
 //   GlyphMetrics[256]: leftSpacing(i32), width(i32), rightSpacing(i32) = 3072 bytes
 //   PixelOffsets[256]: offset(u32) = 1024 bytes
-//   Pixel data: grayscale (0=transparent, 1=shadow, 255=text body)
+//   Pixel data: palette-indexed (0=transparent, nonzero=FONTPAL index)
 //
 // Total header+atlas = 32 + 3072 + 1024 = 4128 bytes before pixel data
 
@@ -100,8 +106,9 @@ bool BitmapFont::load(std::span<const uint8_t> fntData, std::span<const uint8_t>
     // Parse header
     firstChar_ = fntData[0];
     lastChar_ = fntData[1];
-    // fntData[2] is field3 (typically 8, unused)
-    fontHeight_ = fntData[3];
+    // fntData[2] is bitsPerPixel (typically 8)
+    // fntData[3..4] are reserved (zero)
+    fontHeight_ = fntData[5];
 
     if (fontHeight_ == 0)
     {
@@ -217,23 +224,20 @@ bool BitmapFont::createAtlas(SDL_Renderer* sdlRenderer)
                     rgba[dstIdx + 2] = 0;
                     rgba[dstIdx + 3] = 0;
                 }
+                else if (value == 1)
+                {
+                    // Shadow pixel: opaque black drop shadow
+                    rgba[dstIdx] = 0;
+                    rgba[dstIdx + 1] = 0;
+                    rgba[dstIdx + 2] = 0;
+                    rgba[dstIdx + 3] = 255;
+                }
                 else
                 {
-                    // Use FONTPAL to color the pixel; value is the palette index
-                    int palIdx = value * 3;
-                    if (palIdx + 2 < static_cast<int>(paletteRGB_.size()))
-                    {
-                        rgba[dstIdx] = paletteRGB_[palIdx];
-                        rgba[dstIdx + 1] = paletteRGB_[palIdx + 1];
-                        rgba[dstIdx + 2] = paletteRGB_[palIdx + 2];
-                    }
-                    else
-                    {
-                        // Fallback: white for text body
-                        rgba[dstIdx] = 255;
-                        rgba[dstIdx + 1] = 255;
-                        rgba[dstIdx + 2] = 255;
-                    }
+                    // Body pixel: white so SDL_SetTextureColorMod produces exact text color
+                    rgba[dstIdx] = 255;
+                    rgba[dstIdx + 1] = 255;
+                    rgba[dstIdx + 2] = 255;
                     rgba[dstIdx + 3] = 255;
                 }
             }

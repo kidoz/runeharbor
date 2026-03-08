@@ -20,7 +20,6 @@ namespace
 {
 
 const std::vector<std::string> kFaceGroupNames = {"Human", "Elf", "Dwarf", "Goblin"};
-const std::vector<std::string> kGenderNames = {"Male", "Female"};
 
 // 9 base class names (used for cycling during character creation)
 const std::vector<std::string> kBaseClassNames = {"Knight", "Thief",  "Monk",  "Paladin", "Archer",
@@ -88,29 +87,6 @@ std::string getLowerExtension(const std::string& filename)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
     return ext;
-}
-
-Gender genderFromFace(int faceId)
-{
-    int raceStart = 0;
-    int raceCount = 8;
-    if (faceId >= 16)
-    {
-        raceStart = 16;
-        raceCount = 4;
-    }
-    else if (faceId >= 12)
-    {
-        raceStart = 12;
-        raceCount = 4;
-    }
-    else if (faceId >= 8)
-    {
-        raceStart = 8;
-        raceCount = 4;
-    }
-    int offset = faceId - raceStart;
-    return offset < raceCount / 2 ? Gender::Male : Gender::Female;
 }
 
 struct ClassSkills
@@ -491,14 +467,19 @@ void CharacterCreationState::render()
     }
     auto& party = *ctx.shared->party;
 
-    // 1. Background
+    // 1. Background — dim to approximate VGA 6-bit DAC (original rendered through
+    //    256-color palette with 6-bit output, producing ~63% brightness vs true-color)
     if (background)
     {
+        SDL_SetTextureColorMod(static_cast<SDL_Texture*>(background), 160, 160, 160);
         ctx.renderFullscreenTexture(background, backgroundWidth, backgroundHeight);
+        SDL_SetTextureColorMod(static_cast<SDL_Texture*>(background), 255, 255, 255);
     }
     else if (fallbackBackground)
     {
+        SDL_SetTextureColorMod(static_cast<SDL_Texture*>(fallbackBackground), 160, 160, 160);
         ctx.renderFullscreenTexture(fallbackBackground, fallbackWidth, fallbackHeight);
+        SDL_SetTextureColorMod(static_cast<SDL_Texture*>(fallbackBackground), 255, 255, 255);
     }
 
     SDL_Renderer* sdlRenderer = ctx.renderer->getSDLRenderer();
@@ -509,7 +490,9 @@ void CharacterCreationState::render()
     SDL_SetRenderDrawBlendMode(sdlRenderer, SDL_BLENDMODE_BLEND);
 
     // Font pointers (may be null if .fnt files weren't found)
-    auto* nameFont = ctx.ccharFont ? ctx.ccharFont : ctx.arrusFont;
+    // Use arrus (h=19) for character names — cchar (h=29) is too tall and overlaps
+    // the race/gender line below. The original game uses a compact name display.
+    auto* nameFont = ctx.arrusFont;
     auto* labelFont = ctx.arrusFont;
     auto* numFont = ctx.smallnumFont ? ctx.smallnumFont : ctx.arrusFont;
 
@@ -565,18 +548,24 @@ void CharacterCreationState::render()
         drawText(headerX, 4, headerText, headerFont, 255, 255, 255);
     }
 
-    // Layout constants matching makeme.pcx panel structure (640x480 base)
-    constexpr int colX[] = {10, 163, 321, 478};
-    constexpr int colWidth = 150;
+    // Layout constants from Ghidra reverse-engineering of original MM7-Rel.exe
+    // FUN_004968e2 (setup) and FUN_00495b4f (render) — 640x480 base resolution
+    constexpr int colX[] = {8, 166, 324, 482}; // stride 158 (0x9E)
+    constexpr int colWidth = 153;              // 0x99
 
-    constexpr int portraitY = 22;
-    constexpr int nameY = 121;
-    constexpr int raceGenderY = 140;
-    constexpr int classY = 157;
-    constexpr int statsStartY = 180;
-    constexpr int statSpacing = 18;
-    constexpr int skillsStartY = 312;
-    constexpr int skillSpacing = 14;
+    constexpr int portraitY = 35;        // 0x23 from Ghidra
+    constexpr int nameY = 124;           // 0x7C from Ghidra
+    constexpr int statsStartY = 169;     // 0xA9 from Ghidra
+    constexpr int statSpacing = 17;      // fontHeight(arrus=19) - 2, matching original formula
+    constexpr int classLabelY = 291;     // 0x123 — class display below all 7 stats
+    constexpr int skillsStartY = 311;    // 0x137 — per-char skills below class label
+    constexpr int skillSpacing = 17;     // same as statSpacing
+    // Ghidra: class name overlaid on portrait right side; class icon also on portrait right
+    constexpr int nameClassX[] = {18, 177, 336, 495}; // local_13c stride 0x9F
+    constexpr int classOverlayY = 100;   // class name on portrait (Ghidra line 98)
+    constexpr int classIconY = 50;       // 0x32 — class icon on portrait (Ghidra line 99)
+    constexpr int faceMaskY = 29;        // 0x1D — FACEMASK for selected char
+    constexpr int faceMaskX[] = {12, 171, 329, 488}; // local_120 values
 
     for (int c = 0; c < 4; c++)
     {
@@ -585,12 +574,14 @@ void CharacterCreationState::render()
         int panelX = colX[c];
         int panelCenterX = panelX + colWidth / 2;
 
-        // 2. Portrait
+        // 2. Portrait — use Ghidra exact X positions: 17, 176, 335, 494 (stride 159)
+        constexpr int portraitX[] = {17, 176, 335, 494}; // 0x11, 0xB0, 0x14F, 0x1EE
         if (ch.faceId >= 0 && ch.faceId < kPortraitCount && portraitTextures[ch.faceId])
         {
-            int pw = std::min(portraitWidths[ch.faceId], colWidth - 4);
+            int pw = portraitWidths[ch.faceId];
             int ph = portraitHeights[ch.faceId];
-            int px = panelCenterX - pw / 2;
+            // Render portrait at natural size, centered at the Ghidra X position
+            int px = portraitX[c];
             ctx.renderer->renderTexture(portraitTextures[ch.faceId], ctx.scaleX(px),
                                         ctx.scaleY(portraitY), ctx.scaleW(pw), ctx.scaleH(ph));
         }
@@ -601,30 +592,34 @@ void CharacterCreationState::render()
                                     std::format("[Face {}]", ch.faceId + 1));
         }
 
-        // 3. Face mask overlay — skipped; makeme.pcx already has oval frames.
-        //    FACEMASK is used for dynamic masking in the original engine's
-        //    palette-based renderer, not needed with our RGBA blitting.
+        // 3. Face mask overlay for selected character (Ghidra: FUN_004a6204 at local_120, 0x1D)
+        if (isActive && faceMask.tex)
+        {
+            drawOverlay(faceMask, faceMaskX[c], faceMaskY);
+        }
 
         // 4. Portrait navigation arrows (when face row is selected)
+        //    Original: face arrows at Y=103 (0x67), class arrows at Y=32 (0x20)
         if (isActive && menuRowIndex == 1)
         {
+            constexpr int faceArrowY = 103; // 0x67 from original
             if (leftArrow.tex)
             {
-                drawOverlay(leftArrow, panelX, portraitY + 30);
+                drawOverlay(leftArrow, panelX + 2, faceArrowY);
             }
             else if (ctx.debugText)
             {
-                ctx.debugText->drawText(sdlRenderer, ctx.scaleX(panelX), ctx.scaleY(portraitY),
+                ctx.debugText->drawText(sdlRenderer, ctx.scaleX(panelX), ctx.scaleY(faceArrowY),
                                         textScale, 255, 255, 0, "<");
             }
             if (rightArrow.tex)
             {
-                drawOverlay(rightArrow, panelX + colWidth - rightArrow.w, portraitY + 30);
+                drawOverlay(rightArrow, panelX + colWidth - rightArrow.w - 2, faceArrowY);
             }
             else if (ctx.debugText)
             {
                 ctx.debugText->drawText(sdlRenderer, ctx.scaleX(panelX + colWidth - 12),
-                                        ctx.scaleY(portraitY), textScale, 255, 255, 0, ">");
+                                        ctx.scaleY(faceArrowY), textScale, 255, 255, 0, ">");
             }
         }
 
@@ -648,20 +643,17 @@ void CharacterCreationState::render()
             drawText(nameX, nameY, nameStr, nameFont, nr, ng, nb);
         }
 
-        // 6. Race + Gender
+        // 6a. Class icon in portrait area (Ghidra: local_13c + 0x4D, Y=0x32)
         {
-            int groupIdx = faceGroupFromId(ch.faceId);
-            Gender gender = genderFromFace(ch.faceId);
-            std::string raceGender =
-                kFaceGroupNames[groupIdx] + " " + kGenderNames[static_cast<int>(gender)];
-            int rw = measureGameText(raceGender, labelFont);
-            int rx = panelCenterX - rw / 2;
-            if (rx < panelX)
-                rx = panelX;
-            drawText(rx, raceGenderY, raceGender, labelFont, 180, 180, 180);
+            int displayIdx = baseClassDisplayIndex(ch.charClass);
+            if (displayIdx >= 0 && displayIdx < kClassIconCount && classIcons[displayIdx].tex)
+            {
+                int ciX = nameClassX[c] + 77; // local_13c + 0x4D
+                drawOverlay(classIcons[displayIdx], ciX, classIconY);
+            }
         }
 
-        // 7. Class name (with arrows if active)
+        // 6b. Class name overlay on portrait right side (Ghidra: local_13c + 0x49, Y=100)
         {
             uint8_t cr = 255, cg = 255, cb = 235;
             if (isActive && menuRowIndex == 2)
@@ -674,25 +666,11 @@ void CharacterCreationState::render()
             std::string classStr = kBaseClassNames[displayIdx];
             if (isActive && menuRowIndex == 2)
                 classStr = "< " + classStr + " >";
-            int cw = measureGameText(classStr, labelFont);
-            int cx = panelCenterX - cw / 2;
-            if (cx < panelX)
-                cx = panelX;
-            drawText(cx, classY, classStr, labelFont, cr, cg, cb);
+            int classTextX = nameClassX[c] + 73; // local_13c + 0x49
+            drawText(classTextX, classOverlayY, classStr, labelFont, cr, cg, cb);
         }
 
-        // 8. Class icon
-        {
-            int displayIdx = baseClassDisplayIndex(ch.charClass);
-            if (displayIdx >= 0 && displayIdx < kClassIconCount && classIcons[displayIdx].tex)
-            {
-                int iconX = panelX + colWidth - classIcons[displayIdx].w - 2;
-                int iconY = classY - 2;
-                drawOverlay(classIcons[displayIdx], iconX, iconY);
-            }
-        }
-
-        // 9. Stats
+        // 7. Stats
         for (int s = 0; s < 7; s++)
         {
             int statY = statsStartY + s * statSpacing;
@@ -705,12 +683,12 @@ void CharacterCreationState::render()
             }
 
             // Stat label on the left
-            drawText(panelX + 4, statY, kStatNames[s], labelFont, sr, sg, sb);
+            drawText(panelX + 6, statY, kStatNames[s], labelFont, sr, sg, sb);
 
-            // Stat value right-aligned
+            // Stat value right-aligned with consistent margin
             std::string valStr = std::to_string(ch.stats.byIndex(s));
             int valW = measureGameText(valStr, numFont);
-            int valX = panelX + colWidth - valW - 4;
+            int valX = panelX + colWidth - valW - 10;
             drawText(valX, statY, valStr, numFont, sr, sg, sb);
 
             // +/- buttons for active stat row
@@ -727,8 +705,19 @@ void CharacterCreationState::render()
             }
         }
 
-        // 10. Skills (use name font = cchar, smaller than arrus)
-        auto* skillFont = nameFont ? nameFont : labelFont;
+        // 8. Class label below stats (Ghidra: Y=0x123=291, X=colX[c])
+        {
+            int displayIdx = baseClassDisplayIndex(ch.charClass);
+            std::string classStr = kBaseClassNames[displayIdx];
+            int cw = measureGameText(classStr, labelFont);
+            int cx = panelCenterX - cw / 2;
+            if (cx < panelX)
+                cx = panelX;
+            drawText(cx, classLabelY, classStr, labelFont, 255, 255, 235);
+        }
+
+        // 9. Per-character skills (Ghidra: Y=0x137=311, spacing=statSpacing)
+        auto* skillFont = labelFont;
         int skillY = skillsStartY;
         for (const auto& skill : ch.skills)
         {
@@ -737,19 +726,32 @@ void CharacterCreationState::render()
         }
     }
 
-    // 10b. "Available Skills" section
+    // 10b. Stat points remaining + "Available Skills" header
+    //    Ghidra: "stat points" left label at FUN_0044c52e+0x25 (~37), Y=0x18B (395)
+    //    "Available Skills" label centered at same Y level
     {
+        // Stat points (bonus) on left — Ghidra line 355
+        int bonusPoints = calculateBonusPointsRemaining();
+        uint8_t bonusR = bonusPoints > 0 ? 255 : 200;
+        uint8_t bonusG = bonusPoints > 0 ? 230 : 200;
+        uint8_t bonusB = 150;
+        drawText(37, 395, std::format("Bonus  {}", bonusPoints), labelFont, bonusR, bonusG, bonusB);
+
+        // "Available Skills" label — centered
         std::string_view availLabel = "Available Skills";
         int aw = measureGameText(availLabel, labelFont);
         int ax = (kGameWidth - aw) / 2;
-        drawText(ax, 352, availLabel, labelFont, 255, 255, 200);
+        drawText(ax, 395, availLabel, labelFont, 255, 255, 200);
+    }
 
-        // Draw available skill buttons in a row
-        constexpr int skillBtnY = 368;
-        constexpr int skillBtnW = 60;
-        constexpr int skillBtnH = 16;
-        constexpr int skillStartX = 8;
-        auto* skillBtnFont = nameFont ? nameFont : labelFont;
+    // 10c. Available skills grid — 3-column × 3-row at Y=417 (0x1A1)
+    {
+        constexpr int skillGridY = 417;    // 0x1A1 from Ghidra
+        constexpr int skillGridColW = 100; // 100px per column (original)
+        constexpr int skillGridStartX = 17; // 0x11 from original
+        constexpr int skillGridRows = 3;
+        constexpr int skillRowH = 17;      // fontHeight - 2
+        auto* skillBtnFont = numFont;
 
         int extraCount = 0;
         if (ctx.shared && ctx.shared->party)
@@ -761,15 +763,18 @@ void CharacterCreationState::render()
         for (size_t si = 0; si < availableSkills.size(); si++)
         {
             const auto& sk = availableSkills[si];
-            int bx = skillStartX + static_cast<int>(si) * skillBtnW;
+            int col = static_cast<int>(si) / skillGridRows;
+            int row = static_cast<int>(si) % skillGridRows;
+            int bx = skillGridStartX + col * skillGridColW;
+            int by = skillGridY + row * skillRowH;
 
             // Background highlight for selected skills
             if (sk.selected)
             {
                 SDL_FRect btnRect = {static_cast<float>(ctx.scaleX(bx)),
-                                     static_cast<float>(ctx.scaleY(skillBtnY)),
-                                     static_cast<float>(ctx.scaleW(skillBtnW - 2)),
-                                     static_cast<float>(ctx.scaleH(skillBtnH))};
+                                     static_cast<float>(ctx.scaleY(by)),
+                                     static_cast<float>(ctx.scaleW(skillGridColW - 2)),
+                                     static_cast<float>(ctx.scaleH(skillRowH))};
                 SDL_SetRenderDrawColor(sdlRenderer, 80, 120, 80, 180);
                 SDL_RenderFillRect(sdlRenderer, &btnRect);
             }
@@ -785,42 +790,27 @@ void CharacterCreationState::render()
                 sg = 120;
                 sb = 120;
             }
-            drawText(bx + 2, skillBtnY + 2, sk.name, skillBtnFont, sr, sg, sb);
+            drawText(bx + 2, by + 1, sk.name, skillBtnFont, sr, sg, sb);
         }
     }
 
-    // 11. Bottom controls: OK + Clear buttons
+    // 12. Bottom controls: OK + Clear buttons (from Ghidra: OK at 580,431; Clear at 527,431)
     if (okButton.tex)
     {
         drawOverlay(okButton, 580, 431);
     }
     else
     {
-        drawText(580, 440, "OK", labelFont, 200, 255, 200);
+        drawText(580, 441, "OK", labelFont, 200, 255, 200);
     }
 
     if (clearButton.tex)
     {
-        drawOverlay(clearButton, 510, 431);
+        drawOverlay(clearButton, 527, 431);
     }
     else
     {
-        drawText(510, 440, "CLEAR", labelFont, 255, 200, 200);
-    }
-
-    // 12. Bonus points remaining
-    int bonusPoints = calculateBonusPointsRemaining();
-    uint8_t bonusR = bonusPoints > 0 ? 255 : 200;
-    uint8_t bonusG = bonusPoints > 0 ? 230 : 200;
-    uint8_t bonusB = 150;
-    drawText(14, 440, std::format("Bonus: {}", bonusPoints), labelFont, bonusR, bonusG, bonusB);
-
-    // 13. Help text (small, at very bottom)
-    if (ctx.debugText)
-    {
-        ctx.debugText->drawText(sdlRenderer, ctx.scaleX(14), ctx.scaleY(460),
-                                std::max(1, textScale - 1), 150, 150, 150,
-                                "1-4:Select  Arrows:Navigate  Enter:Edit name  ESC:Back");
+        drawText(527, 441, "Clear", labelFont, 255, 200, 200);
     }
 }
 
