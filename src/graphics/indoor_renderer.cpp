@@ -169,7 +169,8 @@ struct BillboardSprite
 
 BillboardSprite makeIndoorDecorationBillboard(const formats::ParsedDecoration& decoration,
                                               const Vec3& cameraPos,
-                                              const formats::SpriteFrameTable* spriteFrameTable)
+                                              const formats::SpriteFrameTable* spriteFrameTable,
+                                              [[maybe_unused]] uint32_t ticks)
 {
     BillboardSprite sprite;
     sprite.basePos = {static_cast<float>(decoration.x), static_cast<float>(decoration.y),
@@ -213,7 +214,7 @@ BillboardSprite makeIndoorDecorationBillboard(const formats::ParsedDecoration& d
     return sprite;
 }
 
-BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, const Vec3& cameraPos)
+BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, const Vec3& cameraPos, const game::RuntimeConfig* config)
 {
     BillboardSprite sprite;
     sprite.basePos = {static_cast<float>(spawn.x), static_cast<float>(spawn.y),
@@ -377,7 +378,7 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         if (decoration.hidden) continue;
         if (decoration.name.empty()) continue;
         
-        BillboardSprite sprite = makeIndoorDecorationBillboard(decoration, cameraPos, spriteFrameTable);
+        BillboardSprite sprite = makeIndoorDecorationBillboard(decoration, cameraPos, spriteFrameTable, SDL_GetTicks());
         if (sprite.distanceSq > 100000000.0f) continue;
         
         RenderOp op;
@@ -392,7 +393,7 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         if (runtimeConfig && runtimeConfig->noMonsters) break;
         if (spawn.objectType == 0) continue;
         
-        BillboardSprite sprite = makeIndoorSpawnBillboard(spawn, cameraPos);
+        BillboardSprite sprite = makeIndoorSpawnBillboard(spawn, cameraPos, runtimeConfig);
         if (sprite.distanceSq > 100000000.0f) continue;
         
         RenderOp op;

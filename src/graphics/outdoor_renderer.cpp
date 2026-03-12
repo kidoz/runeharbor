@@ -147,7 +147,7 @@ struct SpawnBillboard
     SDL_FColor color = {1.0f, 1.0f, 1.0f, 0.75f};
 };
 
-SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, const Vec3& cameraPos)
+SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, const Vec3& cameraPos, const game::RuntimeConfig* config)
 {
     SpawnBillboard sprite;
     sprite.basePos = {static_cast<float>(spawn.x), static_cast<float>(spawn.y),
@@ -754,7 +754,7 @@ void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
             continue;
         }
 
-        sprites.push_back(makeOutdoorSpawnBillboard(spawn, cameraPos));
+        sprites.push_back(makeOutdoorSpawnBillboard(spawn, cameraPos, runtimeConfig));
     }
 
     std::sort(sprites.begin(), sprites.end(), [](const SpawnBillboard& a, const SpawnBillboard& b)
