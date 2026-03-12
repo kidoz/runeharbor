@@ -1458,6 +1458,10 @@ bool Application::loadUiAssets()
                        titleButtonHoverHeights[i]);
     }
 
+    // Load Inventory frame
+    loadPcxTexture({"fr_inven.pcx", "FR_inven", "FR_inven.pcx", "FR_INVEN.PCX"}, "InventoryFrame",
+                   inventoryBackground, inventoryBackgroundWidth, inventoryBackgroundHeight);
+
     // Load portrait textures (pc01 through pc20) from ICONS.LOD
     for (int i = 0; i < kPortraitCount; i++)
     {

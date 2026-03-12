@@ -5,6 +5,7 @@
 #include "../../graphics/visibility.hpp"
 #include "../../ui/dialogue.hpp"
 #include "../../ui/hud.hpp"
+#include "../../ui/inventory_widget.hpp"
 #include "../map_scene.hpp"
 #include "igame_state.hpp"
 #include "state_context.hpp"
@@ -45,6 +46,7 @@ class InGameState : public IGameState
     bool showHelpOverlay = true;
     ui::DialogueWindow dialogue_;
     ui::HUD hud_;
+    ui::InventoryWidget inventory_;
     uint64_t lastUpdateTicks_ = 0;
     float fpsAccumulatorMs_ = 0.0f;
     int fpsFrameCounter_ = 0;

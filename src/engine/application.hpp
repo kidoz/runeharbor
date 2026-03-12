@@ -284,6 +284,11 @@ class Application
     void* loadingBackground = nullptr;
     int loadingBackgroundWidth = 0;
     int loadingBackgroundHeight = 0;
+    
+    // Inventory
+    void* inventoryBackground = nullptr;
+    int inventoryBackgroundWidth = 0;
+    int inventoryBackgroundHeight = 0;
     std::vector<uint8_t> screenPaletteRGB; // 768-byte RGB palette from background PCX
 
     // Bitmap fonts

@@ -117,6 +117,7 @@ ui_sources = files(
     'ui/ui_manager.cpp',
     'ui/hud.cpp',
     'ui/dialogue.cpp',
+    'ui/inventory_widget.cpp',
 )
 
 # Dependencies

@@ -376,6 +376,16 @@ std::optional<GameStateId> InGameState::update()
         ctx.shared->combatSystem->update(deltaMs);
     }
 
+    // Toggle inventory
+    if (ctx.isKeyPressed(SDL_SCANCODE_I))
+    {
+        inventory_.setVisible(!inventory_.visible());
+        if (inventory_.visible())
+        {
+            inventory_.setActiveCharacter(findActivePartyMember());
+        }
+    }
+
     // Toggle render options
     if (ctx.isKeyPressed(SDL_SCANCODE_F))
     {
@@ -647,6 +657,11 @@ void InGameState::render()
         hud_.setGameWorld(ctx.shared->gameWorld);
         hud_.setMapScene(ctx.shared->mapScene);
         hud_.render(*ctx.renderer, *ctx.debugText, scale, offsetX, offsetY);
+        
+        inventory_.setGameWorld(ctx.shared->gameWorld);
+        inventory_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY), 
+                             static_cast<int>(kGameWidth * scale), static_cast<int>(kGameHeight * scale));
+        inventory_.render(*ctx.renderer, *ctx.debugText);
     }
 
     renderOverlay();
