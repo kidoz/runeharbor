@@ -214,7 +214,6 @@ void OutdoorRenderer::render(const engine::MapScene& scene, const Camera& camera
     renderSky(runtimeConfig, blend);
     renderTerrain(odmData, camera, runtimeConfig, blend, frustumOverride);
     renderBuildings(odmData, camera, runtimeConfig, blend, frustumOverride);
-    renderSpawnBillboards(odmData, camera, runtimeConfig, blend, frustumOverride);
 }
 
 void OutdoorRenderer::renderSky(const game::RuntimeConfig* runtimeConfig, float nightBlend)

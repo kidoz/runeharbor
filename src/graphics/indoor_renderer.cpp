@@ -287,17 +287,23 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
     }
 
     // Build sorted face indices for painter's algorithm (back-to-front).
-    struct FaceSort
+    enum class RenderOpType
     {
-        uint32_t index;
-        float distance;
-        float centerX;
-        float centerY;
-        float centerZ;
+        Face,
+        Billboard
     };
 
-    std::vector<FaceSort> sortedFaces;
-    sortedFaces.reserve(blvData.faces.size());
+    struct RenderOp
+    {
+        RenderOpType type;
+        float distanceSq;
+        uint32_t index; // For Face
+        float cx, cy, cz; // For Face
+        BillboardSprite billboard; // For Billboard
+    };
+
+    std::vector<RenderOp> renderOps;
+    renderOps.reserve(blvData.faces.size() + blvData.decorations.size() + blvData.spawns.size());
 
     for (uint32_t i = 0; i < blvData.faces.size(); i++)
     {
@@ -355,22 +361,60 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         }
 
         float dist = viewDirX * viewDirX + viewDirY * viewDirY + viewDirZ * viewDirZ;
-        sortedFaces.push_back({i, dist, cx, cy, cz});
+        RenderOp op;
+        op.type = RenderOpType::Face;
+        op.distanceSq = dist;
+        op.index = i;
+        op.cx = cx;
+        op.cy = cy;
+        op.cz = cz;
+        renderOps.push_back(std::move(op));
     }
 
-    // Sort back-to-front (far faces first)
-    std::sort(sortedFaces.begin(), sortedFaces.end(),
-              [](const FaceSort& a, const FaceSort& b) { return a.distance > b.distance; });
+    for (const auto& decoration : blvData.decorations)
+    {
+        if (runtimeConfig && runtimeConfig->noDecorations) break;
+        if (decoration.hidden) continue;
+        if (decoration.name.empty()) continue;
+        
+        BillboardSprite sprite = makeIndoorDecorationBillboard(decoration, cameraPos, spriteFrameTable);
+        if (sprite.distanceSq > 100000000.0f) continue;
+        
+        RenderOp op;
+        op.type = RenderOpType::Billboard;
+        op.distanceSq = sprite.distanceSq;
+        op.billboard = std::move(sprite);
+        renderOps.push_back(std::move(op));
+    }
+
+    for (const auto& spawn : blvData.spawns)
+    {
+        if (runtimeConfig && runtimeConfig->noMonsters) break;
+        if (spawn.objectType == 0) continue;
+        
+        BillboardSprite sprite = makeIndoorSpawnBillboard(spawn, cameraPos);
+        if (sprite.distanceSq > 100000000.0f) continue;
+        
+        RenderOp op;
+        op.type = RenderOpType::Billboard;
+        op.distanceSq = sprite.distanceSq;
+        op.billboard = std::move(sprite);
+        renderOps.push_back(std::move(op));
+    }
+
+    std::sort(renderOps.begin(), renderOps.end(),
+              [](const RenderOp& a, const RenderOp& b) { return a.distanceSq > b.distanceSq; });
 
     ClipVertex polyIn[MAX_CLIP_VERTS];
     ClipVertex polyOut[MAX_CLIP_VERTS];
 
-    // Render faces
-    for (const auto& fs : sortedFaces)
+    // Render operations
+    for (const auto& op : renderOps)
     {
-        const auto& face = blvData.faces[fs.index];
-        const SDL_FColor faceColor =
-            litIndoorFaceColor(blvData, face, fs.centerX, fs.centerY, fs.centerZ);
+        if (op.type == RenderOpType::Face)
+        {
+            const auto& face = blvData.faces[op.index];
+            const SDL_FColor faceColor = litIndoorFaceColor(blvData, face, op.cx, op.cy, op.cz);
 
         // Build clip-space polygon
         int polyCount = 0;
@@ -478,126 +522,87 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                            static_cast<int>(vertices.size()), indices.data(),
                            static_cast<int>(indices.size()));
     }
-
-    // Sprite billboards (decorations and spawn markers), sorted back-to-front.
-    std::vector<BillboardSprite> billboards;
-    billboards.reserve(blvData.decorations.size() + blvData.spawns.size());
-
-    for (const auto& decoration : blvData.decorations)
-    {
-        if (runtimeConfig && runtimeConfig->noDecorations)
+    else if (op.type == RenderOpType::Billboard)
         {
-            break;
-        }
-        if (decoration.hidden)
-        {
-            continue;
-        }
-        if (decoration.name.empty())
-        {
-            continue;
-        }
-        billboards.push_back(makeIndoorDecorationBillboard(decoration, cameraPos, spriteFrameTable));
-    }
+            const auto& sprite = op.billboard;
+            
+            SDL_SetRenderDrawBlendMode(renderer.getSDLRenderer(), SDL_BLENDMODE_BLEND);
 
-    for (const auto& spawn : blvData.spawns)
-    {
-        if (runtimeConfig && runtimeConfig->noMonsters)
-        {
-            break;
-        }
-        if (spawn.objectType == 0)
-        {
-            continue;
-        }
-        billboards.push_back(makeIndoorSpawnBillboard(spawn, cameraPos));
-    }
-
-    std::sort(billboards.begin(), billboards.end(),
-              [](const BillboardSprite& a, const BillboardSprite& b)
-              { return a.distanceSq > b.distanceSq; });
-
-    if (!billboards.empty())
-    {
-        SDL_SetRenderDrawBlendMode(renderer.getSDLRenderer(), SDL_BLENDMODE_BLEND);
-    }
-
-    const Vec3 worldUp = Vec3::up();
-    for (const auto& sprite : billboards)
-    {
-        Vec3 toCamera = cameraPos - sprite.basePos;
-        toCamera.y = 0.0f;
-        if (toCamera.lengthSquared() < 0.001f)
-        {
-            toCamera = Vec3::forward();
-        }
-        const Vec3 forward = toCamera.normalized();
-        Vec3 right = worldUp.cross(forward);
-        if (right.lengthSquared() < 0.001f)
-        {
-            right = Vec3::right();
-        }
-        right.normalize();
-
-        SDL_Texture* texture = nullptr;
-        float actualHalfWidth = sprite.halfWidth;
-        float actualHeight = sprite.height;
-
-        if (textureLookup && !sprite.textureName.empty())
-        {
-            texture = textureLookup(sprite.textureName);
-            if (texture)
+            Vec3 toCamera = cameraPos - sprite.basePos;
+            toCamera.y = 0.0f;
+            if (toCamera.lengthSquared() < 0.001f)
             {
-                float w, h;
-                if (SDL_GetTextureSize(texture, &w, &h))
+                toCamera = Vec3::forward();
+            }
+            const Vec3 forward = toCamera.normalized();
+            const Vec3 worldUp = Vec3::up();
+            Vec3 right = worldUp.cross(forward);
+            if (right.lengthSquared() < 0.001f)
+            {
+                right = Vec3::right();
+            }
+            right.normalize();
+
+            SDL_Texture* texture = nullptr;
+            float actualHalfWidth = sprite.halfWidth;
+            float actualHeight = sprite.height;
+
+            if (textureLookup && !sprite.textureName.empty())
+            {
+                texture = textureLookup(sprite.textureName);
+                if (texture)
                 {
-                    const float scale = 0.6f;
-                    actualHalfWidth = (w * scale) * 0.5f;
-                    actualHeight = h * scale;
+                    float w, h;
+                    if (SDL_GetTextureSize(texture, &w, &h))
+                    {
+                        const float scale = 0.6f;
+                        actualHalfWidth = (w * scale) * 0.5f;
+                        actualHeight = h * scale;
+                    }
                 }
             }
+
+            const Vec3 bottomLeft = sprite.basePos - right * actualHalfWidth;
+            const Vec3 bottomRight = sprite.basePos + right * actualHalfWidth;
+            const Vec3 topLeft = bottomLeft + worldUp * actualHeight;
+            const Vec3 topRight = bottomRight + worldUp * actualHeight;
+
+            const Vec4 clipBL = viewProjection * Vec4(bottomLeft, 1.0f);
+            const Vec4 clipBR = viewProjection * Vec4(bottomRight, 1.0f);
+            const Vec4 clipTL = viewProjection * Vec4(topLeft, 1.0f);
+            const Vec4 clipTR = viewProjection * Vec4(topRight, 1.0f);
+            if (clipBL.w < CLIP_NEAR_EPSILON || clipBR.w < CLIP_NEAR_EPSILON ||
+                clipTL.w < CLIP_NEAR_EPSILON || clipTR.w < CLIP_NEAR_EPSILON)
+            {
+                continue;
+            }
+
+            float sxBL, syBL, sxBR, syBR, sxTL, syTL, sxTR, syTR;
+            if (!projectClipToScreen(clipBL, vpW, vpH, sxBL, syBL) ||
+                !projectClipToScreen(clipBR, vpW, vpH, sxBR, syBR) ||
+                !projectClipToScreen(clipTL, vpW, vpH, sxTL, syTL) ||
+                !projectClipToScreen(clipTR, vpW, vpH, sxTR, syTR))
+            {
+                continue;
+            }
+
+            SDL_Vertex vertices[4];
+            vertices[0].position = {sxBL, syBL};
+            vertices[1].position = {sxBR, syBR};
+            vertices[2].position = {sxTL, syTL};
+            vertices[3].position = {sxTR, syTR};
+            for (auto& vertex : vertices)
+            {
+                vertex.color = sprite.color;
+            }
+            vertices[0].tex_coord = {0.0f, 1.0f};
+            vertices[1].tex_coord = {1.0f, 1.0f};
+            vertices[2].tex_coord = {0.0f, 0.0f};
+            vertices[3].tex_coord = {1.0f, 0.0f};
+
+            constexpr int indices[6] = {0, 1, 2, 2, 1, 3};
+            SDL_RenderGeometry(renderer.getSDLRenderer(), texture, vertices, 4, indices, 6);
         }
-
-        const Vec3 bottomLeft = sprite.basePos - right * actualHalfWidth;
-        const Vec3 bottomRight = sprite.basePos + right * actualHalfWidth;
-        const Vec3 topLeft = bottomLeft + worldUp * actualHeight;
-        const Vec3 topRight = bottomRight + worldUp * actualHeight;
-
-        const Vec4 clipBL = viewProjection * Vec4(bottomLeft, 1.0f);
-        const Vec4 clipBR = viewProjection * Vec4(bottomRight, 1.0f);
-        const Vec4 clipTL = viewProjection * Vec4(topLeft, 1.0f);
-        const Vec4 clipTR = viewProjection * Vec4(topRight, 1.0f);
-        if (clipBL.w < CLIP_NEAR_EPSILON || clipBR.w < CLIP_NEAR_EPSILON ||
-            clipTL.w < CLIP_NEAR_EPSILON || clipTR.w < CLIP_NEAR_EPSILON)
-        {
-            continue;
-        }
-
-        float sxBL, syBL, sxBR, syBR, sxTL, syTL, sxTR, syTR;
-        if (!projectClipToScreen(clipBL, vpW, vpH, sxBL, syBL) ||
-            !projectClipToScreen(clipBR, vpW, vpH, sxBR, syBR) ||
-            !projectClipToScreen(clipTL, vpW, vpH, sxTL, syTL) ||
-            !projectClipToScreen(clipTR, vpW, vpH, sxTR, syTR))
-        {
-            continue;
-        }
-
-        SDL_Vertex vertices[4];
-        vertices[0].position = {sxBL, syBL};
-        vertices[1].position = {sxBR, syBR};
-        vertices[2].position = {sxTL, syTL};
-        vertices[3].position = {sxTR, syTR};
-        for (auto& vertex : vertices)
-        {
-            vertex.color = sprite.color;
-        }
-        vertices[0].tex_coord = {0.0f, 1.0f};
-        vertices[1].tex_coord = {1.0f, 1.0f};
-        vertices[2].tex_coord = {0.0f, 0.0f};
-        vertices[3].tex_coord = {1.0f, 0.0f};
-
-        constexpr int indices[6] = {0, 1, 2, 2, 1, 3};
-        SDL_RenderGeometry(renderer.getSDLRenderer(), texture, vertices, 4, indices, 6);
     }
 }
 
