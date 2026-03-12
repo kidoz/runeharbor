@@ -168,12 +168,22 @@ struct BillboardSprite
 };
 
 BillboardSprite makeIndoorDecorationBillboard(const formats::ParsedDecoration& decoration,
-                                              const Vec3& cameraPos)
+                                              const Vec3& cameraPos,
+                                              const formats::SpriteFrameTable* spriteFrameTable)
 {
     BillboardSprite sprite;
     sprite.basePos = {static_cast<float>(decoration.x), static_cast<float>(decoration.y),
                       static_cast<float>(decoration.z)};
     sprite.textureName = decoration.name;
+
+    if (spriteFrameTable)
+    {
+        auto entry = spriteFrameTable->findEntryByIcon(decoration.name);
+        if (entry && !entry->textureName.empty())
+        {
+            sprite.textureName = entry->textureName;
+        }
+    }
 
     const std::string lowerName = toLowerCopy(decoration.name);
     sprite.color = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -238,6 +248,11 @@ IndoorRenderer::~IndoorRenderer() = default;
 void IndoorRenderer::setTextureLookup(TextureLookup lookup)
 {
     textureLookup = std::move(lookup);
+}
+
+void IndoorRenderer::setSpriteFrameTable(const formats::SpriteFrameTable* table)
+{
+    spriteFrameTable = table;
 }
 
 void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
@@ -482,7 +497,7 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         {
             continue;
         }
-        billboards.push_back(makeIndoorDecorationBillboard(decoration, cameraPos));
+        billboards.push_back(makeIndoorDecorationBillboard(decoration, cameraPos, spriteFrameTable));
     }
 
     for (const auto& spawn : blvData.spawns)
@@ -524,10 +539,29 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         }
         right.normalize();
 
-        const Vec3 bottomLeft = sprite.basePos - right * sprite.halfWidth;
-        const Vec3 bottomRight = sprite.basePos + right * sprite.halfWidth;
-        const Vec3 topLeft = bottomLeft + worldUp * sprite.height;
-        const Vec3 topRight = bottomRight + worldUp * sprite.height;
+        SDL_Texture* texture = nullptr;
+        float actualHalfWidth = sprite.halfWidth;
+        float actualHeight = sprite.height;
+
+        if (textureLookup && !sprite.textureName.empty())
+        {
+            texture = textureLookup(sprite.textureName);
+            if (texture)
+            {
+                float w, h;
+                if (SDL_GetTextureSize(texture, &w, &h))
+                {
+                    const float scale = 0.6f;
+                    actualHalfWidth = (w * scale) * 0.5f;
+                    actualHeight = h * scale;
+                }
+            }
+        }
+
+        const Vec3 bottomLeft = sprite.basePos - right * actualHalfWidth;
+        const Vec3 bottomRight = sprite.basePos + right * actualHalfWidth;
+        const Vec3 topLeft = bottomLeft + worldUp * actualHeight;
+        const Vec3 topRight = bottomRight + worldUp * actualHeight;
 
         const Vec4 clipBL = viewProjection * Vec4(bottomLeft, 1.0f);
         const Vec4 clipBR = viewProjection * Vec4(bottomRight, 1.0f);
@@ -562,11 +596,6 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         vertices[2].tex_coord = {0.0f, 0.0f};
         vertices[3].tex_coord = {1.0f, 0.0f};
 
-        SDL_Texture* texture = nullptr;
-        if (textureLookup && !sprite.textureName.empty())
-        {
-            texture = textureLookup(sprite.textureName);
-        }
         constexpr int indices[6] = {0, 1, 2, 2, 1, 3};
         SDL_RenderGeometry(renderer.getSDLRenderer(), texture, vertices, 4, indices, 6);
     }

@@ -195,6 +195,11 @@ void OutdoorRenderer::setTextureLookup(TextureLookup lookup)
     textureLookup = std::move(lookup);
 }
 
+void OutdoorRenderer::setSpriteFrameTable(const formats::SpriteFrameTable* table)
+{
+    spriteFrameTable = table;
+}
+
 void OutdoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                              const game::RuntimeConfig* runtimeConfig, float nightBlend,
                              const Frustum* frustumOverride)

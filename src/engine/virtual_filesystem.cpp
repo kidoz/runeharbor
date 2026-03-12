@@ -9,6 +9,7 @@
 #include "../formats/game_lod_archive.hpp"
 #include "../formats/image_lod_archive.hpp"
 #include "../formats/lod_archive.hpp"
+#include "../formats/sprite_lod_archive.hpp"
 #include "../util/ilogger.hpp"
 
 namespace runeharbor::engine
@@ -75,9 +76,27 @@ bool VirtualFileSystem::mountGameArchive(const std::filesystem::path& archivePat
     return true;
 }
 
+bool VirtualFileSystem::mountSpriteArchive(const std::filesystem::path& archivePath)
+{
+    auto archive = std::make_unique<formats::SpriteLODArchive>(logger);
+
+    if (!archive->open(archivePath))
+    {
+        logger.error(std::format("Failed to mount sprite archive: {}", archivePath.string()));
+        return false;
+    }
+
+    archivePaths.push_back(archivePath);
+    spriteArchives.push_back(std::move(archive));
+
+    logger.info(std::format("Mounted sprite archive: {} ({} total sprite archives)",
+                            archivePath.filename().string(), spriteArchives.size()));
+    return true;
+}
+
 void VirtualFileSystem::unmountAll()
 {
-    if (!archives.empty() || !imageArchives.empty() || !gameArchives.empty())
+    if (!archives.empty() || !imageArchives.empty() || !gameArchives.empty() || !spriteArchives.empty())
     {
         logger.info("Unmounted all archives");
     }
@@ -85,12 +104,13 @@ void VirtualFileSystem::unmountAll()
     archives.clear();
     imageArchives.clear();
     gameArchives.clear();
+    spriteArchives.clear();
     archivePaths.clear();
 }
 
 std::optional<std::vector<uint8_t>> VirtualFileSystem::readFile(const std::string& filename)
 {
-    if (archives.empty() && imageArchives.empty() && gameArchives.empty())
+    if (archives.empty() && imageArchives.empty() && gameArchives.empty() && spriteArchives.empty())
     {
         logger.warning("Cannot read file: no archives mounted");
         return std::nullopt;
@@ -116,6 +136,18 @@ std::optional<std::vector<uint8_t>> VirtualFileSystem::readFile(const std::strin
         {
             logger.debug(
                 std::format("Read {} from image archive ({} bytes)", filename, data->size()));
+            return data;
+        }
+    }
+
+    // Then search sprite archives
+    for (size_t i = 0; i < spriteArchives.size(); i++)
+    {
+        auto data = spriteArchives[i]->extractFile(filename);
+        if (data.has_value())
+        {
+            logger.debug(
+                std::format("Read {} from sprite archive ({} bytes)", filename, data->size()));
             return data;
         }
     }
@@ -181,6 +213,19 @@ bool VirtualFileSystem::fileExists(const std::string& filename)
         }
     }
 
+    // Check sprite archives
+    for (const auto& archive : spriteArchives)
+    {
+        auto files = archive->listFiles();
+        for (const auto& name : files)
+        {
+            if (equalsIgnoreCase(name, filename))
+            {
+                return true;
+            }
+        }
+    }
+
     // Check game archives
     for (const auto& archive : gameArchives)
     {
@@ -215,6 +260,13 @@ std::vector<std::string> VirtualFileSystem::listAllFiles() const
         allFiles.insert(allFiles.end(), files.begin(), files.end());
     }
 
+    // Collect files from sprite archives
+    for (const auto& archive : spriteArchives)
+    {
+        auto files = archive->listFiles();
+        allFiles.insert(allFiles.end(), files.begin(), files.end());
+    }
+
     // Collect files from game archives
     for (const auto& archive : gameArchives)
     {
@@ -231,12 +283,25 @@ std::vector<std::string> VirtualFileSystem::listAllFiles() const
 
 size_t VirtualFileSystem::getMountedArchiveCount() const
 {
-    return archives.size() + imageArchives.size() + gameArchives.size();
+    return archives.size() + imageArchives.size() + gameArchives.size() + spriteArchives.size();
 }
 
 std::optional<formats::ImageFileHeader> VirtualFileSystem::getImageInfo(const std::string& filename)
 {
     for (auto& archive : imageArchives)
+    {
+        auto info = archive->getFileInfo(filename);
+        if (info.has_value())
+        {
+            return info;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<formats::SpriteFileHeader> VirtualFileSystem::getSpriteInfo(const std::string& filename)
+{
+    for (auto& archive : spriteArchives)
     {
         auto info = archive->getFileInfo(filename);
         if (info.has_value())

@@ -19,7 +19,9 @@ namespace runeharbor::formats
 class LODArchive;
 class ImageLODArchive;
 class GameLODArchive;
+class SpriteLODArchive;
 struct ImageFileHeader;
+struct SpriteFileHeader;
 } // namespace runeharbor::formats
 
 namespace runeharbor::engine
@@ -60,6 +62,10 @@ class VirtualFileSystem
     /// Returns true on success, false on failure
     bool mountGameArchive(const std::filesystem::path& archivePath);
 
+    /// Mount a sprite LOD archive (SPRITES.LOD, SPRITELO.LOD)
+    /// Returns true on success, false on failure
+    bool mountSpriteArchive(const std::filesystem::path& archivePath);
+
     /// Unmount all archives (both text and image)
     void unmountAll();
 
@@ -80,6 +86,10 @@ class VirtualFileSystem
     /// Only works for files in image archives (BITMAPS.LOD, etc.)
     std::optional<formats::ImageFileHeader> getImageInfo(const std::string& filename);
 
+    /// Get sprite file header info
+    /// Only works for files in sprite archives (SPRITES.LOD, etc.)
+    std::optional<formats::SpriteFileHeader> getSpriteInfo(const std::string& filename);
+
     /// Extract the embedded 768-byte RGB palette from an image LOD entry.
     /// Returns nullopt if no embedded palette exists.
     std::optional<std::vector<uint8_t>> getImagePalette(const std::string& filename);
@@ -95,6 +105,9 @@ class VirtualFileSystem
 
     // Mounted game archives (GAMES.LOD) - in mount order
     std::vector<std::unique_ptr<formats::GameLODArchive>> gameArchives;
+
+    // Mounted sprite archives (SPRITES.LOD, etc.) - in mount order
+    std::vector<std::unique_ptr<formats::SpriteLODArchive>> spriteArchives;
 
     // Archive paths for debugging/logging
     std::vector<std::filesystem::path> archivePaths;

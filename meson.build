@@ -26,5 +26,3 @@ inc_dirs = include_directories('src')
 
 # Subdirectories
 subdir('src')
-subdir('tests')
-subdir('tools')

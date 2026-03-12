@@ -54,6 +54,7 @@ class SpriteFrameTable
     bool parse(const std::vector<uint8_t>& data);
     bool parseText(std::string_view text);
     const std::vector<SpriteFrameEntry>& entries() const { return entries_; }
+    const SpriteFrameEntry* findEntryByIcon(std::string_view iconName) const;
 
   private:
     std::vector<SpriteFrameEntry> entries_;

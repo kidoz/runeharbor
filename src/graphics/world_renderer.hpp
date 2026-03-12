@@ -27,6 +27,7 @@ class WorldRenderer
     ~WorldRenderer();
 
     void setTextureLookup(TextureLookup lookup);
+    void setSpriteFrameTable(const formats::SpriteFrameTable* table);
     void setExtraPickCandidates(std::vector<PickCandidate> candidates);
     void clearExtraPickCandidates();
     void refreshPickCache(const engine::MapScene& scene, const Camera& camera);

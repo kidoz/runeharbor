@@ -5,6 +5,7 @@
 #include <string>
 
 #include "../engine/map_scene.hpp"
+#include "../formats/frame_tables.hpp"
 #include "camera.hpp"
 #include "sdl_renderer.hpp"
 #include "visibility.hpp"
@@ -28,6 +29,7 @@ class OutdoorRenderer
     ~OutdoorRenderer();
 
     void setTextureLookup(TextureLookup lookup);
+    void setSpriteFrameTable(const formats::SpriteFrameTable* table);
     void render(const engine::MapScene& scene, const Camera& camera,
                 const game::RuntimeConfig* runtimeConfig = nullptr, float nightBlend = 0.0f,
                 const Frustum* frustumOverride = nullptr);
@@ -47,6 +49,7 @@ class OutdoorRenderer
     SDLRenderer& renderer;
     util::ILogger& logger;
     TextureLookup textureLookup;
+    const formats::SpriteFrameTable* spriteFrameTable = nullptr;
 };
 
 } // namespace runeharbor::graphics

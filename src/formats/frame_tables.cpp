@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: MIT
 #include "frame_tables.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <string>
 #include <vector>
 
 #include <cstring>
+
+#include "../util/string_utils.hpp"
 
 namespace runeharbor::formats
 {
@@ -226,6 +229,18 @@ bool SpriteFrameTable::parseText(std::string_view text)
     }
 
     return !entries_.empty();
+}
+
+const SpriteFrameEntry* SpriteFrameTable::findEntryByIcon(std::string_view iconName) const
+{
+    auto it = std::find_if(entries_.begin(), entries_.end(),
+                           [iconName](const SpriteFrameEntry& entry)
+                           { return util::equalsIgnoreCase(entry.iconName, iconName); });
+    if (it != entries_.end())
+    {
+        return &(*it);
+    }
+    return nullptr;
 }
 
 bool TextureFrameTable::parse(const std::vector<uint8_t>& data)

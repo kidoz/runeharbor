@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include "../engine/map_scene.hpp"
+#include "../formats/frame_tables.hpp"
 #include "camera.hpp"
 #include "sdl_renderer.hpp"
 
@@ -27,6 +28,7 @@ class IndoorRenderer
     ~IndoorRenderer();
 
     void setTextureLookup(TextureLookup lookup);
+    void setSpriteFrameTable(const formats::SpriteFrameTable* table);
     void render(const engine::MapScene& scene, const Camera& camera,
                 const runeharbor::game::RuntimeConfig* runtimeConfig = nullptr,
                 const std::unordered_set<uint16_t>* visibleSectors = nullptr);
@@ -35,6 +37,7 @@ class IndoorRenderer
     SDLRenderer& renderer;
     [[maybe_unused]] util::ILogger& logger;
     TextureLookup textureLookup;
+    const formats::SpriteFrameTable* spriteFrameTable = nullptr;
 };
 
 } // namespace runeharbor::graphics

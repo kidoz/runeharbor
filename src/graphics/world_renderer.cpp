@@ -30,6 +30,18 @@ void WorldRenderer::setTextureLookup(TextureLookup lookup)
     }
 }
 
+void WorldRenderer::setSpriteFrameTable(const formats::SpriteFrameTable* table)
+{
+    if (indoorRenderer)
+    {
+        indoorRenderer->setSpriteFrameTable(table);
+    }
+    if (outdoorRenderer)
+    {
+        outdoorRenderer->setSpriteFrameTable(table);
+    }
+}
+
 void WorldRenderer::setExtraPickCandidates(std::vector<PickCandidate> candidates)
 {
     extraPickCandidates_ = std::move(candidates);
