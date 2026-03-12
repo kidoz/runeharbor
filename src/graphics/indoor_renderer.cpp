@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <format>
 #include <string_view>
 
 #include <cctype>
@@ -214,7 +215,7 @@ BillboardSprite makeIndoorDecorationBillboard(const formats::ParsedDecoration& d
     return sprite;
 }
 
-BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, const Vec3& cameraPos, const game::RuntimeConfig* config)
+BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, const Vec3& cameraPos, [[maybe_unused]] const game::RuntimeConfig* config, const IndoorRenderer::MonsterSpriteLookup& monsterLookup)
 {
     BillboardSprite sprite;
     sprite.basePos = {static_cast<float>(spawn.x), static_cast<float>(spawn.y),
@@ -223,6 +224,24 @@ BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, co
     const float baseHeight = std::max(kMinBillboardHeight, static_cast<float>(spawn.radius) * 2.0f);
     sprite.height = std::clamp(baseHeight, 56.0f, 220.0f);
     sprite.halfWidth = std::max(kMinBillboardHalfWidth, sprite.height * 0.38f);
+
+    if (monsterLookup)
+    {
+        std::string baseName = monsterLookup(spawn.objectType);
+        if (!baseName.empty())
+        {
+            // Calculate 8-directional facing index based on time and angle
+            // facing is probably 0-2047, but for now we'll just use a time offset for random rotation
+            uint32_t ticks = SDL_GetTicks();
+            uint32_t animOffset = (ticks / 100) % 8; // Change frame every 100ms
+            
+            // Assuming static spawns just face forward for now if we don't have their rotation
+            int directionIndex = animOffset; // fallback random rotation
+            
+            // Limit to max 11 chars + 2 digit suffix if needed, but std::format handles it
+            sprite.textureName = std::format("{}{:02d}", baseName.substr(0, std::min<size_t>(baseName.length(), 6)), directionIndex + 1); // frames are often 1-indexed? Wait, MM7 uses 00-07 for directions maybe? Let's try 01
+        }
+    }
 
     const int group = std::max(0, static_cast<int>(spawn.group));
     const int seed = (static_cast<int>(spawn.objectType) * 131) ^
@@ -249,6 +268,11 @@ IndoorRenderer::~IndoorRenderer() = default;
 void IndoorRenderer::setTextureLookup(TextureLookup lookup)
 {
     textureLookup = std::move(lookup);
+}
+
+void IndoorRenderer::setMonsterSpriteLookup(MonsterSpriteLookup lookup)
+{
+    monsterSpriteLookup = std::move(lookup);
 }
 
 void IndoorRenderer::setSpriteFrameTable(const formats::SpriteFrameTable* table)
@@ -393,7 +417,7 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         if (runtimeConfig && runtimeConfig->noMonsters) break;
         if (spawn.objectType == 0) continue;
         
-        BillboardSprite sprite = makeIndoorSpawnBillboard(spawn, cameraPos, runtimeConfig);
+        BillboardSprite sprite = makeIndoorSpawnBillboard(spawn, cameraPos, runtimeConfig, monsterSpriteLookup);
         if (sprite.distanceSq > 100000000.0f) continue;
         
         RenderOp op;

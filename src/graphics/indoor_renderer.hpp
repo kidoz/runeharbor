@@ -27,7 +27,9 @@ class IndoorRenderer
     IndoorRenderer(SDLRenderer& renderer, util::ILogger& logger);
     ~IndoorRenderer();
 
+    using MonsterSpriteLookup = std::function<std::string(uint16_t objectType)>;
     void setTextureLookup(TextureLookup lookup);
+    void setMonsterSpriteLookup(MonsterSpriteLookup lookup);
     void setSpriteFrameTable(const formats::SpriteFrameTable* table);
     void render(const engine::MapScene& scene, const Camera& camera,
                 const runeharbor::game::RuntimeConfig* runtimeConfig = nullptr,
@@ -37,6 +39,7 @@ class IndoorRenderer
     SDLRenderer& renderer;
     [[maybe_unused]] util::ILogger& logger;
     TextureLookup textureLookup;
+    MonsterSpriteLookup monsterSpriteLookup;
     const formats::SpriteFrameTable* spriteFrameTable = nullptr;
 };
 

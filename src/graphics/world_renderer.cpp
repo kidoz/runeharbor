@@ -30,6 +30,18 @@ void WorldRenderer::setTextureLookup(TextureLookup lookup)
     }
 }
 
+void WorldRenderer::setMonsterSpriteLookup(MonsterSpriteLookup lookup)
+{
+    if (indoorRenderer)
+    {
+        indoorRenderer->setMonsterSpriteLookup(lookup);
+    }
+    if (outdoorRenderer)
+    {
+        outdoorRenderer->setMonsterSpriteLookup(std::move(lookup));
+    }
+}
+
 void WorldRenderer::setSpriteFrameTable(const formats::SpriteFrameTable* table)
 {
     if (indoorRenderer)

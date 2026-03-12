@@ -26,7 +26,9 @@ class WorldRenderer
     WorldRenderer(SDLRenderer& renderer, util::ILogger& logger);
     ~WorldRenderer();
 
+    using MonsterSpriteLookup = std::function<std::string(uint16_t objectType)>;
     void setTextureLookup(TextureLookup lookup);
+    void setMonsterSpriteLookup(MonsterSpriteLookup lookup);
     void setSpriteFrameTable(const formats::SpriteFrameTable* table);
     void setExtraPickCandidates(std::vector<PickCandidate> candidates);
     void clearExtraPickCandidates();

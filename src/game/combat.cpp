@@ -85,6 +85,16 @@ MonsterInstance::Personality parsePersonality(std::string_view aiTypeRaw)
 
 CombatSystem::CombatSystem(util::ILogger& logger) : logger_(logger) {}
 
+const formats::MonsterEntry* CombatSystem::getMonsterDef(int monsterId) const
+{
+    auto it = monsterDefs_.find(monsterId);
+    if (it != monsterDefs_.end())
+    {
+        return &it->second;
+    }
+    return nullptr;
+}
+
 void CombatSystem::loadMonsterData(const std::vector<formats::MonsterEntry>& monsters)
 {
     monsterDefs_.clear();

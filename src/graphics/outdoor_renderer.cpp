@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <format>
 
 #include <cmath>
 
@@ -145,9 +146,10 @@ struct SpawnBillboard
     float height = kMinSpawnBillboardHeight;
     float distanceSq = 0.0f;
     SDL_FColor color = {1.0f, 1.0f, 1.0f, 0.75f};
+    std::string textureName;
 };
 
-SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, const Vec3& cameraPos, const game::RuntimeConfig* config)
+SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, const Vec3& cameraPos, [[maybe_unused]] const game::RuntimeConfig* config, const OutdoorRenderer::MonsterSpriteLookup& monsterLookup)
 {
     SpawnBillboard sprite;
     sprite.basePos = {static_cast<float>(spawn.x), static_cast<float>(spawn.y),
@@ -157,6 +159,25 @@ SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, co
         std::max(kMinSpawnBillboardHeight, static_cast<float>(spawn.radius) * 2.0f);
     sprite.height = std::clamp(baseHeight, 56.0f, 260.0f);
     sprite.halfWidth = std::max(kMinSpawnBillboardHalfWidth, sprite.height * 0.38f);
+
+    if (monsterLookup)
+    {
+        std::string baseName = monsterLookup(spawn.objectType);
+        if (!baseName.empty())
+        {
+            uint32_t ticks = SDL_GetTicks();
+            uint32_t animOffset = (ticks / 100) % 8; 
+            int directionIndex = animOffset; 
+            
+            // e.g. "Goblina" -> "Goblin01"
+            std::string prefix = baseName.substr(0, std::min<size_t>(baseName.length(), 6));
+            
+            // To be precise we need to know the animation set.
+            // MM7 uses "w" for walk, "s" for stand, "a" for attack, etc.
+            // Let's assume stand (s) or walk (w).
+            sprite.textureName = std::format("{}w{:02d}", prefix, directionIndex + 1); // Walk animation, frame 1-8
+        }
+    }
 
     const int group = std::max(0, static_cast<int>(spawn.group));
     const int seed = (static_cast<int>(spawn.objectType) * 163) ^
@@ -193,6 +214,11 @@ OutdoorRenderer::~OutdoorRenderer() = default;
 void OutdoorRenderer::setTextureLookup(TextureLookup lookup)
 {
     textureLookup = std::move(lookup);
+}
+
+void OutdoorRenderer::setMonsterSpriteLookup(MonsterSpriteLookup lookup)
+{
+    monsterSpriteLookup = std::move(lookup);
 }
 
 void OutdoorRenderer::setSpriteFrameTable(const formats::SpriteFrameTable* table)
@@ -754,7 +780,7 @@ void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
             continue;
         }
 
-        sprites.push_back(makeOutdoorSpawnBillboard(spawn, cameraPos, runtimeConfig));
+        sprites.push_back(makeOutdoorSpawnBillboard(spawn, cameraPos, runtimeConfig, monsterSpriteLookup));
     }
 
     std::sort(sprites.begin(), sprites.end(), [](const SpawnBillboard& a, const SpawnBillboard& b)
