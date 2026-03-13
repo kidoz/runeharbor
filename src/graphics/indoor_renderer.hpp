@@ -9,6 +9,7 @@
 #include "../formats/frame_tables.hpp"
 #include "camera.hpp"
 #include "sdl_renderer.hpp"
+#include "light_stack.hpp"
 
 struct SDL_Texture;
 namespace runeharbor::game
@@ -35,12 +36,18 @@ class IndoorRenderer
                 const runeharbor::game::RuntimeConfig* runtimeConfig = nullptr,
                 const std::unordered_set<uint16_t>* visibleSectors = nullptr);
 
+    LightStack& getStationaryLightStack() { return stationaryLights_; }
+    LightStack& getMobileLightStack() { return mobileLights_; }
+
   private:
     SDLRenderer& renderer;
     [[maybe_unused]] util::ILogger& logger;
     TextureLookup textureLookup;
     MonsterSpriteLookup monsterSpriteLookup;
     const formats::SpriteFrameTable* spriteFrameTable = nullptr;
+
+    LightStack stationaryLights_;
+    LightStack mobileLights_;
 };
 
 } // namespace runeharbor::graphics

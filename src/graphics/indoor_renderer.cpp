@@ -83,7 +83,8 @@ float sectorAmbientScale(const formats::BLVMapData& blvData, const formats::Pars
 }
 
 SDL_FColor dynamicLightContribution(const formats::BLVMapData& blvData,
-                                    const formats::ParsedFace& face, float x, float y, float z)
+                                    const formats::ParsedFace& face, float x, float y, float z,
+                                    const LightStack& stationaryLights, const LightStack& mobileLights)
 {
     SDL_FColor add = {0.0f, 0.0f, 0.0f, 0.0f};
     if ((face.attributes & kNoLightFaceBit) != 0)
@@ -91,27 +92,23 @@ SDL_FColor dynamicLightContribution(const formats::BLVMapData& blvData,
         return add;
     }
 
-    auto addLight = [&](const formats::BLVLight& light)
+    auto addLight = [&](float lx, float ly, float lz, float radius, float brightness, float r, float g, float b)
     {
-        const float radius = std::max(1.0f, static_cast<float>(light.radius));
-        const float dx = static_cast<float>(light.x) - x;
-        const float dy = static_cast<float>(light.y) - y;
-        const float dz = static_cast<float>(light.z) - z;
-        const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-        if (dist >= radius)
+        const float distSq = (lx - x) * (lx - x) + (ly - y) * (ly - y) + (lz - z) * (lz - z);
+        if (distSq >= radius * radius)
         {
             return;
         }
 
+        const float dist = std::sqrt(distSq);
         const float falloff = 1.0f - dist / radius;
-        const float brightness =
-            std::clamp(static_cast<float>(light.brightness) / 96.0f, 0.10f, 1.0f);
         const float intensity = falloff * brightness;
-        add.r += (static_cast<float>(light.red) / 255.0f) * intensity;
-        add.g += (static_cast<float>(light.green) / 255.0f) * intensity;
-        add.b += (static_cast<float>(light.blue) / 255.0f) * intensity;
+        add.r += r * intensity;
+        add.g += g * intensity;
+        add.b += b * intensity;
     };
 
+    // 1. Process baked map lights
     bool usedSectorLights = false;
     if (face.sectorId < blvData.sectors.size())
     {
@@ -123,7 +120,13 @@ SDL_FColor dynamicLightContribution(const formats::BLVMapData& blvData,
                 continue;
             }
             usedSectorLights = true;
-            addLight(blvData.lights[lightId]);
+            const auto& light = blvData.lights[lightId];
+            addLight(static_cast<float>(light.x), static_cast<float>(light.y), static_cast<float>(light.z),
+                     std::max(1.0f, static_cast<float>(light.radius)),
+                     std::clamp(static_cast<float>(light.brightness) / 96.0f, 0.10f, 1.0f),
+                     static_cast<float>(light.red) / 255.0f,
+                     static_cast<float>(light.green) / 255.0f,
+                     static_cast<float>(light.blue) / 255.0f);
         }
     }
 
@@ -131,7 +134,32 @@ SDL_FColor dynamicLightContribution(const formats::BLVMapData& blvData,
     {
         for (const auto& light : blvData.lights)
         {
-            addLight(light);
+            addLight(static_cast<float>(light.x), static_cast<float>(light.y), static_cast<float>(light.z),
+                     std::max(1.0f, static_cast<float>(light.radius)),
+                     std::clamp(static_cast<float>(light.brightness) / 96.0f, 0.10f, 1.0f),
+                     static_cast<float>(light.red) / 255.0f,
+                     static_cast<float>(light.green) / 255.0f,
+                     static_cast<float>(light.blue) / 255.0f);
+        }
+    }
+
+    // 2. Process Stationary Light Stack
+    for (const auto& light : stationaryLights.getLights())
+    {
+        if (light.active)
+        {
+            addLight(light.position.x, light.position.y, light.position.z,
+                     light.radius, light.brightness, light.color.r, light.color.g, light.color.b);
+        }
+    }
+
+    // 3. Process Mobile Light Stack
+    for (const auto& light : mobileLights.getLights())
+    {
+        if (light.active)
+        {
+            addLight(light.position.x, light.position.y, light.position.z,
+                     light.radius, light.brightness, light.color.r, light.color.g, light.color.b);
         }
     }
 
@@ -142,7 +170,8 @@ SDL_FColor dynamicLightContribution(const formats::BLVMapData& blvData,
 }
 
 SDL_FColor litIndoorFaceColor(const formats::BLVMapData& blvData, const formats::ParsedFace& face,
-                              float x, float y, float z)
+                              float x, float y, float z,
+                              const LightStack& stationaryLights, const LightStack& mobileLights)
 {
     SDL_FColor color = surfaceColor(face);
     if ((face.attributes & kNoLightFaceBit) != 0)
@@ -151,7 +180,7 @@ SDL_FColor litIndoorFaceColor(const formats::BLVMapData& blvData, const formats:
     }
 
     const float ambient = sectorAmbientScale(blvData, face);
-    const SDL_FColor dynamic = dynamicLightContribution(blvData, face, x, y, z);
+    const SDL_FColor dynamic = dynamicLightContribution(blvData, face, x, y, z, stationaryLights, mobileLights);
     color.r = std::clamp(color.r * ambient + dynamic.r * 0.75f, 0.0f, 1.0f);
     color.g = std::clamp(color.g * ambient + dynamic.g * 0.75f, 0.0f, 1.0f);
     color.b = std::clamp(color.b * ambient + dynamic.b * 0.75f, 0.0f, 1.0f);
@@ -462,7 +491,7 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         if (op.type == RenderOpType::Face)
         {
             const auto& face = blvData.faces[op.index];
-            const SDL_FColor faceColor = litIndoorFaceColor(blvData, face, op.cx, op.cy, op.cz);
+            const SDL_FColor faceColor = litIndoorFaceColor(blvData, face, op.cx, op.cy, op.cz, stationaryLights_, mobileLights_);
 
             // Build clip-space polygon
             int polyCount = 0;
@@ -565,10 +594,47 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                 texture = textureLookup(face.textureName);
             }
 
-            // Render triangulated polygon
+            // Render triangulated polygon (base pass)
+            SDL_SetRenderDrawBlendMode(renderer.getSDLRenderer(), SDL_BLENDMODE_BLEND);
             SDL_RenderGeometry(renderer.getSDLRenderer(), texture, vertices.data(),
                                static_cast<int>(vertices.size()), indices.data(),
                                static_cast<int>(indices.size()));
+
+            // Additive light polygon pass
+            if ((face.attributes & kNoLightFaceBit) == 0 && texture != nullptr)
+            {
+                // We re-render the same geometry but with SDL_BLENDMODE_ADD
+                // The color of the vertices for this pass should be purely the dynamic light contribution
+                // We've already computed it in litIndoorFaceColor, but let's recalculate just the dynamic part here for the additive layer
+                // Actually, an easier way is to just apply the dynamic light as an additive overlay
+                // We need to re-generate the vertex colors for the additive pass.
+                // We'll calculate the dynamic light contribution (without ambient) and use it.
+                std::vector<SDL_Vertex> lightVertices = vertices;
+                bool hasLight = false;
+                for (size_t v_idx = 0; v_idx < lightVertices.size(); ++v_idx)
+                {
+                    // Re-project the 2D screen coordinate back to world? No, we don't have the original world pos easily here.
+                    // Oh wait, we used op.cx, op.cy, op.cz for the face center lighting.
+                    // We can just use the dynamic light computed for the face center and apply it to all vertices.
+                    // To do it properly per-vertex, we'd need worldPos for each vertex.
+                    // Let's just use the face center dynamic light for now.
+                    SDL_FColor dynLight = dynamicLightContribution(blvData, face, op.cx, op.cy, op.cz, stationaryLights_, mobileLights_);
+                    if (dynLight.r > 0 || dynLight.g > 0 || dynLight.b > 0)
+                    {
+                        hasLight = true;
+                    }
+                    lightVertices[v_idx].color = {dynLight.r, dynLight.g, dynLight.b, 1.0f}; // Additive needs alpha=1 for the texture blend if any
+                }
+
+                if (hasLight)
+                {
+                    SDL_SetTextureColorMod(texture, 255, 255, 255); // Reset any texture mod
+                    SDL_SetRenderDrawBlendMode(renderer.getSDLRenderer(), SDL_BLENDMODE_ADD);
+                    SDL_RenderGeometry(renderer.getSDLRenderer(), texture, lightVertices.data(),
+                                       static_cast<int>(lightVertices.size()), indices.data(),
+                                       static_cast<int>(indices.size()));
+                }
+            }
         }
         else if (op.type == RenderOpType::Billboard)
         {
