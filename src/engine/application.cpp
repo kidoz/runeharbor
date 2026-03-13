@@ -401,11 +401,12 @@ bool Application::loadGameData(const std::filesystem::path& dataPath)
 
     // Text/data archives
     const std::vector<std::string> textArchives = {
-        "Events.lod",
+        // "Events.lod" is actually using the Image LOD format with 48-byte headers
     };
 
     // Image archives (use different format)
     std::vector<std::string> imageArchives = {
+        "Events.lod",
         "BITMAPS.LOD",
         "ICONS.LOD",
     };
@@ -1505,8 +1506,8 @@ bool Application::loadUiAssets()
     loadPcxTexture({"presrigh", "PRESRIGH"}, "RightArrow", ccRightArrow_.tex, ccRightArrow_.w,
                    ccRightArrow_.h);
 
-    const char* classIconNames[] = {"IC_KNIGHT", "IC_Thief",  "IC_MONK",  "IC_PALADIN", "IC_ARCHER",
-                                    "IC_RANGER", "IC_CLERIC", "IC_DRUID", "IC_SORC"};
+    const char* classIconNames[] = {"IC_Knight", "IC_Thief",  "IC_monk",  "IC_PALAD", "IC_ARCH",
+                                    "IC_Ranger", "IC_CLER", "IC_DRUID", "IC_SORC"};
     for (int i = 0; i < kClassIconCount; i++)
     {
         std::string lower = classIconNames[i];
