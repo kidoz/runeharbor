@@ -383,6 +383,64 @@ std::optional<GameStateId> InGameState::update()
         if (inventory_.visible())
         {
             inventory_.setActiveCharacter(findActivePartyMember());
+            characterStats_.setVisible(false);
+            spellbook_.setVisible(false);
+            restWidget_.setVisible(false);
+            mapWidget_.setVisible(false);
+        }
+    }
+
+    // Toggle character stats
+    if (ctx.isKeyPressed(SDL_SCANCODE_C))
+    {
+        characterStats_.setVisible(!characterStats_.visible());
+        if (characterStats_.visible())
+        {
+            characterStats_.setActiveCharacter(findActivePartyMember());
+            inventory_.setVisible(false);
+            spellbook_.setVisible(false);
+            restWidget_.setVisible(false);
+            mapWidget_.setVisible(false);
+        }
+    }
+
+    // Toggle spellbook
+    if (ctx.isKeyPressed(SDL_SCANCODE_S))
+    {
+        spellbook_.setVisible(!spellbook_.visible());
+        if (spellbook_.visible())
+        {
+            spellbook_.setActiveCharacter(findActivePartyMember());
+            inventory_.setVisible(false);
+            characterStats_.setVisible(false);
+            restWidget_.setVisible(false);
+            mapWidget_.setVisible(false);
+        }
+    }
+
+    // Toggle rest screen
+    if (ctx.isKeyPressed(SDL_SCANCODE_R))
+    {
+        restWidget_.setVisible(!restWidget_.visible());
+        if (restWidget_.visible())
+        {
+            inventory_.setVisible(false);
+            characterStats_.setVisible(false);
+            spellbook_.setVisible(false);
+            mapWidget_.setVisible(false);
+        }
+    }
+
+    // Toggle map screen
+    if (ctx.isKeyPressed(SDL_SCANCODE_M))
+    {
+        mapWidget_.setVisible(!mapWidget_.visible());
+        if (mapWidget_.visible())
+        {
+            inventory_.setVisible(false);
+            characterStats_.setVisible(false);
+            spellbook_.setVisible(false);
+            restWidget_.setVisible(false);
         }
     }
 
@@ -394,10 +452,6 @@ std::optional<GameStateId> InGameState::update()
     if (ctx.isKeyPressed(SDL_SCANCODE_V))
     {
         renderOptions.showWalls = !renderOptions.showWalls;
-    }
-    if (ctx.isKeyPressed(SDL_SCANCODE_C))
-    {
-        renderOptions.showCeilings = !renderOptions.showCeilings;
     }
     if (ctx.isKeyPressed(SDL_SCANCODE_P))
     {
@@ -657,11 +711,38 @@ void InGameState::render()
         hud_.setGameWorld(ctx.shared->gameWorld);
         hud_.setMapScene(ctx.shared->mapScene);
         hud_.render(*ctx.renderer, *ctx.debugText, scale, offsetX, offsetY);
-        
+
         inventory_.setGameWorld(ctx.shared->gameWorld);
-        inventory_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY), 
-                             static_cast<int>(kGameWidth * scale), static_cast<int>(kGameHeight * scale));
+        inventory_.setInventory(ctx.shared->inventory);
+        inventory_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
+                             static_cast<int>(kGameWidth * scale),
+                             static_cast<int>(kGameHeight * scale));
         inventory_.render(*ctx.renderer, *ctx.debugText);
+
+        characterStats_.setGameWorld(ctx.shared->gameWorld);
+        characterStats_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
+                                  static_cast<int>(kGameWidth * scale),
+                                  static_cast<int>(kGameHeight * scale));
+        characterStats_.render(*ctx.renderer, *ctx.debugText);
+
+        spellbook_.setGameWorld(ctx.shared->gameWorld);
+        spellbook_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
+                             static_cast<int>(kGameWidth * scale),
+                             static_cast<int>(kGameHeight * scale));
+        spellbook_.render(*ctx.renderer, *ctx.debugText);
+
+        restWidget_.setGameWorld(ctx.shared->gameWorld);
+        restWidget_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
+                              static_cast<int>(kGameWidth * scale),
+                              static_cast<int>(kGameHeight * scale));
+        restWidget_.render(*ctx.renderer, *ctx.debugText);
+
+        mapWidget_.setGameWorld(ctx.shared->gameWorld);
+        mapWidget_.setMapScene(ctx.shared->mapScene);
+        mapWidget_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
+                             static_cast<int>(kGameWidth * scale),
+                             static_cast<int>(kGameHeight * scale));
+        mapWidget_.render(*ctx.renderer, *ctx.debugText);
     }
 
     renderOverlay();

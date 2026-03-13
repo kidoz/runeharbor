@@ -3,9 +3,13 @@
 
 #include "../../graphics/primitives.hpp"
 #include "../../graphics/visibility.hpp"
+#include "../../ui/character_stats_widget.hpp"
 #include "../../ui/dialogue.hpp"
 #include "../../ui/hud.hpp"
 #include "../../ui/inventory_widget.hpp"
+#include "../../ui/map_widget.hpp"
+#include "../../ui/rest_widget.hpp"
+#include "../../ui/spellbook_widget.hpp"
 #include "../map_scene.hpp"
 #include "igame_state.hpp"
 #include "state_context.hpp"
@@ -23,6 +27,18 @@ class InGameState : public IGameState
     void exit() override;
     std::optional<GameStateId> update() override;
     void render() override;
+
+    void setInventoryBackground(void* tex, int w, int h) { inventory_.setBackground(tex, w, h); }
+
+    using TextureLookup = std::function<void*(const std::string&, int& w, int& h)>;
+    void setTextureLookup(TextureLookup lookup)
+    {
+        inventory_.setTextureLookup(lookup);
+        characterStats_.setTextureLookup(lookup);
+        spellbook_.setTextureLookup(lookup);
+        restWidget_.setTextureLookup(lookup);
+        mapWidget_.setTextureLookup(lookup);
+    }
 
   private:
     graphics::Rect worldViewportRect() const;
@@ -47,6 +63,10 @@ class InGameState : public IGameState
     ui::DialogueWindow dialogue_;
     ui::HUD hud_;
     ui::InventoryWidget inventory_;
+    ui::CharacterStatsWidget characterStats_;
+    ui::SpellbookWidget spellbook_;
+    ui::RestWidget restWidget_;
+    ui::MapWidget mapWidget_;
     uint64_t lastUpdateTicks_ = 0;
     float fpsAccumulatorMs_ = 0.0f;
     int fpsFrameCounter_ = 0;

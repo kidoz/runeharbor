@@ -149,7 +149,9 @@ struct SpawnBillboard
     std::string textureName;
 };
 
-SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, const Vec3& cameraPos, [[maybe_unused]] const game::RuntimeConfig* config, const OutdoorRenderer::MonsterSpriteLookup& monsterLookup)
+SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, const Vec3& cameraPos,
+                                         [[maybe_unused]] const game::RuntimeConfig* config,
+                                         const OutdoorRenderer::MonsterSpriteLookup& monsterLookup)
 {
     SpawnBillboard sprite;
     sprite.basePos = {static_cast<float>(spawn.x), static_cast<float>(spawn.y),
@@ -166,16 +168,32 @@ SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, co
         if (!baseName.empty())
         {
             uint32_t ticks = SDL_GetTicks();
-            uint32_t animOffset = (ticks / 100) % 8; 
-            int directionIndex = animOffset; 
-            
+            // Implement the 8-directional facing system.
+            // In MM7, circle is 2048 units. Slowly spin in place to simulate idle rotation if
+            // stationary.
+            int facing = (ticks / 10) % 2048;
+
+            // Calculate angle from sprite to camera
+            float dx = cameraPos.x - sprite.basePos.x;
+            float dz = cameraPos.z - sprite.basePos.z;
+            float camAngle = std::atan2(dx, dz);
+
+            // Convert to MM7 angle (0 to 2047)
+            int camFacing = static_cast<int>((camAngle + M_PI) * 1024.0f / M_PI) % 2048;
+            if (camFacing < 0)
+                camFacing += 2048;
+
+            // Difference between monster facing and camera angle, mapped to 8 directions
+            int directionIndex = ((facing - camFacing + 2048 + 128) >> 8) & 7;
+
             // e.g. "Goblina" -> "Goblin01"
             std::string prefix = baseName.substr(0, std::min<size_t>(baseName.length(), 6));
-            
+
             // To be precise we need to know the animation set.
             // MM7 uses "w" for walk, "s" for stand, "a" for attack, etc.
             // Let's assume stand (s) or walk (w).
-            sprite.textureName = std::format("{}w{:02d}", prefix, directionIndex + 1); // Walk animation, frame 1-8
+            sprite.textureName =
+                std::format("{}w{:02d}", prefix, directionIndex + 1); // Walk animation, frame 1-8
         }
     }
 
@@ -780,7 +798,8 @@ void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
             continue;
         }
 
-        sprites.push_back(makeOutdoorSpawnBillboard(spawn, cameraPos, runtimeConfig, monsterSpriteLookup));
+        sprites.push_back(
+            makeOutdoorSpawnBillboard(spawn, cameraPos, runtimeConfig, monsterSpriteLookup));
     }
 
     std::sort(sprites.begin(), sprites.end(), [](const SpawnBillboard& a, const SpawnBillboard& b)

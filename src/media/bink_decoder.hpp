@@ -274,8 +274,10 @@ class BinkDecoder
     bool decodePlane(BinkBitReader& bits, uint8_t* plane, uint8_t* prev, uint32_t width,
                      uint32_t height, bool isChroma);
     bool readBundle(BinkBitReader& bits, BinkBundleType type);
-    int readDCTCoeffs(BinkBitReader& bits, int32_t block[64], int* coefCount, int coefIdx[64], int q);
-    void unquantizeDCTCoeffs(int32_t block[64], const int32_t quant[64], int coefCount, int coefIdx[64]);
+    int readDCTCoeffs(BinkBitReader& bits, int32_t block[64], int* coefCount, int coefIdx[64],
+                      int q);
+    void unquantizeDCTCoeffs(int32_t block[64], const int32_t quant[64], int coefCount,
+                             int coefIdx[64]);
 
     // Block decoders
     void decodeBlockSkip(uint8_t* dst, const uint8_t* prev, int stride);

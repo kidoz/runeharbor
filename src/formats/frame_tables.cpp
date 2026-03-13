@@ -233,9 +233,9 @@ bool SpriteFrameTable::parseText(std::string_view text)
 
 const SpriteFrameEntry* SpriteFrameTable::findEntryByIcon(std::string_view iconName) const
 {
-    auto it = std::find_if(entries_.begin(), entries_.end(),
-                           [iconName](const SpriteFrameEntry& entry)
-                           { return util::equalsIgnoreCase(entry.iconName, iconName); });
+    auto it =
+        std::find_if(entries_.begin(), entries_.end(), [iconName](const SpriteFrameEntry& entry)
+                     { return util::equalsIgnoreCase(entry.iconName, iconName); });
     if (it != entries_.end())
     {
         return &(*it);

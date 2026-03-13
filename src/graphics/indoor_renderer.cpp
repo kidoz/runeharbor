@@ -215,7 +215,9 @@ BillboardSprite makeIndoorDecorationBillboard(const formats::ParsedDecoration& d
     return sprite;
 }
 
-BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, const Vec3& cameraPos, [[maybe_unused]] const game::RuntimeConfig* config, const IndoorRenderer::MonsterSpriteLookup& monsterLookup)
+BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, const Vec3& cameraPos,
+                                         [[maybe_unused]] const game::RuntimeConfig* config,
+                                         const IndoorRenderer::MonsterSpriteLookup& monsterLookup)
 {
     BillboardSprite sprite;
     sprite.basePos = {static_cast<float>(spawn.x), static_cast<float>(spawn.y),
@@ -230,16 +232,28 @@ BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, co
         std::string baseName = monsterLookup(spawn.objectType);
         if (!baseName.empty())
         {
-            // Calculate 8-directional facing index based on time and angle
-            // facing is probably 0-2047, but for now we'll just use a time offset for random rotation
+            // Implement 8-directional facing index based on time and camera angle
             uint32_t ticks = SDL_GetTicks();
-            uint32_t animOffset = (ticks / 100) % 8; // Change frame every 100ms
-            
-            // Assuming static spawns just face forward for now if we don't have their rotation
-            int directionIndex = animOffset; // fallback random rotation
-            
+            // Slowly spin stationary spawns for idle animation effect
+            int facing = (ticks / 10) % 2048;
+
+            // Camera relative angle
+            float dx = cameraPos.x - sprite.basePos.x;
+            float dz = cameraPos.z - sprite.basePos.z;
+            float camAngle = std::atan2(dx, dz);
+
+            // Convert to MM7 angle (0 to 2047)
+            int camFacing = static_cast<int>((camAngle + M_PI) * 1024.0f / M_PI) % 2048;
+            if (camFacing < 0)
+                camFacing += 2048;
+
+            // Difference mapped to 8 directions
+            int directionIndex = ((facing - camFacing + 2048 + 128) >> 8) & 7;
+
             // Limit to max 11 chars + 2 digit suffix if needed, but std::format handles it
-            sprite.textureName = std::format("{}{:02d}", baseName.substr(0, std::min<size_t>(baseName.length(), 6)), directionIndex + 1); // frames are often 1-indexed? Wait, MM7 uses 00-07 for directions maybe? Let's try 01
+            sprite.textureName =
+                std::format("{}{:02d}", baseName.substr(0, std::min<size_t>(baseName.length(), 6)),
+                            directionIndex + 1);
         }
     }
 
@@ -322,8 +336,8 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
     {
         RenderOpType type;
         float distanceSq;
-        uint32_t index; // For Face
-        float cx, cy, cz; // For Face
+        uint32_t index;            // For Face
+        float cx, cy, cz;          // For Face
         BillboardSprite billboard; // For Billboard
     };
 
@@ -398,13 +412,18 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
 
     for (const auto& decoration : blvData.decorations)
     {
-        if (runtimeConfig && runtimeConfig->noDecorations) break;
-        if (decoration.hidden) continue;
-        if (decoration.name.empty()) continue;
-        
-        BillboardSprite sprite = makeIndoorDecorationBillboard(decoration, cameraPos, spriteFrameTable, SDL_GetTicks());
-        if (sprite.distanceSq > 100000000.0f) continue;
-        
+        if (runtimeConfig && runtimeConfig->noDecorations)
+            break;
+        if (decoration.hidden)
+            continue;
+        if (decoration.name.empty())
+            continue;
+
+        BillboardSprite sprite =
+            makeIndoorDecorationBillboard(decoration, cameraPos, spriteFrameTable, SDL_GetTicks());
+        if (sprite.distanceSq > 100000000.0f)
+            continue;
+
         RenderOp op;
         op.type = RenderOpType::Billboard;
         op.distanceSq = sprite.distanceSq;
@@ -414,12 +433,16 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
 
     for (const auto& spawn : blvData.spawns)
     {
-        if (runtimeConfig && runtimeConfig->noMonsters) break;
-        if (spawn.objectType == 0) continue;
-        
-        BillboardSprite sprite = makeIndoorSpawnBillboard(spawn, cameraPos, runtimeConfig, monsterSpriteLookup);
-        if (sprite.distanceSq > 100000000.0f) continue;
-        
+        if (runtimeConfig && runtimeConfig->noMonsters)
+            break;
+        if (spawn.objectType == 0)
+            continue;
+
+        BillboardSprite sprite =
+            makeIndoorSpawnBillboard(spawn, cameraPos, runtimeConfig, monsterSpriteLookup);
+        if (sprite.distanceSq > 100000000.0f)
+            continue;
+
         RenderOp op;
         op.type = RenderOpType::Billboard;
         op.distanceSq = sprite.distanceSq;
@@ -441,116 +464,116 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
             const auto& face = blvData.faces[op.index];
             const SDL_FColor faceColor = litIndoorFaceColor(blvData, face, op.cx, op.cy, op.cz);
 
-        // Build clip-space polygon
-        int polyCount = 0;
-        bool allBehind = true;
+            // Build clip-space polygon
+            int polyCount = 0;
+            bool allBehind = true;
 
-        for (uint8_t i = 0; i < face.numVertices; i++)
-        {
-            if (i >= face.vertexIndices.size())
+            for (uint8_t i = 0; i < face.numVertices; i++)
             {
-                break;
-            }
-            uint16_t vi = face.vertexIndices[i];
-            if (vi >= blvData.vertices.size())
-            {
-                break;
-            }
-            if (polyCount >= MAX_CLIP_VERTS)
-            {
-                break;
-            }
-
-            const auto& vertex = blvData.vertices[vi];
-            Vec3 worldPos = {static_cast<float>(vertex.x), static_cast<float>(vertex.y),
-                             static_cast<float>(vertex.z)};
-
-            Vec4 clip = viewProjection * Vec4(worldPos, 1.0f);
-            if (clip.w >= CLIP_NEAR_EPSILON)
-            {
-                allBehind = false;
-            }
-
-            float u = 0.0f, uv = 0.0f;
-            if (i < face.uCoords.size() && i < face.vCoords.size())
-            {
-                u = static_cast<float>(face.uCoords[i]) / 256.0f;
-                uv = static_cast<float>(face.vCoords[i]) / 256.0f;
-                if (face.isWater() && animateWater)
+                if (i >= face.vertexIndices.size())
                 {
-                    const float wave =
-                        std::sin(waterWavePhase(worldPos.x, worldPos.z, waterTimeSeconds));
-                    u += waterTimeSeconds * 0.09f + wave * 0.03f;
-                    uv += waterTimeSeconds * 0.06f + wave * 0.02f;
+                    break;
                 }
+                uint16_t vi = face.vertexIndices[i];
+                if (vi >= blvData.vertices.size())
+                {
+                    break;
+                }
+                if (polyCount >= MAX_CLIP_VERTS)
+                {
+                    break;
+                }
+
+                const auto& vertex = blvData.vertices[vi];
+                Vec3 worldPos = {static_cast<float>(vertex.x), static_cast<float>(vertex.y),
+                                 static_cast<float>(vertex.z)};
+
+                Vec4 clip = viewProjection * Vec4(worldPos, 1.0f);
+                if (clip.w >= CLIP_NEAR_EPSILON)
+                {
+                    allBehind = false;
+                }
+
+                float u = 0.0f, uv = 0.0f;
+                if (i < face.uCoords.size() && i < face.vCoords.size())
+                {
+                    u = static_cast<float>(face.uCoords[i]) / 256.0f;
+                    uv = static_cast<float>(face.vCoords[i]) / 256.0f;
+                    if (face.isWater() && animateWater)
+                    {
+                        const float wave =
+                            std::sin(waterWavePhase(worldPos.x, worldPos.z, waterTimeSeconds));
+                        u += waterTimeSeconds * 0.09f + wave * 0.03f;
+                        uv += waterTimeSeconds * 0.06f + wave * 0.02f;
+                    }
+                }
+
+                polyIn[polyCount++] = {clip, faceColor, u, uv};
             }
 
-            polyIn[polyCount++] = {clip, faceColor, u, uv};
-        }
-
-        if (allBehind || polyCount < 3)
-        {
-            continue;
-        }
-
-        // Near-plane clip
-        int clippedCount = clipPolygonNearPlane(polyIn, polyCount, polyOut);
-        if (clippedCount < 3)
-        {
-            continue;
-        }
-
-        // Project to screen
-        std::vector<SDL_Vertex> vertices;
-        vertices.reserve(static_cast<size_t>(clippedCount));
-        bool anyFailed = false;
-
-        for (int i = 0; i < clippedCount; i++)
-        {
-            float sx, sy;
-            if (!projectClipToScreen(polyOut[i].clip, vpW, vpH, sx, sy))
+            if (allBehind || polyCount < 3)
             {
-                anyFailed = true;
-                break;
+                continue;
             }
-            SDL_Vertex sv;
-            sv.position = {sx, sy};
-            sv.color = polyOut[i].color;
-            sv.tex_coord = {polyOut[i].u, polyOut[i].v};
-            vertices.push_back(sv);
-        }
 
-        if (anyFailed || vertices.size() < 3)
-        {
-            continue;
-        }
+            // Near-plane clip
+            int clippedCount = clipPolygonNearPlane(polyIn, polyCount, polyOut);
+            if (clippedCount < 3)
+            {
+                continue;
+            }
 
-        // Fan triangulation
-        std::vector<int> indices;
-        indices.reserve((vertices.size() - 2) * 3);
-        for (size_t i = 1; i + 1 < vertices.size(); i++)
-        {
-            indices.push_back(0);
-            indices.push_back(static_cast<int>(i));
-            indices.push_back(static_cast<int>(i + 1));
-        }
+            // Project to screen
+            std::vector<SDL_Vertex> vertices;
+            vertices.reserve(static_cast<size_t>(clippedCount));
+            bool anyFailed = false;
 
-        // Look up texture if available
-        SDL_Texture* texture = nullptr;
-        if (textureLookup && !face.textureName.empty())
-        {
-            texture = textureLookup(face.textureName);
-        }
+            for (int i = 0; i < clippedCount; i++)
+            {
+                float sx, sy;
+                if (!projectClipToScreen(polyOut[i].clip, vpW, vpH, sx, sy))
+                {
+                    anyFailed = true;
+                    break;
+                }
+                SDL_Vertex sv;
+                sv.position = {sx, sy};
+                sv.color = polyOut[i].color;
+                sv.tex_coord = {polyOut[i].u, polyOut[i].v};
+                vertices.push_back(sv);
+            }
 
-        // Render triangulated polygon
-        SDL_RenderGeometry(renderer.getSDLRenderer(), texture, vertices.data(),
-                           static_cast<int>(vertices.size()), indices.data(),
-                           static_cast<int>(indices.size()));
-    }
-    else if (op.type == RenderOpType::Billboard)
+            if (anyFailed || vertices.size() < 3)
+            {
+                continue;
+            }
+
+            // Fan triangulation
+            std::vector<int> indices;
+            indices.reserve((vertices.size() - 2) * 3);
+            for (size_t i = 1; i + 1 < vertices.size(); i++)
+            {
+                indices.push_back(0);
+                indices.push_back(static_cast<int>(i));
+                indices.push_back(static_cast<int>(i + 1));
+            }
+
+            // Look up texture if available
+            SDL_Texture* texture = nullptr;
+            if (textureLookup && !face.textureName.empty())
+            {
+                texture = textureLookup(face.textureName);
+            }
+
+            // Render triangulated polygon
+            SDL_RenderGeometry(renderer.getSDLRenderer(), texture, vertices.data(),
+                               static_cast<int>(vertices.size()), indices.data(),
+                               static_cast<int>(indices.size()));
+        }
+        else if (op.type == RenderOpType::Billboard)
         {
             const auto& sprite = op.billboard;
-            
+
             SDL_SetRenderDrawBlendMode(renderer.getSDLRenderer(), SDL_BLENDMODE_BLEND);
 
             Vec3 toCamera = cameraPos - sprite.basePos;

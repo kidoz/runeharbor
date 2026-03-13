@@ -96,7 +96,8 @@ bool VirtualFileSystem::mountSpriteArchive(const std::filesystem::path& archiveP
 
 void VirtualFileSystem::unmountAll()
 {
-    if (!archives.empty() || !imageArchives.empty() || !gameArchives.empty() || !spriteArchives.empty())
+    if (!archives.empty() || !imageArchives.empty() || !gameArchives.empty() ||
+        !spriteArchives.empty())
     {
         logger.info("Unmounted all archives");
     }
@@ -299,7 +300,8 @@ std::optional<formats::ImageFileHeader> VirtualFileSystem::getImageInfo(const st
     return std::nullopt;
 }
 
-std::optional<formats::SpriteFileHeader> VirtualFileSystem::getSpriteInfo(const std::string& filename)
+std::optional<formats::SpriteFileHeader>
+VirtualFileSystem::getSpriteInfo(const std::string& filename)
 {
     for (auto& archive : spriteArchives)
     {

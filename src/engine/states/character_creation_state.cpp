@@ -553,18 +553,18 @@ void CharacterCreationState::render()
     constexpr int colX[] = {8, 166, 324, 482}; // stride 158 (0x9E)
     constexpr int colWidth = 153;              // 0x99
 
-    constexpr int portraitY = 35;        // 0x23 from Ghidra
-    constexpr int nameY = 124;           // 0x7C from Ghidra
-    constexpr int statsStartY = 169;     // 0xA9 from Ghidra
-    constexpr int statSpacing = 17;      // fontHeight(arrus=19) - 2, matching original formula
-    constexpr int classLabelY = 291;     // 0x123 — class display below all 7 stats
-    constexpr int skillsStartY = 311;    // 0x137 — per-char skills below class label
-    constexpr int skillSpacing = 17;     // same as statSpacing
+    constexpr int portraitY = 35;     // 0x23 from Ghidra
+    constexpr int nameY = 124;        // 0x7C from Ghidra
+    constexpr int statsStartY = 169;  // 0xA9 from Ghidra
+    constexpr int statSpacing = 17;   // fontHeight(arrus=19) - 2, matching original formula
+    constexpr int classLabelY = 291;  // 0x123 — class display below all 7 stats
+    constexpr int skillsStartY = 311; // 0x137 — per-char skills below class label
+    constexpr int skillSpacing = 17;  // same as statSpacing
     // Ghidra: class name overlaid on portrait right side; class icon also on portrait right
     constexpr int nameClassX[] = {18, 177, 336, 495}; // local_13c stride 0x9F
-    constexpr int classOverlayY = 100;   // class name on portrait (Ghidra line 98)
-    constexpr int classIconY = 50;       // 0x32 — class icon on portrait (Ghidra line 99)
-    constexpr int faceMaskY = 29;        // 0x1D — FACEMASK for selected char
+    constexpr int classOverlayY = 100;                // class name on portrait (Ghidra line 98)
+    constexpr int classIconY = 50; // 0x32 — class icon on portrait (Ghidra line 99)
+    constexpr int faceMaskY = 29;  // 0x1D — FACEMASK for selected char
     constexpr int faceMaskX[] = {12, 171, 329, 488}; // local_120 values
 
     for (int c = 0; c < 4; c++)
@@ -746,11 +746,11 @@ void CharacterCreationState::render()
 
     // 10c. Available skills grid — 3-column × 3-row at Y=417 (0x1A1)
     {
-        constexpr int skillGridY = 417;    // 0x1A1 from Ghidra
-        constexpr int skillGridColW = 100; // 100px per column (original)
+        constexpr int skillGridY = 417;     // 0x1A1 from Ghidra
+        constexpr int skillGridColW = 100;  // 100px per column (original)
         constexpr int skillGridStartX = 17; // 0x11 from original
         constexpr int skillGridRows = 3;
-        constexpr int skillRowH = 17;      // fontHeight - 2
+        constexpr int skillRowH = 17; // fontHeight - 2
         auto* skillBtnFont = numFont;
 
         int extraCount = 0;

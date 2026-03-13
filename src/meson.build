@@ -118,6 +118,10 @@ ui_sources = files(
     'ui/hud.cpp',
     'ui/dialogue.cpp',
     'ui/inventory_widget.cpp',
+    'ui/character_stats_widget.cpp',
+    'ui/spellbook_widget.cpp',
+    'ui/rest_widget.cpp',
+    'ui/map_widget.cpp',
 )
 
 # Dependencies

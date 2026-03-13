@@ -284,7 +284,7 @@ class Application
     void* loadingBackground = nullptr;
     int loadingBackgroundWidth = 0;
     int loadingBackgroundHeight = 0;
-    
+
     // Inventory
     void* inventoryBackground = nullptr;
     int inventoryBackgroundWidth = 0;

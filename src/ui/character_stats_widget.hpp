@@ -6,22 +6,20 @@
 #include <unordered_map>
 
 #include "../game/game_world.hpp"
-#include "../game/inventory.hpp"
 #include "widgets.hpp"
 
 namespace runeharbor::ui
 {
 
-class InventoryWidget : public Widget
+class CharacterStatsWidget : public Widget
 {
   public:
-    InventoryWidget();
+    CharacterStatsWidget();
 
     using TextureLookup = std::function<void*(const std::string&, int& w, int& h)>;
     void setTextureLookup(TextureLookup lookup) { textureLookup_ = lookup; }
 
     void setGameWorld(game::GameWorld* world) { gameWorld_ = world; }
-    void setInventory(game::Inventory* inventory) { inventory_ = inventory; }
     void setActiveCharacter(int index) { activeCharacterIndex_ = index; }
 
     void render(graphics::IRenderer& renderer, const graphics::DebugText& text) override;
@@ -33,18 +31,11 @@ class InventoryWidget : public Widget
         bgW_ = w;
         bgH_ = h;
     }
-    void setCharacterBody(void* tex, int w, int h)
-    {
-        bodyTexture_ = tex;
-        bodyW_ = w;
-        bodyH_ = h;
-    }
 
   private:
     void* getCachedTexture(const std::string& name, int& w, int& h);
 
     game::GameWorld* gameWorld_ = nullptr;
-    game::Inventory* inventory_ = nullptr;
     int activeCharacterIndex_ = 0;
     TextureLookup textureLookup_;
 
@@ -57,9 +48,6 @@ class InventoryWidget : public Widget
 
     void* bgTexture_ = nullptr;
     int bgW_ = 0, bgH_ = 0;
-
-    void* bodyTexture_ = nullptr;
-    int bodyW_ = 0, bodyH_ = 0;
 };
 
 } // namespace runeharbor::ui

@@ -1039,6 +1039,20 @@ void Application::wireUpMapTextures()
 
     clearMapTextureCache();
 
+    worldRenderer->setMonsterSpriteLookup(
+        [this](uint16_t objectType) -> std::string
+        {
+            if (combatSystem_)
+            {
+                auto* def = combatSystem_->getMonsterDef(objectType);
+                if (def)
+                {
+                    return def->picture;
+                }
+            }
+            return "";
+        });
+
     worldRenderer->setTextureLookup(
         [this](const std::string& name) -> SDL_Texture*
         {
@@ -1571,6 +1585,24 @@ bool Application::loadUiAssets()
         {
             loadGameState->setBackground(loadBg, loadBgW, loadBgH);
         }
+    }
+    if (inGameState)
+    {
+        inGameState->setInventoryBackground(inventoryBackground, inventoryBackgroundWidth,
+                                            inventoryBackgroundHeight);
+
+        inGameState->setTextureLookup(
+            [this](const std::string& name, int& w, int& h) -> void*
+            {
+                void* tex = nullptr;
+                if (loadPcxTexture(
+                        {name, name + ".pcx", name + ".PCX", name + "01", name + "01.pcx"}, "Item",
+                        tex, w, h))
+                {
+                    return tex;
+                }
+                return nullptr;
+            });
     }
 
     uiAssetsLoaded = true;

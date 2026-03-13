@@ -1508,7 +1508,8 @@ bool SmackerDecoder::decodeAudioTrack(const uint8_t* data, size_t size, int trac
         return false;
     }
 
-    for (size_t i = 0; i < std::min(size, size_t(16)); i++) {
+    for (size_t i = 0; i < std::min(size, size_t(16)); i++)
+    {
     }
 
     outAudio.sampleRate = info.sampleRate;
