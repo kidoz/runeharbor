@@ -754,68 +754,102 @@ void InGameState::render()
 
 void InGameState::updateCameraInput()
 {
-    if (!ctx.camera || !ctx.shared || !ctx.shared->mapScene)
+    if (!ctx.camera || !ctx.shared || !ctx.shared->mapScene || !ctx.shared->gameWorld)
     {
         return;
     }
 
-    float orbitSpeed = 0.015f;
-    float zoomSpeed = 50.0f;
-    float panSpeed = 8.0f;
-    if (ctx.shared && ctx.shared->gameWorld)
-    {
-        panSpeed = std::max(1.0f, ctx.shared->gameWorld->runtimeConfig().walkSpeed / 48.0f);
-    }
+    auto& party = ctx.shared->gameWorld->party();
+    const auto& config = ctx.shared->gameWorld->runtimeConfig();
+
+    float orbitSpeed = 16.0f; // MM7 rotation units per frame
+    float panSpeed = std::max(1.0f, config.walkSpeed / 2.0f);
 
     if (ctx.isKeyDown(SDL_SCANCODE_LSHIFT) || ctx.isKeyDown(SDL_SCANCODE_RSHIFT))
     {
         orbitSpeed *= 2.0f;
-        zoomSpeed *= 2.0f;
         panSpeed *= 2.0f;
     }
 
+    // Party Orientation (Yaw/Pitch in MM7 0-2047 units)
+    float yaw = party.yaw();
+    float pitch = party.pitch();
+
     if (ctx.isKeyDown(SDL_SCANCODE_LEFT))
     {
-        ctx.camera->orbit(-orbitSpeed, 0.0f);
+        yaw -= orbitSpeed;
+        if (yaw < 0) yaw += 2048.0f;
     }
     if (ctx.isKeyDown(SDL_SCANCODE_RIGHT))
     {
-        ctx.camera->orbit(orbitSpeed, 0.0f);
+        yaw += orbitSpeed;
+        if (yaw >= 2048.0f) yaw -= 2048.0f;
     }
     if (ctx.isKeyDown(SDL_SCANCODE_UP))
     {
-        ctx.camera->orbit(0.0f, orbitSpeed);
+        pitch += orbitSpeed;
+        pitch = std::min(pitch, 512.0f); // Limit looking up
     }
     if (ctx.isKeyDown(SDL_SCANCODE_DOWN))
     {
-        ctx.camera->orbit(0.0f, -orbitSpeed);
+        pitch -= orbitSpeed;
+        pitch = std::max(pitch, -512.0f); // Limit looking down
     }
 
-    if (ctx.isKeyDown(SDL_SCANCODE_Q))
-    {
-        ctx.camera->zoom(zoomSpeed);
-    }
-    if (ctx.isKeyDown(SDL_SCANCODE_E))
-    {
-        ctx.camera->zoom(-zoomSpeed);
-    }
+    party.setOrientation(yaw, pitch);
 
+    // Party Movement
+    float px = party.worldX();
+    float py = party.worldY();
+    float pz = party.worldZ();
+
+    float yawRad = yaw * M_PI / 1024.0f;
+    float dx = std::cos(yawRad);
+    float dy = std::sin(yawRad);
+
+    // Simple forward/back and strafe
     if (ctx.isKeyDown(SDL_SCANCODE_W))
     {
-        ctx.camera->pan(0.0f, panSpeed);
+        px += dx * panSpeed;
+        py += dy * panSpeed;
     }
     if (ctx.isKeyDown(SDL_SCANCODE_S))
     {
-        ctx.camera->pan(0.0f, -panSpeed);
+        px -= dx * panSpeed;
+        py -= dy * panSpeed;
     }
     if (ctx.isKeyDown(SDL_SCANCODE_A))
     {
-        ctx.camera->pan(-panSpeed, 0.0f);
+        px -= dy * panSpeed;
+        py += dx * panSpeed;
     }
     if (ctx.isKeyDown(SDL_SCANCODE_D))
     {
-        ctx.camera->pan(panSpeed, 0.0f);
+        px += dy * panSpeed;
+        py -= dx * panSpeed;
     }
+
+    party.setWorldPosition(px, py, pz);
+
+    // Sync camera to party
+    graphics::Vec3 target = {px, py, pz + config.partyEyeLevel};
+    ctx.camera->setTarget(target);
+    ctx.camera->setPosition(target);
+    
+    // Convert MM7 angle (0=East, CCW) to camera yaw
+    // For our camera, we probably just pass the radians. Let's reset and orbit to set absolute angles.
+    // Wait, camera.orbit applies a delta. Our camera has no absolute `setRotation` yet.
+    // Let's check if Camera has a setYaw/Pitch or if we can recreate it.
+    // For now, we will add a method or recreate the view matrix. 
+    // Actually, earlier we saw Camera had `yaw` and `pitch` private members but `orbit` adds to them.
+    // We can just rely on the party position and calculate a "lookAt" target slightly ahead.
+    
+    graphics::Vec3 lookTarget = {
+        px + dx * 100.0f,
+        py + dy * 100.0f,
+        pz + config.partyEyeLevel + static_cast<float>(std::sin(pitch * M_PI / 1024.0f)) * 100.0f
+    };
+    ctx.camera->lookAt(lookTarget, 0.0f);
 }
 
 int InGameState::pickMonsterUnderCursor() const

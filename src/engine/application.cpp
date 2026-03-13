@@ -1015,19 +1015,19 @@ void Application::updateViewport()
 
 void Application::configureCameraForMap()
 {
-    if (!mapScene || !mapScene->isLoaded())
+    if (!mapScene || !mapScene->isLoaded() || !gameWorld_)
     {
         return;
     }
 
-    const auto& bounds = mapScene->getBounds();
-    if (!bounds.valid)
-    {
-        return;
-    }
-
-    float distance = std::max(bounds.radius() * 2.5f, 1000.0f);
-    camera.lookAt(bounds.center(), distance);
+    const auto& party = gameWorld_->party();
+    const auto& config = gameWorld_->runtimeConfig();
+    
+    // Set camera to first-person view based on party location
+    graphics::Vec3 target = {party.worldX(), party.worldY(), party.worldZ() + config.partyEyeLevel};
+    camera.setTarget(target);
+    camera.setPosition(target); // Force distance to 0 for first-person
+    camera.orbit(party.yaw() * M_PI / 1024.0f, party.pitch() * M_PI / 1024.0f); // Convert 2048 to radians
 }
 
 void Application::wireUpMapTextures()
