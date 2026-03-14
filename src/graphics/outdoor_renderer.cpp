@@ -148,11 +148,13 @@ struct SpawnBillboard
     float distanceSq = 0.0f;
     SDL_FColor color = {1.0f, 1.0f, 1.0f, 0.75f};
     std::string textureName;
+    uint32_t attributes = 0;
 };
 
 SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, const Vec3& cameraPos,
                                          [[maybe_unused]] const game::RuntimeConfig* config,
-                                         const OutdoorRenderer::MonsterSpriteLookup& monsterLookup)
+                                         const OutdoorRenderer::MonsterSpriteLookup& monsterLookup,
+                                         const formats::SpriteFrameTable* spriteFrameTable)
 {
     SpawnBillboard sprite;
     sprite.basePos = gameplayToRenderPosition(
@@ -193,8 +195,20 @@ SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, co
             // To be precise we need to know the animation set.
             // MM7 uses "w" for walk, "s" for stand, "a" for attack, etc.
             // Let's assume stand (s) or walk (w).
-            sprite.textureName =
+            std::string frameName =
                 std::format("{}w{:02d}", prefix, directionIndex + 1); // Walk animation, frame 1-8
+
+            sprite.textureName = frameName;
+            if (spriteFrameTable)
+            {
+                auto entry = spriteFrameTable->findEntryByIcon(frameName);
+                if (entry)
+                {
+                    if (!entry->textureName.empty())
+                        sprite.textureName = entry->textureName;
+                    sprite.attributes = entry->attributes;
+                }
+            }
         }
     }
 
@@ -803,8 +817,8 @@ void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
             continue;
         }
 
-        sprites.push_back(
-            makeOutdoorSpawnBillboard(spawn, cameraPos, runtimeConfig, monsterSpriteLookup));
+        sprites.push_back(makeOutdoorSpawnBillboard(spawn, cameraPos, runtimeConfig,
+                                                    monsterSpriteLookup, spriteFrameTable));
     }
 
     std::sort(sprites.begin(), sprites.end(), [](const SpawnBillboard& a, const SpawnBillboard& b)
@@ -833,10 +847,30 @@ void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
         right.normalize();
 
         const float distance = std::sqrt(sprite.distanceSq);
-        sprite.color = applyOutdoorLighting(sprite.color, distance, billboardLighting);
+        SDL_FColor drawColor = applyOutdoorLighting(sprite.color, distance, billboardLighting);
 
-        const Vec3 bottomLeft = sprite.basePos - right * sprite.halfWidth;
-        const Vec3 bottomRight = sprite.basePos + right * sprite.halfWidth;
+        Vec3 drawPos = sprite.basePos;
+        uint32_t ticks = SDL_GetTicks();
+
+        if (sprite.attributes & 0x80) // Oscillate
+        {
+            float offset = std::sin(ticks * 0.01f) * 4.0f;
+            drawPos.y += offset;
+        }
+        if (sprite.attributes & 0x02) // Translucent
+        {
+            drawColor.a *= 0.5f;
+        }
+        if (sprite.attributes & 0x40) // Mirror / Shimmer
+        {
+            float shimmer = (std::sin(ticks * 0.005f) + 1.0f) * 0.5f;
+            drawColor.r = std::clamp(drawColor.r + shimmer * 0.2f, 0.0f, 1.0f);
+            drawColor.g = std::clamp(drawColor.g + shimmer * 0.2f, 0.0f, 1.0f);
+            drawColor.b = std::clamp(drawColor.b + shimmer * 0.2f, 0.0f, 1.0f);
+        }
+
+        const Vec3 bottomLeft = drawPos - right * sprite.halfWidth;
+        const Vec3 bottomRight = drawPos + right * sprite.halfWidth;
         const Vec3 topLeft = bottomLeft + worldUp * sprite.height;
         const Vec3 topRight = bottomRight + worldUp * sprite.height;
 
@@ -866,7 +900,7 @@ void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
         vertices[3].position = {sxTR, syTR};
         for (auto& vertex : vertices)
         {
-            vertex.color = sprite.color;
+            vertex.color = drawColor;
         }
         vertices[0].tex_coord = {0.0f, 1.0f};
         vertices[1].tex_coord = {1.0f, 1.0f};

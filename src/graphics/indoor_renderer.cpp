@@ -198,6 +198,7 @@ struct BillboardSprite
     float distanceSq = 0.0f;
     SDL_FColor color = {1.0f, 1.0f, 1.0f, 1.0f};
     std::string textureName;
+    uint32_t attributes = 0;
 };
 
 BillboardSprite makeIndoorDecorationBillboard(const formats::ParsedDecoration& decoration,
@@ -216,6 +217,7 @@ BillboardSprite makeIndoorDecorationBillboard(const formats::ParsedDecoration& d
         if (entry && !entry->textureName.empty())
         {
             sprite.textureName = entry->textureName;
+            sprite.attributes = entry->attributes;
         }
     }
 
@@ -249,7 +251,8 @@ BillboardSprite makeIndoorDecorationBillboard(const formats::ParsedDecoration& d
 
 BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, const Vec3& cameraPos,
                                          [[maybe_unused]] const game::RuntimeConfig* config,
-                                         const IndoorRenderer::MonsterSpriteLookup& monsterLookup)
+                                         const IndoorRenderer::MonsterSpriteLookup& monsterLookup,
+                                         const formats::SpriteFrameTable* spriteFrameTable)
 {
     BillboardSprite sprite;
     sprite.basePos = {static_cast<float>(spawn.x), static_cast<float>(spawn.y),
@@ -282,10 +285,21 @@ BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, co
             // Difference mapped to 8 directions
             int directionIndex = ((facing - camFacing + 2048 + 128) >> 8) & 7;
 
-            // Limit to max 11 chars + 2 digit suffix if needed, but std::format handles it
-            sprite.textureName =
+            std::string frameName =
                 std::format("{}{:02d}", baseName.substr(0, std::min<size_t>(baseName.length(), 6)),
                             directionIndex + 1);
+
+            sprite.textureName = frameName;
+            if (spriteFrameTable)
+            {
+                auto entry = spriteFrameTable->findEntryByIcon(frameName);
+                if (entry)
+                {
+                    if (!entry->textureName.empty())
+                        sprite.textureName = entry->textureName;
+                    sprite.attributes = entry->attributes;
+                }
+            }
         }
     }
 
@@ -470,8 +484,8 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         if (spawn.objectType == 0)
             continue;
 
-        BillboardSprite sprite =
-            makeIndoorSpawnBillboard(spawn, cameraPos, runtimeConfig, monsterSpriteLookup);
+        BillboardSprite sprite = makeIndoorSpawnBillboard(spawn, cameraPos, runtimeConfig,
+                                                          monsterSpriteLookup, spriteFrameTable);
         if (sprite.distanceSq > 100000000.0f)
             continue;
 
@@ -685,8 +699,29 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                 }
             }
 
-            const Vec3 bottomLeft = sprite.basePos - right * actualHalfWidth;
-            const Vec3 bottomRight = sprite.basePos + right * actualHalfWidth;
+            Vec3 drawPos = sprite.basePos;
+            SDL_FColor drawColor = sprite.color;
+            uint32_t ticks = SDL_GetTicks();
+
+            if (sprite.attributes & 0x80) // Oscillate
+            {
+                float offset = std::sin(ticks * 0.01f) * 4.0f;
+                drawPos.y += offset;
+            }
+            if (sprite.attributes & 0x02) // Translucent
+            {
+                drawColor.a *= 0.5f;
+            }
+            if (sprite.attributes & 0x40) // Mirror / Shimmer
+            {
+                float shimmer = (std::sin(ticks * 0.005f) + 1.0f) * 0.5f;
+                drawColor.r = std::clamp(drawColor.r + shimmer * 0.2f, 0.0f, 1.0f);
+                drawColor.g = std::clamp(drawColor.g + shimmer * 0.2f, 0.0f, 1.0f);
+                drawColor.b = std::clamp(drawColor.b + shimmer * 0.2f, 0.0f, 1.0f);
+            }
+
+            const Vec3 bottomLeft = drawPos - right * actualHalfWidth;
+            const Vec3 bottomRight = drawPos + right * actualHalfWidth;
             const Vec3 topLeft = bottomLeft + worldUp * actualHeight;
             const Vec3 topRight = bottomRight + worldUp * actualHeight;
 
@@ -716,7 +751,7 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
             vertices[3].position = {sxTR, syTR};
             for (auto& vertex : vertices)
             {
-                vertex.color = sprite.color;
+                vertex.color = drawColor;
             }
             vertices[0].tex_coord = {0.0f, 1.0f};
             vertices[1].tex_coord = {1.0f, 1.0f};
