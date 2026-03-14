@@ -8,8 +8,8 @@
 #include "../engine/map_scene.hpp"
 #include "../formats/frame_tables.hpp"
 #include "camera.hpp"
-#include "sdl_renderer.hpp"
 #include "light_stack.hpp"
+#include "sdl_renderer.hpp"
 
 struct SDL_Texture;
 namespace runeharbor::game

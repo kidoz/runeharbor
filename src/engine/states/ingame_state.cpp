@@ -26,7 +26,9 @@
 #include "../../graphics/irenderer.hpp"
 #include "../../graphics/math3d.hpp"
 #include "../../graphics/visibility.hpp"
+#include "../../graphics/world_coordinates.hpp"
 #include "../../graphics/world_renderer.hpp"
+#include "../outdoor_terrain.hpp"
 
 namespace runeharbor::engine
 {
@@ -778,12 +780,14 @@ void InGameState::updateCameraInput()
     if (ctx.isKeyDown(SDL_SCANCODE_LEFT))
     {
         yaw -= orbitSpeed;
-        if (yaw < 0) yaw += 2048.0f;
+        if (yaw < 0)
+            yaw += 2048.0f;
     }
     if (ctx.isKeyDown(SDL_SCANCODE_RIGHT))
     {
         yaw += orbitSpeed;
-        if (yaw >= 2048.0f) yaw -= 2048.0f;
+        if (yaw >= 2048.0f)
+            yaw -= 2048.0f;
     }
     if (ctx.isKeyDown(SDL_SCANCODE_UP))
     {
@@ -829,27 +833,22 @@ void InGameState::updateCameraInput()
         py -= dx * panSpeed;
     }
 
+    if (ctx.shared->mapScene && !ctx.shared->mapScene->getODMData().heightmap.empty())
+    {
+        pz = clampOutdoorPartyZ(ctx.shared->mapScene->getODMData(), px, py, pz);
+    }
+
     party.setWorldPosition(px, py, pz);
 
-    // Sync camera to party
-    graphics::Vec3 target = {px, py, pz + config.partyEyeLevel};
-    ctx.camera->setTarget(target);
-    ctx.camera->setPosition(target);
-    
-    // Convert MM7 angle (0=East, CCW) to camera yaw
-    // For our camera, we probably just pass the radians. Let's reset and orbit to set absolute angles.
-    // Wait, camera.orbit applies a delta. Our camera has no absolute `setRotation` yet.
-    // Let's check if Camera has a setYaw/Pitch or if we can recreate it.
-    // For now, we will add a method or recreate the view matrix. 
-    // Actually, earlier we saw Camera had `yaw` and `pitch` private members but `orbit` adds to them.
-    // We can just rely on the party position and calculate a "lookAt" target slightly ahead.
-    
-    graphics::Vec3 lookTarget = {
-        px + dx * 100.0f,
-        py + dy * 100.0f,
-        pz + config.partyEyeLevel + static_cast<float>(std::sin(pitch * M_PI / 1024.0f)) * 100.0f
-    };
-    ctx.camera->lookAt(lookTarget, 0.0f);
+    const float pitchRad = pitch * M_PI / 1024.0f;
+    const float dz = std::sin(pitchRad);
+
+    const graphics::Vec3 eye =
+        graphics::gameplayToRenderPosition(px, py, pz + config.partyEyeLevel);
+    const graphics::Vec3 lookTarget = graphics::gameplayToRenderPosition(
+        px + dx * 100.0f, py + dy * 100.0f, pz + config.partyEyeLevel + dz * 100.0f);
+    ctx.camera->setTarget(lookTarget);
+    ctx.camera->setPosition(eye);
 }
 
 int InGameState::pickMonsterUnderCursor() const
@@ -880,7 +879,8 @@ int InGameState::pickMonsterUnderCursor() const
         {
             continue;
         }
-        candidates.push_back({i, graphics::Vec3{monster.x, monster.y, monster.z}});
+        candidates.push_back(
+            {i, graphics::gameplayToRenderPosition(monster.x, monster.y, monster.z)});
     }
 
     const auto hit = graphics::pickClosestProjectedPoint(

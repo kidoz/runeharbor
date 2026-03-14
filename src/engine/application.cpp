@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <cctype>
+#include <cmath>
 
 #include "../formats/credits_parser.hpp"
 #include "../formats/hostile_parser.hpp"
@@ -34,6 +35,7 @@
 #include "../graphics/palette.hpp"
 #include "../graphics/sdl_renderer.hpp"
 #include "../graphics/visibility.hpp"
+#include "../graphics/world_coordinates.hpp"
 #include "../graphics/world_renderer.hpp"
 #include "../media/vid_archive.hpp"
 #include "../media/vid_manifest.hpp"
@@ -41,6 +43,7 @@
 #include "../platform/iwindow.hpp"
 #include "../util/ilogger.hpp"
 #include "map_transition_resolver.hpp"
+#include "outdoor_terrain.hpp"
 #include "states/character_creation_state.hpp"
 #include "states/credits_state.hpp"
 #include "states/ingame_state.hpp"
@@ -186,6 +189,18 @@ constexpr ClassSkills kClassStartingSkills[] = {
     {"Axe", "Perception"},      // Ranger
     {"Dagger", "Earth Magic"},  // Druid
 };
+
+void groundPartyToOutdoorTerrain(game::Party& party, const MapScene* scene)
+{
+    if (!scene || scene->getODMData().heightmap.empty())
+    {
+        return;
+    }
+
+    party.setWorldPosition(
+        party.worldX(), party.worldY(),
+        clampOutdoorPartyZ(scene->getODMData(), party.worldX(), party.worldY(), party.worldZ()));
+}
 } // namespace
 
 Application::~Application()
@@ -1023,12 +1038,21 @@ void Application::configureCameraForMap()
 
     const auto& party = gameWorld_->party();
     const auto& config = gameWorld_->runtimeConfig();
-    
-    // Set camera to first-person view based on party location
-    graphics::Vec3 target = {party.worldX(), party.worldY(), party.worldZ() + config.partyEyeLevel};
-    camera.setTarget(target);
-    camera.setPosition(target); // Force distance to 0 for first-person
-    camera.orbit(party.yaw() * M_PI / 1024.0f, party.pitch() * M_PI / 1024.0f); // Convert 2048 to radians
+
+    const float yawRad = party.yaw() * M_PI / 1024.0f;
+    const float pitchRad = party.pitch() * M_PI / 1024.0f;
+    const float dx = std::cos(yawRad);
+    const float dy = std::sin(yawRad);
+    const float dz = std::sin(pitchRad);
+
+    const graphics::Vec3 eye = graphics::gameplayToRenderPosition(
+        party.worldX(), party.worldY(), party.worldZ() + config.partyEyeLevel);
+    const graphics::Vec3 lookTarget = graphics::gameplayToRenderPosition(
+        party.worldX() + dx * 100.0f, party.worldY() + dy * 100.0f,
+        party.worldZ() + config.partyEyeLevel + dz * 100.0f);
+
+    camera.setTarget(lookTarget);
+    camera.setPosition(eye);
 }
 
 void Application::wireUpMapTextures()
@@ -1506,8 +1530,8 @@ bool Application::loadUiAssets()
     loadPcxTexture({"presrigh", "PRESRIGH"}, "RightArrow", ccRightArrow_.tex, ccRightArrow_.w,
                    ccRightArrow_.h);
 
-    const char* classIconNames[] = {"IC_Knight", "IC_Thief",  "IC_monk",  "IC_PALAD", "IC_ARCH",
-                                    "IC_Ranger", "IC_CLER", "IC_DRUID", "IC_SORC"};
+    const char* classIconNames[] = {"IC_Knight", "IC_Thief", "IC_monk",  "IC_PALAD", "IC_ARCH",
+                                    "IC_Ranger", "IC_CLER",  "IC_DRUID", "IC_SORC"};
     for (int i = 0; i < kClassIconCount; i++)
     {
         std::string lower = classIconNames[i];
@@ -2073,7 +2097,6 @@ void Application::finalizeLoadingTask()
         // Keep state context in sync before the first InGame render to avoid stale pointers.
         updateStateContext();
         mapLoaded = true;
-        configureCameraForMap();
         wireUpMapTextures();
         setGameState(GameState::InGame);
 
@@ -2163,6 +2186,7 @@ void Application::finalizeLoadingTask()
             }
 
             applyMapEntryPoint();
+            configureCameraForMap();
             pendingTransition_.active = false;
             if (sharedData)
             {
@@ -2589,6 +2613,7 @@ void Application::configureGameplayCallbacks()
             if (gameWorld_)
             {
                 gameWorld_->party().setWorldPosition(x, y, z);
+                groundPartyToOutdoorTerrain(gameWorld_->party(), mapScene.get());
                 gameWorld_->party().setOrientation(yaw, gameWorld_->party().pitch());
             }
 
@@ -3607,6 +3632,7 @@ void Application::applyMapEntryPoint()
     {
         gameWorld_->party().setWorldPosition(pendingArrivalOverride_.x, pendingArrivalOverride_.y,
                                              pendingArrivalOverride_.z);
+        groundPartyToOutdoorTerrain(gameWorld_->party(), mapScene.get());
         gameWorld_->party().setOrientation(pendingArrivalOverride_.yaw,
                                            gameWorld_->party().pitch());
         pendingArrivalOverride_.active = false;
@@ -3693,6 +3719,7 @@ void Application::applyMapEntryPoint()
         const auto& spawn = outdoorSpawns[selected];
         gameWorld_->party().setWorldPosition(
             static_cast<float>(spawn.x), static_cast<float>(spawn.y), static_cast<float>(spawn.z));
+        groundPartyToOutdoorTerrain(gameWorld_->party(), mapScene.get());
         applyEntryOrientation();
     }
 }

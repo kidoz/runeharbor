@@ -11,6 +11,7 @@
 #include "../game/game_world.hpp"
 #include "clip_utils.hpp"
 #include "visibility.hpp"
+#include "world_coordinates.hpp"
 
 namespace runeharbor::graphics
 {
@@ -154,8 +155,8 @@ SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, co
                                          const OutdoorRenderer::MonsterSpriteLookup& monsterLookup)
 {
     SpawnBillboard sprite;
-    sprite.basePos = {static_cast<float>(spawn.x), static_cast<float>(spawn.y),
-                      static_cast<float>(spawn.z)};
+    sprite.basePos = gameplayToRenderPosition(
+        static_cast<float>(spawn.x), static_cast<float>(spawn.y), static_cast<float>(spawn.z));
 
     const float baseHeight =
         std::max(kMinSpawnBillboardHeight, static_cast<float>(spawn.radius) * 2.0f);
@@ -536,12 +537,12 @@ void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const 
 
     for (const auto& building : odmData.buildings)
     {
-        float minX = static_cast<float>(building.worldX + building.minX);
-        float minY = static_cast<float>(building.worldY + building.minY);
-        float minZ = static_cast<float>(building.worldZ + building.minZ);
-        float maxX = static_cast<float>(building.worldX + building.maxX);
-        float maxY = static_cast<float>(building.worldY + building.maxY);
-        float maxZ = static_cast<float>(building.worldZ + building.maxZ);
+        const float minX = static_cast<float>(building.worldX + building.minX);
+        const float maxX = static_cast<float>(building.worldX + building.maxX);
+        const float minY = static_cast<float>(building.worldZ + building.minZ);
+        const float maxY = static_cast<float>(building.worldZ + building.maxZ);
+        const float minZ = static_cast<float>(building.worldY + building.minY);
+        const float maxZ = static_cast<float>(building.worldY + building.maxY);
 
         if (!frustum->testAABB(minX, minY, minZ, maxX, maxY, maxZ))
         {
@@ -570,8 +571,8 @@ void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const 
                 {
                     const auto& v = building.vertices[vi];
                     cx += static_cast<float>(v.x);
-                    cy += static_cast<float>(v.y);
-                    cz += static_cast<float>(v.z);
+                    cy += static_cast<float>(v.z);
+                    cz += static_cast<float>(v.y);
                     valid++;
                 }
             }
@@ -581,14 +582,16 @@ void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const 
             }
             float inv = 1.0f / static_cast<float>(valid);
             cx = cx * inv + static_cast<float>(building.worldX);
-            cy = cy * inv + static_cast<float>(building.worldY);
-            cz = cz * inv + static_cast<float>(building.worldZ);
+            cy = cy * inv + static_cast<float>(building.worldZ);
+            cz = cz * inv + static_cast<float>(building.worldY);
 
             // Backface culling
             float viewX = cx - cameraPos.x;
             float viewY = cy - cameraPos.y;
             float viewZ = cz - cameraPos.z;
-            float dot = face.normalFX * viewX + face.normalFY * viewY + face.normalFZ * viewZ;
+            const Vec3 faceNormal =
+                gameplayToRenderDirection(face.normalFX, face.normalFY, face.normalFZ);
+            float dot = faceNormal.x * viewX + faceNormal.y * viewY + faceNormal.z * viewZ;
             if (dot > 0.0f)
             {
                 continue;
@@ -633,9 +636,10 @@ void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const 
             }
 
             const auto& v = building.vertices[vi];
-            Vec3 wp = {static_cast<float>(v.x) + static_cast<float>(building.worldX),
-                       static_cast<float>(v.y) + static_cast<float>(building.worldY),
-                       static_cast<float>(v.z) + static_cast<float>(building.worldZ)};
+            Vec3 wp = gameplayToRenderPosition(
+                static_cast<float>(v.x) + static_cast<float>(building.worldX),
+                static_cast<float>(v.y) + static_cast<float>(building.worldY),
+                static_cast<float>(v.z) + static_cast<float>(building.worldZ));
 
             Vec4 clip = viewProjection * Vec4(wp, 1.0f);
             if (clip.w >= CLIP_NEAR_EPSILON)
@@ -792,8 +796,9 @@ void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
         }
 
         const float cullRadius = std::max(64.0f, static_cast<float>(spawn.radius) * 2.0f);
-        if (!frustum->testSphere(static_cast<float>(spawn.x), static_cast<float>(spawn.y),
-                                 static_cast<float>(spawn.z), cullRadius))
+        const Vec3 renderPos = gameplayToRenderPosition(
+            static_cast<float>(spawn.x), static_cast<float>(spawn.y), static_cast<float>(spawn.z));
+        if (!frustum->testSphere(renderPos.x, renderPos.y, renderPos.z, cullRadius))
         {
             continue;
         }

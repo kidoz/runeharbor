@@ -202,11 +202,47 @@ void SDLRenderer::renderTexturedPolygon(const std::vector<SDL_Vertex>& vertices,
 
 int SDLRenderer::getViewportWidth() const
 {
+    if (!renderer)
+    {
+        return viewportWidth;
+    }
+
+    SDL_Rect viewport = {};
+    if (SDL_GetRenderViewport(renderer, &viewport) && viewport.w > 0)
+    {
+        return viewport.w;
+    }
+
+    int outputWidth = 0;
+    int outputHeight = 0;
+    if (SDL_GetRenderOutputSize(renderer, &outputWidth, &outputHeight))
+    {
+        return outputWidth;
+    }
+
     return viewportWidth;
 }
 
 int SDLRenderer::getViewportHeight() const
 {
+    if (!renderer)
+    {
+        return viewportHeight;
+    }
+
+    SDL_Rect viewport = {};
+    if (SDL_GetRenderViewport(renderer, &viewport) && viewport.h > 0)
+    {
+        return viewport.h;
+    }
+
+    int outputWidth = 0;
+    int outputHeight = 0;
+    if (SDL_GetRenderOutputSize(renderer, &outputWidth, &outputHeight))
+    {
+        return outputHeight;
+    }
+
     return viewportHeight;
 }
 

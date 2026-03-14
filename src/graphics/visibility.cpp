@@ -9,6 +9,7 @@
 
 #include "../formats/blv_map.hpp"
 #include "../formats/odm_map.hpp"
+#include "world_coordinates.hpp"
 
 namespace runeharbor::graphics
 {
@@ -489,11 +490,11 @@ collectMapEventCandidates(const formats::BLVMapData& blvData, const formats::ODM
     {
         const auto& building = odmData.buildings[bi];
         const float minX = static_cast<float>(building.worldX + building.minX);
-        const float minY = static_cast<float>(building.worldY + building.minY);
-        const float minZ = static_cast<float>(building.worldZ + building.minZ);
+        const float minY = static_cast<float>(building.worldZ + building.minZ);
+        const float minZ = static_cast<float>(building.worldY + building.minY);
         const float maxX = static_cast<float>(building.worldX + building.maxX);
-        const float maxY = static_cast<float>(building.worldY + building.maxY);
-        const float maxZ = static_cast<float>(building.worldZ + building.maxZ);
+        const float maxY = static_cast<float>(building.worldZ + building.maxZ);
+        const float maxZ = static_cast<float>(building.worldY + building.maxY);
         if (!frustum.testAABB(minX, minY, minZ, maxX, maxY, maxZ))
         {
             continue;
@@ -516,9 +517,10 @@ collectMapEventCandidates(const formats::BLVMapData& blvData, const formats::ODM
                     continue;
                 }
                 const auto& v = building.vertices[vi];
-                centroid = centroid + Vec3(static_cast<float>(v.x + building.worldX),
-                                           static_cast<float>(v.y + building.worldY),
-                                           static_cast<float>(v.z + building.worldZ));
+                centroid =
+                    centroid + gameplayToRenderPosition(static_cast<float>(v.x + building.worldX),
+                                                        static_cast<float>(v.y + building.worldY),
+                                                        static_cast<float>(v.z + building.worldZ));
                 valid++;
             }
             if (valid <= 0)
