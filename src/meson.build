@@ -56,6 +56,8 @@ formats_sources = files(
     'formats/npctopic_parser.cpp',
     'formats/npctext_parser.cpp',
     'formats/npcnames_parser.cpp',
+    'formats/npcprof_parser.cpp',
+    'formats/npcgreet_parser.cpp',
     'formats/autonote_parser.cpp',
     'formats/credits_parser.cpp',
     'formats/two_d_events_parser.cpp',

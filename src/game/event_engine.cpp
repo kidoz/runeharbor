@@ -1387,6 +1387,15 @@ size_t EventEngine::executeCommand(const EventScript& script, size_t index, bool
         }
         return nextIndex;
 
+    case EventOpcode::Unused20:
+    case EventOpcode::Unused27:
+    case EventOpcode::Unused28:
+    case EventOpcode::Unused44:
+    case EventOpcode::Unused45:
+    case EventOpcode::Unused46:
+    case EventOpcode::Unused52:
+        return nextIndex;
+
     default:
         logger_.warning("Unhandled event opcode: " + std::to_string(static_cast<int>(cmd.opcode)));
         return nextIndex;

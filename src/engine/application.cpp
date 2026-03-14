@@ -20,7 +20,9 @@
 #include "../formats/mapstats_parser.hpp"
 #include "../formats/monsters_parser.hpp"
 #include "../formats/npcdata_parser.hpp"
+#include "../formats/npcgreet_parser.hpp"
 #include "../formats/npcnames_parser.hpp"
+#include "../formats/npcprof_parser.hpp"
 #include "../formats/npctext_parser.hpp"
 #include "../formats/npctopic_parser.hpp"
 #include "../formats/pcx_image.hpp"
@@ -2545,10 +2547,6 @@ void Application::configureGameplayCallbacks()
                 sharedData->pendingNpcDialogId = dialogTextId;
                 sharedData->awaitingNpcDialogText = true;
                 sharedData->openNpcDialogue = true;
-                sharedData->npcDialogueSpeaker = std::move(speaker);
-                sharedData->npcDialogueChoiceIds.clear();
-                sharedData->npcDialogueChoiceTexts.clear();
-
                 if (auto textIt = npcDialogTextById_.find(dialogTextId);
                     textIt != npcDialogTextById_.end())
                 {
@@ -2558,6 +2556,34 @@ void Application::configureGameplayCallbacks()
                 {
                     sharedData->npcDialogueText.clear();
                 }
+
+                // Check if NPC has a greeting via npcdata
+                if (auto greetIdIt = npcGreetingIdByNpcId_.find(dialogTextId); greetIdIt != npcGreetingIdByNpcId_.end())
+                {
+                    int greetId = greetIdIt->second;
+                    if (auto greetEntryIt = npcGreetingById_.find(greetId); greetEntryIt != npcGreetingById_.end())
+                    {
+                        // Use greeting 1 for now
+                        if (!greetEntryIt->second.greeting1.empty())
+                        {
+                            sharedData->npcDialogueText = greetEntryIt->second.greeting1;
+                        }
+                    }
+                }
+
+                // Add profession information if they have one
+                if (auto profIdIt = npcProfessionIdByNpcId_.find(dialogTextId); profIdIt != npcProfessionIdByNpcId_.end())
+                {
+                    int profId = profIdIt->second;
+                    if (auto profEntryIt = npcProfessionById_.find(profId); profEntryIt != npcProfessionById_.end())
+                    {
+                        speaker += " (" + profEntryIt->second.name + ")";
+                    }
+                }
+
+                sharedData->npcDialogueSpeaker = std::move(speaker);
+                sharedData->npcDialogueChoiceIds.clear();
+                sharedData->npcDialogueChoiceTexts.clear();
 
                 std::vector<int> topicIds;
                 if (auto byNpcIt = npcTopicIdsByNpcId_.find(dialogTextId);
@@ -3279,6 +3305,9 @@ void Application::loadDataTables()
                 {
                     npcTopicIdsByNpcId_[entry.id] = std::move(topicIds);
                 }
+
+                npcProfessionIdByNpcId_[entry.id] = entry.professionId;
+                npcGreetingIdByNpcId_[entry.id] = entry.greetingId;
             }
 
             logger.info(std::format("Loaded {} npc profiles with {} dialogue topic sets",
@@ -3310,6 +3339,40 @@ void Application::loadDataTables()
                 }
             }
             logger.info(std::format("Loaded {} npc fallback names", npcNamePool_.size()));
+        }
+    }
+
+    npcProfessionById_.clear();
+    if (auto profData = readFirstExisting({"npcprof.txt", "NPCPROF.TXT", "NPCProf.txt"}); profData.has_value())
+    {
+        formats::NPCProfessionParser parser(logger);
+        if (parser.parse(*profData))
+        {
+            for (const auto& entry : parser.getEntries())
+            {
+                if (entry.id >= 0)
+                {
+                    npcProfessionById_[entry.id] = entry;
+                }
+            }
+            logger.info(std::format("Loaded {} npc professions", npcProfessionById_.size()));
+        }
+    }
+
+    npcGreetingById_.clear();
+    if (auto greetData = readFirstExisting({"npcgreet.txt", "NPCGREET.TXT", "NPCGreet.txt"}); greetData.has_value())
+    {
+        formats::NPCGreetingParser parser(logger);
+        if (parser.parse(*greetData))
+        {
+            for (const auto& entry : parser.getEntries())
+            {
+                if (entry.id >= 0)
+                {
+                    npcGreetingById_[entry.id] = entry;
+                }
+            }
+            logger.info(std::format("Loaded {} npc greetings", npcGreetingById_.size()));
         }
     }
 

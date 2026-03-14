@@ -21,6 +21,8 @@
 #include "../formats/frame_tables.hpp"
 #include "../formats/snd_archive.hpp"
 #include "../formats/sound_list.hpp"
+#include "../formats/npcprof_parser.hpp"
+#include "../formats/npcgreet_parser.hpp"
 #include "../game/character.hpp"
 #include "../game/combat.hpp"
 #include "../game/event_engine.hpp"
@@ -208,6 +210,10 @@ class Application
     std::unordered_map<int, std::vector<int>> npcTopicIdsByNpcId_;
     std::unordered_map<int, std::vector<int>> npcTopicIdsByTextId_;
     std::unordered_map<int, std::string> npcTopicNameById_;
+    std::unordered_map<int, int> npcProfessionIdByNpcId_;
+    std::unordered_map<int, int> npcGreetingIdByNpcId_;
+    std::unordered_map<int, formats::NPCProfessionEntry> npcProfessionById_;
+    std::unordered_map<int, formats::NPCGreetingEntry> npcGreetingById_;
     std::vector<std::string> npcNamePool_;
     std::vector<game::EventScript> globalEventScripts_;
     std::unique_ptr<formats::SndArchive> sndArchive_;
