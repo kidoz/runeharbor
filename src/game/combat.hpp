@@ -112,6 +112,8 @@ enum class DamageElement : uint8_t
     Physical = 10,
 };
 
+class Inventory;
+
 // Combat event callbacks for UI
 struct CombatCallbacks
 {
@@ -132,6 +134,7 @@ class CombatSystem
 
     // Set references
     void setGameWorld(GameWorld* world) { gameWorld_ = world; }
+    void setInventory(Inventory* inventory) { inventory_ = inventory; }
     void setCallbacks(const CombatCallbacks& callbacks) { callbacks_ = callbacks; }
 
     // Load monster definitions
@@ -189,6 +192,7 @@ class CombatSystem
 
     util::ILogger& logger_;
     GameWorld* gameWorld_ = nullptr;
+    Inventory* inventory_ = nullptr;
     CombatCallbacks callbacks_;
 
     std::unordered_map<int, formats::MonsterEntry> monsterDefs_;

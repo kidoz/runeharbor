@@ -82,6 +82,10 @@ class Party
     // Recalculate all derived stats for all members
     void recalculateAll();
 
+    // Core Gameplay actions
+    void awardExperience(int amount);
+    bool rest(int hours);
+
   private:
     std::array<Character, kPartySize> members_;
     int gold_ = 200;

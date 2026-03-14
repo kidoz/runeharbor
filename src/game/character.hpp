@@ -306,6 +306,15 @@ struct Character
 
     // Recalculate derived stats (HP, SP, AC, resistances) from base stats + equipment
     void recalculateDerived();
+
+    // Experience and Leveling
+    int xpRequiredForNextLevel() const;
+    bool canLevelUp() const;
+    void addExperience(int amount);
+    void levelUp();
+    
+    // Resting
+    void rest(int hours);
 };
 
 } // namespace runeharbor::game

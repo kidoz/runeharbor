@@ -11,6 +11,7 @@
 
 #include "../util/string_utils.hpp"
 #include "game_world.hpp"
+#include "inventory.hpp"
 
 namespace runeharbor::game
 {
@@ -302,7 +303,31 @@ AttackResult CombatSystem::playerAttack(int characterIndex, int monsterIndex)
 
     // Base damage from might + weapon
     int mightBonus = std::max(0, (ch.stats.might - 10) / 2);
-    int baseDamage = 1 + mightBonus + ch.level;
+    int baseDamage = 1 + mightBonus; // Hand-to-hand base is 1 + might
+
+    bool usingWeapon = false;
+    if (inventory_)
+    {
+        const auto& charInv = inventory_->getInventory(characterIndex);
+        const auto& mainHandItem = charInv.equipped[static_cast<size_t>(EquipSlot::MainHand)];
+        
+        if (mainHandItem.valid())
+        {
+            const auto* itemDef = inventory_->getItemDef(mainHandItem.itemId);
+            if (itemDef && !itemDef->mod1.empty())
+            {
+                usingWeapon = true;
+                int weaponDmg = rollDamage(itemDef->mod1) + itemDef->mod2;
+                baseDamage = mightBonus + weaponDmg;
+            }
+        }
+    }
+    
+    // Add level bonus? Original code added level. MM7 usually adds skill mastery bonus instead. Let's keep a small level scaling if no weapon.
+    if (!usingWeapon)
+    {
+        baseDamage += ch.level;
+    }
 
     // Critical hit (5% chance, double damage)
     if (randomInt(1, 20) == 20)
