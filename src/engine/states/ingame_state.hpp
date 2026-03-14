@@ -43,7 +43,7 @@ class InGameState : public IGameState
   private:
     graphics::Rect worldViewportRect() const;
     bool mapMouseToWorldViewport(int screenX, int screenY, int& localX, int& localY) const;
-    void updateCameraInput();
+    void updateCameraInput(float deltaMs);
     void renderOverlay();
     int pickMonsterUnderCursor() const;
     std::optional<graphics::PickHit> pickMapObjectUnderCursor(bool requireEventId) const;

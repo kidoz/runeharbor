@@ -29,6 +29,7 @@
 #include "../../graphics/world_coordinates.hpp"
 #include "../../graphics/world_renderer.hpp"
 #include "../outdoor_terrain.hpp"
+#include "../physics.hpp"
 
 namespace runeharbor::engine
 {
@@ -306,7 +307,7 @@ std::optional<GameStateId> InGameState::update()
         return std::nullopt;
     }
 
-    updateCameraInput();
+    updateCameraInput(deltaMs);
     if (ctx.worldRenderer && ctx.shared && ctx.shared->mapScene &&
         ctx.shared->mapScene->isLoaded() && ctx.camera)
     {
@@ -754,7 +755,7 @@ void InGameState::render()
     }
 }
 
-void InGameState::updateCameraInput()
+void InGameState::updateCameraInput(float deltaMs)
 {
     if (!ctx.camera || !ctx.shared || !ctx.shared->mapScene || !ctx.shared->gameWorld)
     {
@@ -765,7 +766,7 @@ void InGameState::updateCameraInput()
     const auto& config = ctx.shared->gameWorld->runtimeConfig();
 
     float orbitSpeed = 16.0f; // MM7 rotation units per frame
-    float panSpeed = std::max(1.0f, config.walkSpeed / 2.0f);
+    float panSpeed = std::max(1.0f, config.walkSpeed / 2.0f) * (deltaMs / 16.0f); // Normalize speed
 
     if (ctx.isKeyDown(SDL_SCANCODE_LSHIFT) || ctx.isKeyDown(SDL_SCANCODE_RSHIFT))
     {
@@ -833,12 +834,27 @@ void InGameState::updateCameraInput()
         py -= dx * panSpeed;
     }
 
-    if (ctx.shared->mapScene && !ctx.shared->mapScene->getODMData().heightmap.empty())
-    {
-        pz = clampOutdoorPartyZ(ctx.shared->mapScene->getODMData(), px, py, pz);
-    }
-
     party.setWorldPosition(px, py, pz);
+
+    if (ctx.shared->mapScene)
+    {
+        PhysicsConfig physConfig;
+        physConfig.playerHeight = static_cast<float>(config.partyHeight);
+        
+        const formats::BLVMapData* blv = nullptr;
+        const formats::ODMMapData* odm = nullptr;
+        
+        if (ctx.shared->gameWorld->isIndoorMap())
+            blv = &ctx.shared->mapScene->getBLVData();
+        else
+            odm = &ctx.shared->mapScene->getODMData();
+
+        updatePartyPhysics(party, blv, odm, deltaMs, physConfig);
+        
+        px = party.worldX();
+        py = party.worldY();
+        pz = party.worldZ();
+    }
 
     const float pitchRad = pitch * M_PI / 1024.0f;
     const float dz = std::sin(pitchRad);
