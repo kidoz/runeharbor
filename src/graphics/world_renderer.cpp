@@ -10,13 +10,107 @@
 namespace runeharbor::graphics
 {
 
-WorldRenderer::WorldRenderer(SDLRenderer& renderer, util::ILogger& logger)
+WorldRenderer::WorldRenderer(SDLRenderer& renderer, util::ILogger& logger) : renderer_(renderer)
 {
     indoorRenderer = std::make_unique<IndoorRenderer>(renderer, logger);
     outdoorRenderer = std::make_unique<OutdoorRenderer>(renderer, logger);
 }
 
-WorldRenderer::~WorldRenderer() = default;
+WorldRenderer::~WorldRenderer()
+{
+    if (auto* gpu = renderer_.getGPUDevice())
+    {
+        if (offscreenGpuTexture_)
+        {
+            SDL_ReleaseGPUTexture(gpu, offscreenGpuTexture_);
+        }
+        if (offscreenDepthTexture_)
+        {
+            SDL_ReleaseGPUTexture(gpu, offscreenDepthTexture_);
+        }
+    }
+    if (offscreenSdlTexture_)
+    {
+        renderer_.destroyTexture(offscreenSdlTexture_);
+    }
+}
+
+void WorldRenderer::ensureOffscreenTarget(int width, int height)
+{
+    if (width <= 0 || height <= 0)
+        return;
+    if (offscreenTargetWidth_ == width && offscreenTargetHeight_ == height && offscreenGpuTexture_)
+        return;
+
+    auto* gpu = renderer_.getGPUDevice();
+    if (!gpu)
+        return;
+
+    if (offscreenGpuTexture_)
+    {
+        SDL_ReleaseGPUTexture(gpu, offscreenGpuTexture_);
+        offscreenGpuTexture_ = nullptr;
+    }
+    if (offscreenDepthTexture_)
+    {
+        SDL_ReleaseGPUTexture(gpu, offscreenDepthTexture_);
+        offscreenDepthTexture_ = nullptr;
+    }
+    if (offscreenSdlTexture_)
+    {
+        renderer_.destroyTexture(offscreenSdlTexture_);
+        offscreenSdlTexture_ = nullptr;
+    }
+
+    SDL_GPUTextureCreateInfo texInfo = {};
+    texInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    texInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    texInfo.width = static_cast<Uint32>(width);
+    texInfo.height = static_cast<Uint32>(height);
+    texInfo.layer_count_or_depth = 1;
+    texInfo.num_levels = 1;
+    texInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    texInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+
+    offscreenGpuTexture_ = SDL_CreateGPUTexture(gpu, &texInfo);
+
+    SDL_GPUTextureCreateInfo depthInfo = texInfo;
+    depthInfo.format =
+        SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT; // Apple Metal only supports 32-bit depth formats
+    depthInfo.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    offscreenDepthTexture_ = SDL_CreateGPUTexture(gpu, &depthInfo);
+
+    if (!offscreenGpuTexture_ || !offscreenDepthTexture_)
+    {
+        return;
+    }
+
+    SDL_PropertiesID texProps = SDL_CreateProperties();
+    SDL_SetNumberProperty(texProps, SDL_PROP_TEXTURE_CREATE_FORMAT_NUMBER, SDL_PIXELFORMAT_RGBA32);
+    SDL_SetNumberProperty(texProps, SDL_PROP_TEXTURE_CREATE_ACCESS_NUMBER,
+                          SDL_TEXTUREACCESS_TARGET);
+    SDL_SetNumberProperty(texProps, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, width);
+    SDL_SetNumberProperty(texProps, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, height);
+    SDL_SetPointerProperty(texProps, SDL_PROP_TEXTURE_CREATE_GPU_TEXTURE_POINTER,
+                           offscreenGpuTexture_);
+
+    SDL_Texture* sdlTex = SDL_CreateTextureWithProperties(renderer_.getSDLRenderer(), texProps);
+    SDL_DestroyProperties(texProps);
+
+    if (sdlTex)
+    {
+        offscreenSdlTexture_ = sdlTex;
+        offscreenTargetWidth_ = width;
+        offscreenTargetHeight_ = height;
+    }
+    else
+    {
+        SDL_ReleaseGPUTexture(gpu, offscreenGpuTexture_);
+        offscreenGpuTexture_ = nullptr;
+        SDL_ReleaseGPUTexture(gpu, offscreenDepthTexture_);
+        offscreenDepthTexture_ = nullptr;
+    }
+}
 
 void WorldRenderer::setTextureLookup(TextureLookup lookup)
 {
@@ -161,6 +255,21 @@ void WorldRenderer::render(const engine::MapScene& scene, const Camera& camera,
         return;
     }
 
+    // Invalidate GPU geometry caches when the map changes
+    if (scene.getName() != lastSceneName_)
+    {
+        lastSceneName_ = scene.getName();
+        if (indoorRenderer)
+            indoorRenderer->invalidateGPUCache();
+        if (outdoorRenderer)
+            outdoorRenderer->invalidateGPUCache();
+    }
+
+    auto* gpu = renderer_.getGPUDevice();
+    if (gpu) {
+        ensureOffscreenTarget(renderer_.getViewportWidth(), renderer_.getViewportHeight());
+    }
+
     refreshVisibilityCache(scene, camera);
     refreshPickCache(scene, camera);
 
@@ -170,7 +279,8 @@ void WorldRenderer::render(const engine::MapScene& scene, const Camera& camera,
         // Indoor scene
         if (indoorRenderer)
         {
-            indoorRenderer->render(scene, camera, runtimeConfig, &visibleIndoorSectors_);
+            indoorRenderer->render(scene, camera, runtimeConfig, &visibleIndoorSectors_, 
+                                   offscreenGpuTexture_, offscreenDepthTexture_, offscreenSdlTexture_);
         }
     }
     else if (!scene.getODMData().heightmap.empty())
@@ -188,7 +298,8 @@ void WorldRenderer::render(const engine::MapScene& scene, const Camera& camera,
         // Outdoor scene
         if (outdoorRenderer)
         {
-            outdoorRenderer->render(scene, camera, runtimeConfig, nightBlend, &visibilityFrustum_);
+            outdoorRenderer->render(scene, camera, runtimeConfig, nightBlend, &visibilityFrustum_,
+                                    offscreenGpuTexture_, offscreenDepthTexture_, offscreenSdlTexture_);
         }
     }
 }

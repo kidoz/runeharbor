@@ -7,11 +7,13 @@
 #include <format>
 #include <string_view>
 
+#include <SDL3_shadercross/SDL_shadercross.h>
 #include <cctype>
 #include <cmath>
 
 #include "../game/game_world.hpp"
 #include "clip_utils.hpp"
+#include "shaders_compiled.hpp"
 #include "visibility.hpp"
 
 namespace runeharbor::graphics
@@ -321,9 +323,36 @@ BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, co
 IndoorRenderer::IndoorRenderer(SDLRenderer& renderer, util::ILogger& logger)
     : renderer(renderer), logger(logger)
 {
+    gpuDevice = renderer.getGPUDevice();
+    if (gpuDevice)
+    {
+        initGPUPipeline();
+    }
+    else
+    {
+        logger.warning(
+            "IndoorRenderer: No SDL_GPUDevice available. Falling back to software projection.");
+    }
 }
 
-IndoorRenderer::~IndoorRenderer() = default;
+IndoorRenderer::~IndoorRenderer()
+{
+    if (gpuDevice)
+    {
+        if (indoorPipeline)
+            SDL_ReleaseGPUGraphicsPipeline(gpuDevice, indoorPipeline);
+        if (vertexShader)
+            SDL_ReleaseGPUShader(gpuDevice, vertexShader);
+        if (fragmentShader)
+            SDL_ReleaseGPUShader(gpuDevice, fragmentShader);
+        if (indoorVertexBuffer)
+            SDL_ReleaseGPUBuffer(gpuDevice, indoorVertexBuffer);
+        if (indoorIndexBuffer)
+            SDL_ReleaseGPUBuffer(gpuDevice, indoorIndexBuffer);
+        if (defaultSampler)
+            SDL_ReleaseGPUSampler(gpuDevice, defaultSampler);
+    }
+}
 
 void IndoorRenderer::setTextureLookup(TextureLookup lookup)
 {
@@ -342,12 +371,58 @@ void IndoorRenderer::setSpriteFrameTable(const formats::SpriteFrameTable* table)
 
 void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                             const runeharbor::game::RuntimeConfig* runtimeConfig,
-                            const std::unordered_set<uint16_t>* visibleSectors)
+                            const std::unordered_set<uint16_t>* visibleSectors,
+                            SDL_GPUTexture* colorTex, SDL_GPUTexture* depthTex, SDL_Texture* blitTex)
 {
     const auto& blvData = scene.getBLVData();
     if (blvData.vertices.empty() || blvData.faces.empty())
     {
         return;
+    }
+
+    if (gpuInitialized && indoorIndexCount == 0)
+    {
+        buildGPUIndoor(blvData);
+    }
+
+    bool gpuWallsDrawn = false;
+    if (gpuInitialized && indoorIndexCount > 0 && colorTex && depthTex)
+    {
+        // Flush the 2D renderer to ensure any pending texture uploads are processed
+        SDL_FlushRenderer(renderer.getSDLRenderer());
+
+        SDL_GPUCommandBuffer* cmdBuf = SDL_AcquireGPUCommandBuffer(gpuDevice);
+        if (cmdBuf) {
+            SDL_GPUColorTargetInfo colorTarget = {};
+            colorTarget.texture = colorTex;
+            colorTarget.clear_color = {0.0f, 0.0f, 0.0f, 0.0f}; // Transparent
+            colorTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+            colorTarget.store_op = SDL_GPU_STOREOP_STORE;
+
+            SDL_GPUDepthStencilTargetInfo depthTarget = {};
+            depthTarget.texture = depthTex;
+            depthTarget.clear_depth = 1.0f;
+            depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+            depthTarget.store_op = SDL_GPU_STOREOP_DONT_CARE;
+            depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+            depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+            depthTarget.cycle = false;
+
+            SDL_GPURenderPass* renderPass = SDL_BeginGPURenderPass(cmdBuf, &colorTarget, 1, &depthTarget);
+            
+            renderIndoorGPU(blvData, camera, runtimeConfig, visibleSectors, cmdBuf, renderPass);
+            
+            SDL_EndGPURenderPass(renderPass);
+            SDL_SubmitGPUCommandBuffer(cmdBuf);
+
+            if (blitTex) {
+                SDL_SetTextureBlendMode(blitTex, SDL_BLENDMODE_BLEND);
+                float w, h;
+                SDL_GetTextureSize(blitTex, &w, &h);
+                renderer.renderTexture(blitTex, 0, 0, static_cast<int>(w), static_cast<int>(h));
+            }
+            gpuWallsDrawn = true;
+        }
     }
 
     const auto& viewProjection = camera.getViewProjectionMatrix();
@@ -507,6 +582,8 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
     {
         if (op.type == RenderOpType::Face)
         {
+            if (gpuWallsDrawn) continue; // GPU already drew the walls
+
             const auto& face = blvData.faces[op.index];
             const SDL_FColor faceColor = litIndoorFaceColor(blvData, face, op.cx, op.cy, op.cz,
                                                             stationaryLights_, mobileLights_);
@@ -570,23 +647,30 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                 continue;
             }
 
+            // Tessellate clip-space polygons to minimize affine texture warping
+            std::vector<ClipVertex> tessellatedVerts;
+            for (int i = 1; i + 1 < clippedCount; i++)
+            {
+                tessellateTriangle(polyOut[0], polyOut[i], polyOut[i + 1], tessellatedVerts);
+            }
+
             // Project to screen
             std::vector<SDL_Vertex> vertices;
-            vertices.reserve(static_cast<size_t>(clippedCount));
+            vertices.reserve(tessellatedVerts.size());
             bool anyFailed = false;
 
-            for (int i = 0; i < clippedCount; i++)
+            for (const auto& tv : tessellatedVerts)
             {
                 float sx, sy;
-                if (!projectClipToScreen(polyOut[i].clip, vpW, vpH, sx, sy))
+                if (!projectClipToScreen(tv.clip, vpW, vpH, sx, sy))
                 {
                     anyFailed = true;
                     break;
                 }
                 SDL_Vertex sv;
                 sv.position = {sx, sy};
-                sv.color = polyOut[i].color;
-                sv.tex_coord = {polyOut[i].u, polyOut[i].v};
+                sv.color = tv.color;
+                sv.tex_coord = {tv.u, tv.v};
                 vertices.push_back(sv);
             }
 
@@ -595,14 +679,11 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                 continue;
             }
 
-            // Fan triangulation
             std::vector<int> indices;
-            indices.reserve((vertices.size() - 2) * 3);
-            for (size_t i = 1; i + 1 < vertices.size(); i++)
+            indices.reserve(vertices.size());
+            for (size_t i = 0; i < vertices.size(); i++)
             {
-                indices.push_back(0);
                 indices.push_back(static_cast<int>(i));
-                indices.push_back(static_cast<int>(i + 1));
             }
 
             // Look up texture if available
@@ -760,6 +841,380 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
 
             constexpr int indices[6] = {0, 1, 2, 2, 1, 3};
             SDL_RenderGeometry(renderer.getSDLRenderer(), texture, vertices, 4, indices, 6);
+        }
+    }
+}
+
+void IndoorRenderer::initGPUPipeline()
+{
+    if (!gpuDevice)
+        return;
+
+    if (!SDL_ShaderCross_Init())
+    {
+        logger.error("Failed to initialize SDL_shadercross: " + std::string(SDL_GetError()));
+        return;
+    }
+
+    SDL_ShaderCross_SPIRV_Info vertexSpirv = {};
+    vertexSpirv.bytecode = shaders::world_vert_data;
+    vertexSpirv.bytecode_size = shaders::world_vert_size;
+    vertexSpirv.entrypoint = "main";
+    vertexSpirv.shader_stage = SDL_SHADERCROSS_SHADERSTAGE_VERTEX;
+
+    SDL_ShaderCross_GraphicsShaderResourceInfo vertexResInfo = {};
+    vertexResInfo.num_samplers = 0;
+    vertexResInfo.num_storage_textures = 0;
+    vertexResInfo.num_storage_buffers = 0;
+    vertexResInfo.num_uniform_buffers = 1;
+
+    vertexShader =
+        SDL_ShaderCross_CompileGraphicsShaderFromSPIRV(gpuDevice, &vertexSpirv, &vertexResInfo, 0);
+
+    SDL_ShaderCross_SPIRV_Info fragmentSpirv = {};
+    fragmentSpirv.bytecode = shaders::world_frag_data;
+    fragmentSpirv.bytecode_size = shaders::world_frag_size;
+    fragmentSpirv.entrypoint = "main";
+    fragmentSpirv.shader_stage = SDL_SHADERCROSS_SHADERSTAGE_FRAGMENT;
+
+    SDL_ShaderCross_GraphicsShaderResourceInfo fragmentResInfo = {};
+    fragmentResInfo.num_samplers = 1;
+    fragmentResInfo.num_storage_textures = 0;
+    fragmentResInfo.num_storage_buffers = 0;
+    fragmentResInfo.num_uniform_buffers = 1;
+
+    fragmentShader = SDL_ShaderCross_CompileGraphicsShaderFromSPIRV(gpuDevice, &fragmentSpirv,
+                                                                    &fragmentResInfo, 0);
+
+    if (!vertexShader || !fragmentShader)
+    {
+        logger.error("Failed to compile cross shaders: " + std::string(SDL_GetError()));
+        SDL_ShaderCross_Quit();
+        return;
+    }
+
+    SDL_GPUGraphicsPipelineCreateInfo pipelineInfo = {};
+    pipelineInfo.vertex_shader = vertexShader;
+    pipelineInfo.fragment_shader = fragmentShader;
+    pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+
+    SDL_GPUVertexBufferDescription vertexBufferDesc[1] = {};
+    vertexBufferDesc[0].slot = 0;
+    vertexBufferDesc[0].pitch = sizeof(GPUVertex);
+    vertexBufferDesc[0].input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    vertexBufferDesc[0].instance_step_rate = 0;
+
+    SDL_GPUVertexAttribute vertexAttributes[3] = {};
+    // Position
+    vertexAttributes[0].location = 0;
+    vertexAttributes[0].buffer_slot = 0;
+    vertexAttributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+    vertexAttributes[0].offset = offsetof(GPUVertex, x);
+    // Color
+    vertexAttributes[1].location = 1;
+    vertexAttributes[1].buffer_slot = 0;
+    vertexAttributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+    vertexAttributes[1].offset = offsetof(GPUVertex, r);
+    // Texcoord
+    vertexAttributes[2].location = 2;
+    vertexAttributes[2].buffer_slot = 0;
+    vertexAttributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+    vertexAttributes[2].offset = offsetof(GPUVertex, u);
+
+    pipelineInfo.vertex_input_state.num_vertex_attributes = 3;
+    pipelineInfo.vertex_input_state.vertex_attributes = vertexAttributes;
+
+    pipelineInfo.vertex_input_state.num_vertex_buffers = 1;
+    pipelineInfo.vertex_input_state.vertex_buffer_descriptions = vertexBufferDesc;
+
+    // Rasterizer state
+    pipelineInfo.rasterizer_state.cull_mode =
+        SDL_GPU_CULLMODE_NONE; // Indoor BSP culling handles visibility, but faces are drawn direct.
+                               // Let's do NONE for safety until ported fully.
+    pipelineInfo.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+
+    // Depth Stencil state
+    pipelineInfo.depth_stencil_state.enable_depth_test = true;
+    pipelineInfo.depth_stencil_state.enable_depth_write = true;
+    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+
+    // Target state
+    pipelineInfo.target_info.num_color_targets = 1;
+    SDL_GPUColorTargetDescription targetDesc = {};
+    targetDesc.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    
+    // Enable blending for transparency
+    targetDesc.blend_state.enable_blend = true;
+    targetDesc.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    targetDesc.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    targetDesc.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+    targetDesc.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    targetDesc.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    targetDesc.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+    targetDesc.blend_state.enable_color_write_mask = false; // default all channels
+
+    pipelineInfo.target_info.color_target_descriptions = &targetDesc;
+    pipelineInfo.target_info.has_depth_stencil_target = true;
+    pipelineInfo.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
+
+    indoorPipeline = SDL_CreateGPUGraphicsPipeline(gpuDevice, &pipelineInfo);
+    if (!indoorPipeline)
+    {
+        logger.error("Failed to create pipeline: " + std::string(SDL_GetError()));
+    }
+
+    SDL_GPUSamplerCreateInfo samplerInfo = {};
+    samplerInfo.min_filter = SDL_GPU_FILTER_NEAREST;
+    samplerInfo.mag_filter = SDL_GPU_FILTER_NEAREST;
+    samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    defaultSampler = SDL_CreateGPUSampler(gpuDevice, &samplerInfo);
+
+    gpuInitialized = true;
+}
+
+void IndoorRenderer::invalidateGPUCache()
+{
+    indoorIndexCount = 0;
+    indoorDrawCalls.clear();
+    if (gpuDevice)
+    {
+        if (indoorVertexBuffer)
+        {
+            SDL_ReleaseGPUBuffer(gpuDevice, indoorVertexBuffer);
+            indoorVertexBuffer = nullptr;
+        }
+        if (indoorIndexBuffer)
+        {
+            SDL_ReleaseGPUBuffer(gpuDevice, indoorIndexBuffer);
+            indoorIndexBuffer = nullptr;
+        }
+    }
+}
+
+void IndoorRenderer::buildGPUIndoor(const formats::BLVMapData& blvData)
+{
+    if (!gpuDevice || blvData.faces.empty())
+        return;
+
+    indoorDrawCalls.clear();
+
+    // Group faces by (texture, sector), skipping invisible and portal faces
+    struct TextureSectorKey
+    {
+        std::string textureName;
+        uint16_t sectorId;
+        bool operator==(const TextureSectorKey&) const = default;
+    };
+    struct KeyHash
+    {
+        size_t operator()(const TextureSectorKey& k) const
+        {
+            return std::hash<std::string>{}(k.textureName) ^
+                   (std::hash<uint16_t>{}(k.sectorId) << 16);
+        }
+    };
+    std::unordered_map<TextureSectorKey, std::vector<uint32_t>, KeyHash> groupedFaces;
+    for (uint32_t i = 0; i < blvData.faces.size(); ++i)
+    {
+        const auto& face = blvData.faces[i];
+        if (face.isInvisible() || face.isPortal())
+            continue;
+        TextureSectorKey key{face.textureName, face.sectorId};
+        groupedFaces[key].push_back(i);
+    }
+
+    std::vector<GPUVertex> vertices;
+    std::vector<uint32_t> indices;
+
+    for (const auto& [key, faceIndices] : groupedFaces)
+    {
+        uint32_t indexStart = static_cast<uint32_t>(indices.size());
+
+        for (uint32_t fIdx : faceIndices)
+        {
+            const auto& face = blvData.faces[fIdx];
+            if (face.vertexIndices.size() < 3)
+                continue;
+
+            uint32_t startIdx = static_cast<uint32_t>(vertices.size());
+
+            // Compute face center for lighting
+            float cx = 0.0f, cy = 0.0f, cz = 0.0f;
+            for (uint16_t vIdx : face.vertexIndices)
+            {
+                if (vIdx < blvData.vertices.size())
+                {
+                    cx += static_cast<float>(blvData.vertices[vIdx].x);
+                    cy += static_cast<float>(blvData.vertices[vIdx].y);
+                    cz += static_cast<float>(blvData.vertices[vIdx].z);
+                }
+            }
+            cx /= face.vertexIndices.size();
+            cy /= face.vertexIndices.size();
+            cz /= face.vertexIndices.size();
+
+            // Apply lighting to get face color
+            SDL_FColor faceColor =
+                litIndoorFaceColor(blvData, face, cx, cy, cz, stationaryLights_, mobileLights_);
+
+            for (size_t i = 0; i < face.vertexIndices.size(); ++i)
+            {
+                uint16_t vIdx = face.vertexIndices[i];
+                if (vIdx >= blvData.vertices.size())
+                    continue;
+
+                const auto& vPos = blvData.vertices[vIdx];
+
+                float u = 0.0f, v = 0.0f;
+                if (i < face.uCoords.size() && i < face.vCoords.size())
+                {
+                    u = static_cast<float>(face.uCoords[i]) / 256.0f;
+                    v = static_cast<float>(face.vCoords[i]) / 256.0f;
+                }
+
+                GPUVertex vertex = {static_cast<float>(vPos.x),
+                                    static_cast<float>(vPos.y),
+                                    static_cast<float>(vPos.z),
+                                    faceColor.r,
+                                    faceColor.g,
+                                    faceColor.b,
+                                    faceColor.a,
+                                    u,
+                                    v};
+                vertices.push_back(vertex);
+            }
+
+            // Triangulate n-gon (triangle fan)
+            for (size_t i = 1; i < face.vertexIndices.size() - 1; ++i)
+            {
+                indices.push_back(startIdx);
+                indices.push_back(startIdx + i);
+                indices.push_back(startIdx + i + 1);
+            }
+        }
+
+        uint32_t indexCount = static_cast<uint32_t>(indices.size()) - indexStart;
+        if (indexCount > 0)
+        {
+            indoorDrawCalls.push_back({key.textureName, key.sectorId, indexStart, indexCount});
+        }
+    }
+
+    indoorIndexCount = static_cast<uint32_t>(indices.size());
+
+    if (indoorIndexCount == 0)
+        return;
+
+    if (indoorVertexBuffer)
+        SDL_ReleaseGPUBuffer(gpuDevice, indoorVertexBuffer);
+    if (indoorIndexBuffer)
+        SDL_ReleaseGPUBuffer(gpuDevice, indoorIndexBuffer);
+
+    SDL_GPUBufferCreateInfo vboInfo = {};
+    vboInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+    vboInfo.size = vertices.size() * sizeof(GPUVertex);
+    indoorVertexBuffer = SDL_CreateGPUBuffer(gpuDevice, &vboInfo);
+
+    SDL_GPUBufferCreateInfo iboInfo = {};
+    iboInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
+    iboInfo.size = indices.size() * sizeof(uint32_t);
+    indoorIndexBuffer = SDL_CreateGPUBuffer(gpuDevice, &iboInfo);
+
+    SDL_GPUTransferBufferCreateInfo transferInfo = {};
+    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    transferInfo.size = vboInfo.size + iboInfo.size;
+    SDL_GPUTransferBuffer* transferBuffer = SDL_CreateGPUTransferBuffer(gpuDevice, &transferInfo);
+
+    void* mapData = SDL_MapGPUTransferBuffer(gpuDevice, transferBuffer, false);
+    memcpy(mapData, vertices.data(), vboInfo.size);
+    memcpy(static_cast<uint8_t*>(mapData) + vboInfo.size, indices.data(), iboInfo.size);
+    SDL_UnmapGPUTransferBuffer(gpuDevice, transferBuffer);
+
+    SDL_GPUCommandBuffer* cmdBuf = SDL_AcquireGPUCommandBuffer(gpuDevice);
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmdBuf);
+
+    SDL_GPUTransferBufferLocation srcVbo = {transferBuffer, 0};
+    SDL_GPUBufferRegion dstVbo = {indoorVertexBuffer, 0, vboInfo.size};
+    SDL_UploadToGPUBuffer(copyPass, &srcVbo, &dstVbo, false);
+
+    SDL_GPUTransferBufferLocation srcIbo = {transferBuffer, static_cast<Uint32>(vboInfo.size)};
+    SDL_GPUBufferRegion dstIbo = {indoorIndexBuffer, 0, iboInfo.size};
+    SDL_UploadToGPUBuffer(copyPass, &srcIbo, &dstIbo, false);
+
+    SDL_EndGPUCopyPass(copyPass);
+    SDL_SubmitGPUCommandBuffer(cmdBuf);
+    SDL_ReleaseGPUTransferBuffer(gpuDevice, transferBuffer);
+}
+
+void IndoorRenderer::renderIndoorGPU(const formats::BLVMapData& blvData, const Camera& camera,
+                                     const runeharbor::game::RuntimeConfig* runtimeConfig,
+                                     const std::unordered_set<uint16_t>* visibleSectors,
+                                     SDL_GPUCommandBuffer* cmdBuf, SDL_GPURenderPass* renderPass)
+{
+    (void)blvData;
+    (void)runtimeConfig;
+
+    if (!gpuInitialized || !indoorVertexBuffer || !indoorIndexBuffer || !indoorPipeline || !cmdBuf || !renderPass) {
+        return;
+    }
+
+    // Set Viewport
+    SDL_GPUViewport viewport = {};
+    viewport.x = 0;
+    viewport.y = 0;
+    viewport.w = static_cast<float>(renderer.getViewportWidth());
+    viewport.h = static_cast<float>(renderer.getViewportHeight());
+    viewport.min_depth = 0.0f;
+    viewport.max_depth = 1.0f;
+    SDL_SetGPUViewport(renderPass, &viewport);
+
+    // Bind Pipeline
+    SDL_BindGPUGraphicsPipeline(renderPass, indoorPipeline);
+
+    // Bind Buffers
+    SDL_GPUBufferBinding vboBinding = {indoorVertexBuffer, 0};
+    SDL_BindGPUVertexBuffers(renderPass, 0, &vboBinding, 1);
+
+    SDL_GPUBufferBinding iboBinding = {indoorIndexBuffer, 0};
+    SDL_BindGPUIndexBuffer(renderPass, &iboBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+    // Upload Uniforms (View/Projection Matrix)
+    Mat4 vp = camera.getViewProjectionMatrix();
+    SDL_PushGPUVertexUniformData(cmdBuf, 0, vp.m.data(), sizeof(float) * 16);
+
+    // Push fragment uniform (no night blend for indoor)
+    float fragUniforms[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    SDL_PushGPUFragmentUniformData(cmdBuf, 0, fragUniforms, sizeof(fragUniforms));
+
+    for (const auto& drawCall : indoorDrawCalls)
+    {
+        // Sector visibility culling — skip draw calls for sectors not visible
+        if (visibleSectors && !visibleSectors->empty() &&
+            !visibleSectors->contains(drawCall.sectorId))
+        {
+            continue;
+        }
+
+        SDL_GPUTexture* gpuTex = nullptr;
+        if (textureLookup && !drawCall.textureName.empty())
+        {
+            if (SDL_Texture* tex = textureLookup(drawCall.textureName))
+            {
+                SDL_PropertiesID texProps = SDL_GetTextureProperties(tex);
+                gpuTex = (SDL_GPUTexture*)SDL_GetPointerProperty(
+                    texProps, SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, nullptr);
+            }
+        }
+
+        if (gpuTex)
+        {
+            SDL_GPUTextureSamplerBinding samplerBinding = {gpuTex, defaultSampler};
+            SDL_BindGPUFragmentSamplers(renderPass, 0, &samplerBinding, 1);
+            SDL_DrawGPUIndexedPrimitives(renderPass, drawCall.indexCount, 1, drawCall.indexStart, 0,
+                                         0);
         }
     }
 }

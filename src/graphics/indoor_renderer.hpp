@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <SDL3/SDL_gpu.h>
+
 #include <functional>
 #include <string>
 #include <unordered_set>
@@ -34,12 +36,36 @@ class IndoorRenderer
     void setSpriteFrameTable(const formats::SpriteFrameTable* table);
     void render(const engine::MapScene& scene, const Camera& camera,
                 const runeharbor::game::RuntimeConfig* runtimeConfig = nullptr,
-                const std::unordered_set<uint16_t>* visibleSectors = nullptr);
+                const std::unordered_set<uint16_t>* visibleSectors = nullptr,
+                SDL_GPUTexture* colorTex = nullptr, SDL_GPUTexture* depthTex = nullptr, SDL_Texture* blitTex = nullptr);
+    void invalidateGPUCache();
 
     LightStack& getStationaryLightStack() { return stationaryLights_; }
     LightStack& getMobileLightStack() { return mobileLights_; }
 
   private:
+    void initGPUPipeline();
+    void buildGPUIndoor(const formats::BLVMapData& blvData);
+    void renderIndoorGPU(const formats::BLVMapData& blvData, const Camera& camera,
+                         const runeharbor::game::RuntimeConfig* runtimeConfig,
+                         const std::unordered_set<uint16_t>* visibleSectors,
+                         SDL_GPUCommandBuffer* cmdBuf, SDL_GPURenderPass* renderPass);
+
+    struct GPUVertex
+    {
+        float x, y, z;
+        float r, g, b, a;
+        float u, v;
+    };
+
+    struct GPUDrawCall
+    {
+        std::string textureName;
+        uint16_t sectorId;
+        uint32_t indexStart;
+        uint32_t indexCount;
+    };
+
     SDLRenderer& renderer;
     [[maybe_unused]] util::ILogger& logger;
     TextureLookup textureLookup;
@@ -48,6 +74,18 @@ class IndoorRenderer
 
     LightStack stationaryLights_;
     LightStack mobileLights_;
+
+    // GPU State
+    SDL_GPUDevice* gpuDevice = nullptr;
+    SDL_GPUGraphicsPipeline* indoorPipeline = nullptr;
+    SDL_GPUShader* vertexShader = nullptr;
+    SDL_GPUShader* fragmentShader = nullptr;
+    SDL_GPUBuffer* indoorVertexBuffer = nullptr;
+    SDL_GPUBuffer* indoorIndexBuffer = nullptr;
+    SDL_GPUSampler* defaultSampler = nullptr;
+    uint32_t indoorIndexCount = 0;
+    bool gpuInitialized = false;
+    std::vector<GPUDrawCall> indoorDrawCalls;
 };
 
 } // namespace runeharbor::graphics

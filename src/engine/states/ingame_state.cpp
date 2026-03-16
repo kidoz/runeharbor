@@ -118,6 +118,12 @@ void InGameState::enter()
     fpsFrameCounter_ = 0;
     displayedFps_ = 0.0f;
 
+    inventory_.setVisible(false);
+    characterStats_.setVisible(false);
+    spellbook_.setVisible(false);
+    restWidget_.setVisible(false);
+    mapWidget_.setVisible(false);
+
     if (ctx.shared && ctx.shared->gameWorld)
     {
         hud_.setGameWorld(ctx.shared->gameWorld);
@@ -780,15 +786,15 @@ void InGameState::updateCameraInput(float deltaMs)
 
     if (ctx.isKeyDown(SDL_SCANCODE_LEFT))
     {
-        yaw -= orbitSpeed;
-        if (yaw < 0)
-            yaw += 2048.0f;
-    }
-    if (ctx.isKeyDown(SDL_SCANCODE_RIGHT))
-    {
         yaw += orbitSpeed;
         if (yaw >= 2048.0f)
             yaw -= 2048.0f;
+    }
+    if (ctx.isKeyDown(SDL_SCANCODE_RIGHT))
+    {
+        yaw -= orbitSpeed;
+        if (yaw < 0)
+            yaw += 2048.0f;
     }
     if (ctx.isKeyDown(SDL_SCANCODE_UP))
     {
@@ -840,17 +846,17 @@ void InGameState::updateCameraInput(float deltaMs)
     {
         PhysicsConfig physConfig;
         physConfig.playerHeight = static_cast<float>(config.partyHeight);
-        
+
         const formats::BLVMapData* blv = nullptr;
         const formats::ODMMapData* odm = nullptr;
-        
+
         if (ctx.shared->gameWorld->isIndoorMap())
             blv = &ctx.shared->mapScene->getBLVData();
         else
             odm = &ctx.shared->mapScene->getODMData();
 
         updatePartyPhysics(party, blv, odm, deltaMs, physConfig);
-        
+
         px = party.worldX();
         py = party.worldY();
         pz = party.worldZ();

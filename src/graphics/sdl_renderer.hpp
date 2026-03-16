@@ -6,6 +6,7 @@
 
 struct SDL_Window;
 struct SDL_Renderer;
+struct SDL_GPUDevice;
 
 namespace runeharbor::graphics
 {
@@ -42,11 +43,14 @@ class SDLRenderer : public IRenderer
     int getViewportWidth() const override;
     int getViewportHeight() const override;
 
+    SDL_GPUDevice* getGPUDevice() const { return gpuDevice; }
+
   private:
     void updateViewport();
 
     util::ILogger& logger;
     SDL_Renderer* renderer = nullptr;
+    SDL_GPUDevice* gpuDevice = nullptr;
     int viewportWidth = 0;
     int viewportHeight = 0;
 };

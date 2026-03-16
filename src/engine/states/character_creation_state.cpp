@@ -344,6 +344,13 @@ std::optional<GameStateId> CharacterCreationState::update()
                 ext = ".odm";
             }
 
+            if (ctx.shared->gameWorld) {
+                auto& party = ctx.shared->gameWorld->party();
+                // MM7 starts the new game at this exact coordinate on Emerald Island
+                party.setWorldPosition(12552.0f, 800.0f, 193.0f);
+                party.setOrientation(512.0f, 0.0f);
+            }
+
             ctx.shared->quickStartReady = true;
             ctx.shared->autoLoadMap = true;
             ctx.shared->startupMapName = startMap;

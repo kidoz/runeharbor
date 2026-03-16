@@ -29,6 +29,7 @@
 #include "../formats/placemon_parser.hpp"
 #include "../formats/rnditems_parser.hpp"
 #include "../formats/spells_parser.hpp"
+#include "../formats/sprite_lod_archive.hpp"
 #include "../formats/sprite_parser.hpp"
 #include "../formats/two_d_events_parser.hpp"
 #include "../graphics/bitmap_font.hpp"
@@ -36,6 +37,7 @@
 #include "../graphics/line_renderer.hpp"
 #include "../graphics/palette.hpp"
 #include "../graphics/sdl_renderer.hpp"
+#include "../graphics/sprite_decoder.hpp"
 #include "../graphics/visibility.hpp"
 #include "../graphics/world_coordinates.hpp"
 #include "../graphics/world_renderer.hpp"
@@ -1091,62 +1093,104 @@ void Application::wireUpMapTextures()
                 return static_cast<SDL_Texture*>(it->second);
             }
 
-            // Get image info (dimensions, palette ID)
-            auto info = vfs->getImageInfo(name);
-            if (!info)
+            auto loadPaletteById = [this](int paletteId) -> graphics::Palette
             {
-                return nullptr;
-            }
-
-            // Get raw indexed pixel data
-            auto data = vfs->readFile(name);
-            if (!data)
-            {
-                return nullptr;
-            }
-
-            // Load palette
-            graphics::Palette palette;
-            int palId = info->paletteId;
-            if (palId == 0)
-            {
-                palId = 1; // PAL000 doesn't exist; use PAL001 as fallback
-            }
-            std::string palName = std::format("pal{:03d}", palId);
-            auto palData = vfs->readFile(palName);
-            if (palData && palData->size() >= 768)
-            {
-                std::vector<uint8_t> rgb;
-                if (palData->size() > 768)
+                if (!vfs)
                 {
-                    rgb.assign(palData->end() - 768, palData->end());
+                    return graphics::Palette::createDefaultPalette();
                 }
-                else
+
+                const int resolvedPaletteId = (paletteId > 0) ? paletteId : 1;
+                const std::array<std::string, 3> candidates = {
+                    std::format("PAL{:03d}", resolvedPaletteId),
+                    std::format("pal{:03d}", resolvedPaletteId),
+                    std::format("pal{}", resolvedPaletteId),
+                };
+
+                for (const auto& palName : candidates)
                 {
-                    rgb = *palData;
+                    auto palData = vfs->readFile(palName);
+                    if (!palData || palData->size() < 768)
+                    {
+                        continue;
+                    }
+
+                    std::vector<uint8_t> rgb;
+                    if (palData->size() > 768)
+                    {
+                        rgb.assign(palData->end() - 768, palData->end());
+                    }
+                    else
+                    {
+                        rgb = *palData;
+                    }
+
+                    auto palette = graphics::Palette::fromRGBData(rgb);
+                    palette.setColor(0, graphics::Palette::Color(0, 0, 0, 0));
+                    return palette;
                 }
-                palette = graphics::Palette::fromRGBData(rgb);
-            }
-            else
+
+                auto palette = graphics::Palette::createDefaultPalette();
+                palette.setColor(0, graphics::Palette::Color(0, 0, 0, 0));
+                return palette;
+            };
+
+            if (auto info = vfs->getImageInfo(name); info.has_value())
             {
-                palette = graphics::Palette::createDefaultPalette();
+                auto data = vfs->readFile(name);
+                if (data)
+                {
+                    graphics::Palette palette = loadPaletteById(info->paletteId);
+                    if (auto embeddedPalette = vfs->getImagePalette(name);
+                        embeddedPalette && embeddedPalette->size() >= 768)
+                    {
+                        std::vector<uint8_t> rgb;
+                        if (embeddedPalette->size() > 768)
+                        {
+                            rgb.assign(embeddedPalette->end() - 768, embeddedPalette->end());
+                        }
+                        else
+                        {
+                            rgb = *embeddedPalette;
+                        }
+                        palette = graphics::Palette::fromRGBData(rgb);
+                        palette.setColor(0, graphics::Palette::Color(0, 0, 0, 0));
+                    }
+
+                    auto image = graphics::Image::fromPalettedData(*data, info->width, info->height,
+                                                                   palette);
+                    if (image)
+                    {
+                        void* tex = renderer->createTexture(*image);
+                        if (tex)
+                        {
+                            mapTextureCache[name] = tex;
+                            return static_cast<SDL_Texture*>(tex);
+                        }
+                    }
+                }
             }
 
-            // Convert indexed data to RGBA image
-            auto image =
-                graphics::Image::fromPalettedData(*data, info->width, info->height, palette);
-            if (!image)
+            if (auto spriteInfo = vfs->getSpriteInfo(name); spriteInfo.has_value())
             {
-                return nullptr;
+                auto data = vfs->readFile(name);
+                if (data)
+                {
+                    graphics::Palette palette = loadPaletteById(spriteInfo->paletteId);
+                    auto image = graphics::SpriteDecoder::decode(*data, palette, logger);
+                    if (image)
+                    {
+                        void* tex = renderer->createTexture(*image);
+                        if (tex)
+                        {
+                            mapTextureCache[name] = tex;
+                            return static_cast<SDL_Texture*>(tex);
+                        }
+                    }
+                }
             }
 
-            // Create GPU texture
-            void* tex = renderer->createTexture(*image);
-            if (tex)
-            {
-                mapTextureCache[name] = tex;
-            }
-            return static_cast<SDL_Texture*>(tex);
+            return nullptr;
         });
 }
 
@@ -2558,10 +2602,12 @@ void Application::configureGameplayCallbacks()
                 }
 
                 // Check if NPC has a greeting via npcdata
-                if (auto greetIdIt = npcGreetingIdByNpcId_.find(dialogTextId); greetIdIt != npcGreetingIdByNpcId_.end())
+                if (auto greetIdIt = npcGreetingIdByNpcId_.find(dialogTextId);
+                    greetIdIt != npcGreetingIdByNpcId_.end())
                 {
                     int greetId = greetIdIt->second;
-                    if (auto greetEntryIt = npcGreetingById_.find(greetId); greetEntryIt != npcGreetingById_.end())
+                    if (auto greetEntryIt = npcGreetingById_.find(greetId);
+                        greetEntryIt != npcGreetingById_.end())
                     {
                         // Use greeting 1 for now
                         if (!greetEntryIt->second.greeting1.empty())
@@ -2572,10 +2618,12 @@ void Application::configureGameplayCallbacks()
                 }
 
                 // Add profession information if they have one
-                if (auto profIdIt = npcProfessionIdByNpcId_.find(dialogTextId); profIdIt != npcProfessionIdByNpcId_.end())
+                if (auto profIdIt = npcProfessionIdByNpcId_.find(dialogTextId);
+                    profIdIt != npcProfessionIdByNpcId_.end())
                 {
                     int profId = profIdIt->second;
-                    if (auto profEntryIt = npcProfessionById_.find(profId); profEntryIt != npcProfessionById_.end())
+                    if (auto profEntryIt = npcProfessionById_.find(profId);
+                        profEntryIt != npcProfessionById_.end())
                     {
                         speaker += " (" + profEntryIt->second.name + ")";
                     }
@@ -3343,7 +3391,8 @@ void Application::loadDataTables()
     }
 
     npcProfessionById_.clear();
-    if (auto profData = readFirstExisting({"npcprof.txt", "NPCPROF.TXT", "NPCProf.txt"}); profData.has_value())
+    if (auto profData = readFirstExisting({"npcprof.txt", "NPCPROF.TXT", "NPCProf.txt"});
+        profData.has_value())
     {
         formats::NPCProfessionParser parser(logger);
         if (parser.parse(*profData))
@@ -3360,7 +3409,8 @@ void Application::loadDataTables()
     }
 
     npcGreetingById_.clear();
-    if (auto greetData = readFirstExisting({"npcgreet.txt", "NPCGREET.TXT", "NPCGreet.txt"}); greetData.has_value())
+    if (auto greetData = readFirstExisting({"npcgreet.txt", "NPCGREET.TXT", "NPCGreet.txt"});
+        greetData.has_value())
     {
         formats::NPCGreetingParser parser(logger);
         if (parser.parse(*greetData))

@@ -138,11 +138,22 @@ if not zlib_dep.found()
     error('zlib is required for LOD archive decompression')
 endif
 
+# Shaders
+python = import('python').find_installation('python3')
+shader_sources = files('graphics/shaders/world.vert', 'graphics/shaders/world.frag')
+shaders_header = custom_target(
+    'compile_shaders',
+    input: shader_sources,
+    output: 'shaders_compiled.hpp',
+    command: [python, meson.project_source_root() / 'tools/compile_shaders.py', '--output', '@OUTPUT@', '@INPUT@'],
+)
+
 # Main executable
 executable(
     'runeharbor',
     sources: [
         'main.cpp',
+        shaders_header,
         util_sources,
         platform_sources,
         engine_sources,
@@ -154,6 +165,6 @@ executable(
         ui_sources,
     ],
     include_directories: inc_dirs,
-    dependencies: [sdl3_dep, zlib_dep],
+    dependencies: [sdl3_dep, zlib_dep, sdl_shadercross_dep],
     install: true,
 )

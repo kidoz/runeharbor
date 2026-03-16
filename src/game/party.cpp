@@ -165,7 +165,7 @@ void Party::awardExperience(int amount)
     {
         return;
     }
-    
+
     // Distribute evenly among conscious members? Or give all amount to each?
     // In MM7 usually it's divided by conscious members if it's monster XP,
     // but quest XP is often awarded fully to each. Let's just give to all conscious for now.
@@ -174,7 +174,7 @@ void Party::awardExperience(int amount)
     {
         return;
     }
-    
+
     int share = amount / count;
     for (auto& m : members_)
     {
@@ -194,19 +194,19 @@ bool Party::rest(int hours)
         }
         consumeFood(1);
     }
-    
+
     for (auto& m : members_)
     {
         m.rest(hours);
     }
-    
-    // 128 ticks per real second. Let's assume 1 hour game time = 3600 real seconds? 
+
+    // 128 ticks per real second. Let's assume 1 hour game time = 3600 real seconds?
     // Actually from docs: "128 Ticks per second (time multiplier)", "0xE10 (3600) Seconds per hour"
-    // Game time advances. We just add roughly 3600 seconds per hour to game time? 
+    // Game time advances. We just add roughly 3600 seconds per hour to game time?
     // Wait, the docs say: 3600 seconds per hour. So 3600 * 128 ticks per hour?
     uint64_t ticksPerHour = 3600ULL * 128ULL;
     advanceTime(hours * ticksPerHour);
-    
+
     return true;
 }
 

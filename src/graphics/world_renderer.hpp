@@ -12,6 +12,9 @@
 #include "sdl_renderer.hpp"
 #include "visibility.hpp"
 
+struct SDL_GPUTexture;
+struct SDL_Texture;
+
 namespace runeharbor::game
 {
 struct RuntimeConfig;
@@ -49,7 +52,9 @@ class WorldRenderer
 
   private:
     void refreshVisibilityCache(const engine::MapScene& scene, const Camera& camera);
+    void ensureOffscreenTarget(int width, int height);
 
+    SDLRenderer& renderer_;
     std::unique_ptr<IndoorRenderer> indoorRenderer;
     std::unique_ptr<OutdoorRenderer> outdoorRenderer;
     Mat4 pickViewProjection_ = Mat4::identity();
@@ -60,6 +65,13 @@ class WorldRenderer
     std::vector<PickCandidate> mapEventPickCandidates_;
     bool visibilityCacheValid_ = false;
     bool pickCacheValid_ = false;
+    std::string lastSceneName_;
+
+    SDL_GPUTexture* offscreenGpuTexture_ = nullptr;
+    SDL_GPUTexture* offscreenDepthTexture_ = nullptr;
+    SDL_Texture* offscreenSdlTexture_ = nullptr;
+    int offscreenTargetWidth_ = 0;
+    int offscreenTargetHeight_ = 0;
 };
 
 } // namespace runeharbor::graphics

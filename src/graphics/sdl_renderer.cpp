@@ -18,12 +18,32 @@ SDLRenderer::SDLRenderer(SDL_Window* window, util::ILogger& logger) : logger(log
         return;
     }
 
-    // Create SDL3 renderer with GPU acceleration
-    renderer = SDL_CreateRenderer(window, nullptr);
+    // Try to create an SDL3 renderer with the "gpu" driver explicitly to get SDL_GPUDevice
+    renderer = SDL_CreateRenderer(window, "gpu");
+    if (!renderer)
+    {
+        logger.warning("Failed to create 'gpu' renderer, falling back to default: " +
+                       std::string(SDL_GetError()));
+        renderer = SDL_CreateRenderer(window, nullptr);
+    }
+
     if (!renderer)
     {
         logger.error("Failed to create SDL renderer: " + std::string(SDL_GetError()));
         return;
+    }
+
+    SDL_PropertiesID props = SDL_GetRendererProperties(renderer);
+    gpuDevice = static_cast<SDL_GPUDevice*>(
+        SDL_GetPointerProperty(props, SDL_PROP_RENDERER_GPU_DEVICE_POINTER, nullptr));
+
+    if (gpuDevice)
+    {
+        logger.info("SDL_GPUDevice successfully extracted from renderer");
+    }
+    else
+    {
+        logger.warning("No SDL_GPUDevice available on the created renderer");
     }
 
     // Enable VSync by default

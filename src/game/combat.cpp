@@ -310,7 +310,7 @@ AttackResult CombatSystem::playerAttack(int characterIndex, int monsterIndex)
     {
         const auto& charInv = inventory_->getInventory(characterIndex);
         const auto& mainHandItem = charInv.equipped[static_cast<size_t>(EquipSlot::MainHand)];
-        
+
         if (mainHandItem.valid())
         {
             const auto* itemDef = inventory_->getItemDef(mainHandItem.itemId);
@@ -322,8 +322,9 @@ AttackResult CombatSystem::playerAttack(int characterIndex, int monsterIndex)
             }
         }
     }
-    
-    // Add level bonus? Original code added level. MM7 usually adds skill mastery bonus instead. Let's keep a small level scaling if no weapon.
+
+    // Add level bonus? Original code added level. MM7 usually adds skill mastery bonus instead.
+    // Let's keep a small level scaling if no weapon.
     if (!usingWeapon)
     {
         baseDamage += ch.level;

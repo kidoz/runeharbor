@@ -1,0 +1,9 @@
+[wrap-git]
+directory = SDL_shadercross
+url = https://github.com/libsdl-org/SDL_shadercross.git
+revision = 3a314481ede01f5d966f0e834019942e34c02b82
+depth = 1
+method = cmake
+
+[provide]
+sdl3-shader-cross = SDL3_shadercross_dep

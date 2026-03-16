@@ -107,7 +107,7 @@ int Character::xpRequiredForNextLevel() const
 {
     // Triangle formula: level * (level + 1) / 2 * 1000
     // But since level is already 1-based, xpNeeded for level N is: N * (N - 1) / 2 * 1000
-    // To reach level+1, we need level * (level + 1) / 2 * 1000? 
+    // To reach level+1, we need level * (level + 1) / 2 * 1000?
     // Let's use the formula from docs: xpNeeded = N*(N-1)/2 * 1000
     int targetLevel = level + 1;
     return (targetLevel * (targetLevel - 1) / 2) * 1000;
@@ -132,14 +132,14 @@ void Character::levelUp()
     {
         return;
     }
-    
+
     level++;
     recalculateDerived();
     // In MM7 you gain HP/SP equal to class base + endurance/intellect bonus per level.
-    // The recalculateDerived() already handles the max HP/SP, so we just fill the new diff or restore.
-    // We'll fully restore HP/SP on level up as a simplification, or just leave it for rest?
-    // Let's just restore them for now, or just add the delta.
-    // Actually, levelUp in MM7 requires training center. We'll just increment here.
+    // The recalculateDerived() already handles the max HP/SP, so we just fill the new diff or
+    // restore. We'll fully restore HP/SP on level up as a simplification, or just leave it for
+    // rest? Let's just restore them for now, or just add the delta. Actually, levelUp in MM7
+    // requires training center. We'll just increment here.
 }
 
 void Character::rest(int hours)
@@ -148,13 +148,13 @@ void Character::rest(int hours)
     {
         return;
     }
-    
+
     // Simple regeneration
     if (hours >= 8)
     {
         hitPoints = maxHitPoints;
         spellPoints = maxSpellPoints;
-        
+
         // Cure weak
         clearCondition(ConditionIndex::Weak);
     }
@@ -162,8 +162,10 @@ void Character::rest(int hours)
     {
         // Partial regeneration
         float regenFraction = static_cast<float>(hours) / 8.0f;
-        hitPoints = std::min(maxHitPoints, hitPoints + static_cast<int>(maxHitPoints * regenFraction));
-        spellPoints = std::min(maxSpellPoints, spellPoints + static_cast<int>(maxSpellPoints * regenFraction));
+        hitPoints =
+            std::min(maxHitPoints, hitPoints + static_cast<int>(maxHitPoints * regenFraction));
+        spellPoints = std::min(maxSpellPoints,
+                               spellPoints + static_cast<int>(maxSpellPoints * regenFraction));
     }
 }
 

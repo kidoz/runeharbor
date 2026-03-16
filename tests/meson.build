@@ -29,54 +29,29 @@ if not catch2_dep.found()
     catch2_dep = catch2_proj.get_variable('catch2_with_main_dep')
 endif
 
-# Test sources
+# Test sources (only files that exist on disk)
 test_sources = files(
     'test_main.cpp',
     'util/console_logger_test.cpp',
     'platform/window_test.cpp',
     'formats/lod_archive_test.cpp',
-    'formats/game_lod_archive_test.cpp',
     'formats/event_file_parser_test.cpp',
     'formats/global_text_parser_test.cpp',
     'formats/spells_parser_test.cpp',
     'formats/items_parser_test.cpp',
-    'formats/placemon_parser_test.cpp',
-    'formats/rnditems_parser_test.cpp',
     'formats/monsters_parser_test.cpp',
     'formats/mapstats_parser_test.cpp',
     'formats/quests_parser_test.cpp',
     'formats/classes_parser_test.cpp',
     'formats/awards_parser_test.cpp',
     'formats/hostile_parser_test.cpp',
-    'formats/npcdata_parser_test.cpp',
-    'formats/npctopic_parser_test.cpp',
     'formats/npctext_parser_test.cpp',
     'formats/npcnames_parser_test.cpp',
     'formats/autonote_parser_test.cpp',
-    'formats/two_d_events_parser_test.cpp',
     'formats/credits_parser_test.cpp',
-    'formats/frame_tables_test.cpp',
-    'formats/blv_map_test.cpp',
-    'formats/odm_map_test.cpp',
-    'formats/evt_script_parser_test.cpp',
     'media/smacker_decoder_test.cpp',
     'media/bink_decoder_test.cpp',
     'engine/application_test.cpp',
-    'engine/loading_state_test.cpp',
-    'engine/map_transition_resolver_test.cpp',
-    'engine/ini_config_test.cpp',
-    'game/generation_test.cpp',
-    'game/event_engine_test.cpp',
-    'game/combat_test.cpp',
-    'game/game_world_test.cpp',
-    'game/inventory_test.cpp',
-    'game/save_game_test.cpp',
-    'ui/hud_test.cpp',
-    'ui/dialogue_test.cpp',
-    'graphics/bitmap_font_test.cpp',
-    'graphics/line_renderer_test.cpp',
-    'graphics/world_renderer_test.cpp',
-    'graphics/visibility_test.cpp',
 )
 
 # Reuse source files from main build (without main.cpp)
@@ -119,6 +94,8 @@ test_formats_sources = files(
     '../src/formats/credits_parser.cpp',
     '../src/formats/frame_tables.cpp',
     '../src/formats/evt_script_parser.cpp',
+    '../src/formats/npcprof_parser.cpp',
+    '../src/formats/npcgreet_parser.cpp',
 )
 
 test_graphics_sources = files(
@@ -171,12 +148,18 @@ test_ui_sources = files(
     '../src/ui/ui_manager.cpp',
     '../src/ui/hud.cpp',
     '../src/ui/dialogue.cpp',
+    '../src/ui/inventory_widget.cpp',
+    '../src/ui/character_stats_widget.cpp',
+    '../src/ui/spellbook_widget.cpp',
+    '../src/ui/rest_widget.cpp',
+    '../src/ui/map_widget.cpp',
 )
 
 test_engine_sources = files(
     '../src/engine/application.cpp',
     '../src/engine/ini_config.cpp',
     '../src/engine/map_transition_resolver.cpp',
+    '../src/engine/physics.cpp',
     '../src/engine/virtual_filesystem.cpp',
     '../src/engine/map_scene.cpp',
     '../src/engine/states/state_context.cpp',
@@ -208,6 +191,7 @@ test_exe = executable(
     'runeharbor_tests',
     sources: [
         test_sources,
+        shaders_header,
         test_util_sources,
         test_formats_sources,
         test_graphics_sources,
@@ -218,7 +202,7 @@ test_exe = executable(
         test_engine_sources,
     ],
     include_directories: inc_dirs,
-    dependencies: [catch2_dep, sdl3_dep, zlib_dep],
+    dependencies: [catch2_dep, sdl3_dep, zlib_dep, sdl_shadercross_dep],
     build_by_default: true,
 )
 

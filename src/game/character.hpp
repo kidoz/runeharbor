@@ -312,7 +312,7 @@ struct Character
     bool canLevelUp() const;
     void addExperience(int amount);
     void levelUp();
-    
+
     // Resting
     void rest(int hours);
 };

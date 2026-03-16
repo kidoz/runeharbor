@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 #include "physics.hpp"
-#include "outdoor_terrain.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <limits>
+
+#include <cmath>
+
+#include "outdoor_terrain.hpp"
 
 namespace runeharbor::engine
 {
@@ -21,14 +23,13 @@ bool isPointInPolygonXY(float px, float py, const formats::ParsedFace& face,
     {
         const auto& vi = vertices[face.vertexIndices[i]];
         const auto& vj = vertices[face.vertexIndices[j]];
-        
+
         float vxi = static_cast<float>(vi.x);
         float vyi = static_cast<float>(vi.y);
         float vxj = static_cast<float>(vj.x);
         float vyj = static_cast<float>(vj.y);
 
-        if (((vyi > py) != (vyj > py)) &&
-            (px < (vxj - vxi) * (py - vyi) / (vyj - vyi) + vxi))
+        if (((vyi > py) != (vyj > py)) && (px < (vxj - vxi) * (py - vyi) / (vyj - vyi) + vxi))
         {
             inside = !inside;
         }
@@ -45,14 +46,13 @@ bool isPointInPolygonXY(float px, float py, const formats::ParsedFace& face,
     {
         const auto& vi = vertices[face.vertexIndices[i]];
         const auto& vj = vertices[face.vertexIndices[j]];
-        
+
         float vxi = static_cast<float>(vi.x);
         float vyi = static_cast<float>(vi.y);
         float vxj = static_cast<float>(vj.x);
         float vyj = static_cast<float>(vj.y);
 
-        if (((vyi > py) != (vyj > py)) &&
-            (px < (vxj - vxi) * (py - vyi) / (vyj - vyi) + vxi))
+        if (((vyi > py) != (vyj > py)) && (px < (vxj - vxi) * (py - vyi) / (vyj - vyi) + vxi))
         {
             inside = !inside;
         }
@@ -64,8 +64,7 @@ bool isPointInPolygonXY(float px, float py, const formats::ParsedFace& face,
 bool aabbOverlap(float minX1, float maxX1, float minY1, float maxY1, float minZ1, float maxZ1,
                  float minX2, float maxX2, float minY2, float maxY2, float minZ2, float maxZ2)
 {
-    return (minX1 <= maxX2 && maxX1 >= minX2) &&
-           (minY1 <= maxY2 && maxY1 >= minY2) &&
+    return (minX1 <= maxX2 && maxX1 >= minX2) && (minY1 <= maxY2 && maxY1 >= minY2) &&
            (minZ1 <= maxZ2 && maxZ1 >= minZ2);
 }
 
@@ -75,7 +74,7 @@ bool resolveIndoorCollision(const formats::BLVMapData& blv, float& px, float& py
                             float radius, float height)
 {
     bool collided = false;
-    
+
     // Very simplified swept collision: push out of walls
     // We treat the player as a cylinder (radius, height).
     const float pMinX = px - radius;
@@ -92,16 +91,17 @@ bool resolveIndoorCollision(const formats::BLVMapData& blv, float& px, float& py
             continue;
 
         // Bounding box early out
-        if (!aabbOverlap(pMinX, pMaxX, pMinY, pMaxY, pMinZ, pMaxZ,
-                         static_cast<float>(face.minX), static_cast<float>(face.maxX),
-                         static_cast<float>(face.minY), static_cast<float>(face.maxY),
-                         static_cast<float>(face.minZ), static_cast<float>(face.maxZ)))
+        if (!aabbOverlap(pMinX, pMaxX, pMinY, pMaxY, pMinZ, pMaxZ, static_cast<float>(face.minX),
+                         static_cast<float>(face.maxX), static_cast<float>(face.minY),
+                         static_cast<float>(face.maxY), static_cast<float>(face.minZ),
+                         static_cast<float>(face.maxZ)))
         {
             continue;
         }
 
         // Calculate distance to plane
-        float distToPlane = px * face.normalFX + py * face.normalFY + pz * face.normalFZ - face.normalFDist;
+        float distToPlane =
+            px * face.normalFX + py * face.normalFY + pz * face.normalFZ - face.normalFDist;
 
         // If we are too close to the plane
         if (std::abs(distToPlane) < radius)
@@ -110,17 +110,24 @@ bool resolveIndoorCollision(const formats::BLVMapData& blv, float& px, float& py
             if (std::abs(face.normalFZ) < 0.1f) // Wall
             {
                 // Push out along normal
-                float pushDist = radius - std::abs(distToPlane);
-                // Ensure we only push if we are actually "in" the face (rough approx via AABB for now,
-                // proper PIP needs to handle polygon boundaries properly)
-                
+                // Ensure we only push if we are actually "in" the face (rough approx via AABB for
+                // now, proper PIP needs to handle polygon boundaries properly)
+
                 // For a wall, check Z range explicitly
                 if (pz + height > face.minZ && pz < face.maxZ)
                 {
                     // Push out
-                    float dir = (distToPlane > 0.0f) ? 1.0f : -1.0f;
-                    px += face.normalFX * pushDist * dir;
-                    py += face.normalFY * pushDist * dir;
+                    // If we are colliding, we should push along the normal to get outside.
+                    // If distToPlane is negative, we are "inside" or "behind" the face,
+                    // so we push in the direction of the normal to get out.
+                    // Wait, if it's a solid, we should always be pushed in the direction of the
+                    // face normal so that we end up in front of the face. Actually, if we
+                    // penetrate, we want to move to distToPlane = radius. So we need to add (radius
+                    // - distToPlane) * face.normal. If we are behind the face (distToPlane < 0), we
+                    // still push along the normal: push vector = face.normal * (radius -
+                    // distToPlane).
+                    px += face.normalFX * (radius - distToPlane);
+                    py += face.normalFY * (radius - distToPlane);
                     collided = true;
                 }
             }
@@ -128,15 +135,13 @@ bool resolveIndoorCollision(const formats::BLVMapData& blv, float& px, float& py
             {
                 if (isPointInPolygonXY(px, py, face, blv.vertices))
                 {
-                    float pushDist = radius - std::abs(distToPlane);
-                    float dir = (distToPlane > 0.0f) ? 1.0f : -1.0f;
-                    pz += face.normalFZ * pushDist * dir;
+                    pz += face.normalFZ * (radius - distToPlane);
                     collided = true;
                 }
             }
         }
     }
-    
+
     return collided;
 }
 
@@ -154,10 +159,10 @@ bool resolveOutdoorCollision(const formats::ODMMapData& odm, float& px, float& p
     for (const auto& bldg : odm.buildings)
     {
         // Building AABB early out
-        if (!aabbOverlap(pMinX, pMaxX, pMinY, pMaxY, pMinZ, pMaxZ,
-                         static_cast<float>(bldg.minX), static_cast<float>(bldg.maxX),
-                         static_cast<float>(bldg.minY), static_cast<float>(bldg.maxY),
-                         static_cast<float>(bldg.minZ), static_cast<float>(bldg.maxZ)))
+        if (!aabbOverlap(pMinX, pMaxX, pMinY, pMaxY, pMinZ, pMaxZ, static_cast<float>(bldg.minX),
+                         static_cast<float>(bldg.maxX), static_cast<float>(bldg.minY),
+                         static_cast<float>(bldg.maxY), static_cast<float>(bldg.minZ),
+                         static_cast<float>(bldg.maxZ)))
         {
             continue;
         }
@@ -168,7 +173,8 @@ bool resolveOutdoorCollision(const formats::ODMMapData& odm, float& px, float& p
             if (face.isInvisible() || face.isWater() || face.isLava())
                 continue;
 
-            float distToPlane = px * face.normalFX + py * face.normalFY + pz * face.normalFZ - face.normalFDist;
+            float distToPlane =
+                px * face.normalFX + py * face.normalFY + pz * face.normalFZ - face.normalFDist;
 
             if (std::abs(distToPlane) < radius)
             {
@@ -176,10 +182,8 @@ bool resolveOutdoorCollision(const formats::ODMMapData& odm, float& px, float& p
                 {
                     if (pz + height > face.minZ && pz < face.maxZ)
                     {
-                        float pushDist = radius - std::abs(distToPlane);
-                        float dir = (distToPlane > 0.0f) ? 1.0f : -1.0f;
-                        px += face.normalFX * pushDist * dir;
-                        py += face.normalFY * pushDist * dir;
+                        px += face.normalFX * (radius - distToPlane);
+                        py += face.normalFY * (radius - distToPlane);
                         collided = true;
                     }
                 }
@@ -187,16 +191,14 @@ bool resolveOutdoorCollision(const formats::ODMMapData& odm, float& px, float& p
                 {
                     if (isPointInPolygonXY(px, py, face, bldg.vertices))
                     {
-                        float pushDist = radius - std::abs(distToPlane);
-                        float dir = (distToPlane > 0.0f) ? 1.0f : -1.0f;
-                        pz += face.normalFZ * pushDist * dir;
+                        pz += face.normalFZ * (radius - distToPlane);
                         collided = true;
                     }
                 }
             }
         }
     }
-    
+
     return collided;
 }
 
@@ -220,7 +222,7 @@ void updatePartyPhysics(game::Party& party, const formats::BLVMapData* blv,
     pz += vz * dt;
 
     // 3. Resolve collisions
-    
+
     // First, resolve against outdoor terrain if it exists
     if (odm && !odm->heightmap.empty())
     {
@@ -231,7 +233,7 @@ void updatePartyPhysics(game::Party& party, const formats::BLVMapData* blv,
             vz = 0.0f;
         }
     }
-    
+
     // Then resolve against indoor geometry or outdoor buildings
     if (blv && blv->faces.size() > 0)
     {

@@ -144,4 +144,55 @@ inline bool clipLineNearPlane(const Vec4& inA, const Vec4& inB, Vec4& outA, Vec4
     return true;
 }
 
+// Software Tessellation to fix affine texture warping in SDL_RenderGeometry.
+// Recursively subdivides a clip-space triangle if its depth (W) ratio is too high.
+// Linearly interpolating in clip space preserves perspective-correct UVs!
+inline void tessellateTriangle(const ClipVertex& v0, const ClipVertex& v1, const ClipVertex& v2,
+                               std::vector<ClipVertex>& outVerts, int depth = 0)
+{
+    // Max depth to prevent infinite loops/excessive geometry
+    const int MAX_SUBDIV = 3;
+
+    // We subdivide if the ratio of max_w to min_w is too large (meaning heavy perspective)
+    float minW = std::min({v0.clip.w, v1.clip.w, v2.clip.w});
+    float maxW = std::max({v0.clip.w, v1.clip.w, v2.clip.w});
+
+    // A ratio of 1.5x depth across a single triangle is where affine wobble gets very noticeable
+    bool needsSubdiv = (maxW / std::max(minW, 0.001f) > 1.4f);
+
+    if (depth >= MAX_SUBDIV || !needsSubdiv)
+    {
+        outVerts.push_back(v0);
+        outVerts.push_back(v1);
+        outVerts.push_back(v2);
+        return;
+    }
+
+    // Subdivide into 4 smaller triangles by splitting the edges
+    auto mid = [](const ClipVertex& a, const ClipVertex& b) -> ClipVertex
+    {
+        ClipVertex m;
+        m.clip.x = (a.clip.x + b.clip.x) * 0.5f;
+        m.clip.y = (a.clip.y + b.clip.y) * 0.5f;
+        m.clip.z = (a.clip.z + b.clip.z) * 0.5f;
+        m.clip.w = (a.clip.w + b.clip.w) * 0.5f;
+        m.u = (a.u + b.u) * 0.5f;
+        m.v = (a.v + b.v) * 0.5f;
+        m.color.r = (a.color.r + b.color.r) * 0.5f;
+        m.color.g = (a.color.g + b.color.g) * 0.5f;
+        m.color.b = (a.color.b + b.color.b) * 0.5f;
+        m.color.a = (a.color.a + b.color.a) * 0.5f;
+        return m;
+    };
+
+    ClipVertex m01 = mid(v0, v1);
+    ClipVertex m12 = mid(v1, v2);
+    ClipVertex m20 = mid(v2, v0);
+
+    tessellateTriangle(v0, m01, m20, outVerts, depth + 1);
+    tessellateTriangle(v1, m12, m01, outVerts, depth + 1);
+    tessellateTriangle(v2, m20, m12, outVerts, depth + 1);
+    tessellateTriangle(m01, m12, m20, outVerts, depth + 1);
+}
+
 } // namespace runeharbor::graphics
