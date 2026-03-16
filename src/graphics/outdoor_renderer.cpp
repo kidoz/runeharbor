@@ -214,6 +214,39 @@ SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, co
         }
     }
 
+    if (monsterLookup)
+    {
+        std::string baseName = monsterLookup(spawn.objectType);
+        if (!baseName.empty())
+        {
+            uint32_t ticks = SDL_GetTicks();
+            // MM7 monsters slowly spin in place when idle. 2048 is a full circle.
+            // Let's simulate a slow spin by using ticks.
+            int facing = (ticks / 10) % 2048; 
+            
+            // Camera relative angle
+            float dx = cameraPos.x - sprite.basePos.x;
+            float dz = cameraPos.z - sprite.basePos.z;
+            float camAngle = std::atan2(dx, dz);
+            int camFacing = static_cast<int>((camAngle + M_PI) * 1024.0f / M_PI) % 2048;
+            if (camFacing < 0) camFacing += 2048;
+
+            // Direction index is the difference between where the sprite is facing and where the camera is
+            int relativeFacing = (facing - camFacing + 2048) % 2048;
+            int directionIndex = ((relativeFacing + 128) >> 8) & 7;
+
+            // e.g. "Goblina" -> "Goblin01"
+            std::string prefix = baseName.substr(0, std::min<size_t>(baseName.length(), 6));
+
+            // Use walk animation frames 1-8 (in MM7, walk frame index might be related to time)
+            int animFrame = (ticks / 150) % 4 + 1; // 4 frames for walk? Just an example.
+            
+            // But we don't have the frame table. We just want 8-directional facing.
+            // Let's use the direction index (0-7) mapped to the expected 1-8 sprite naming pattern
+            sprite.textureName = std::format("{}{:02d}", prefix, directionIndex + 1); // Using base + direction
+        }
+    }
+
     const int group = std::max(0, static_cast<int>(spawn.group));
     const int seed = (static_cast<int>(spawn.objectType) * 163) ^
                      (static_cast<int>(spawn.objectIndex) * 97) ^ (group * 19);

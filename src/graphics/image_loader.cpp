@@ -27,7 +27,12 @@ std::unique_ptr<Image> ImageLoader::loadImage(const std::string& name)
     const Palette& palette = loadPalette(info->paletteId);
 
     // Create image from raw data + palette
-    return Image::fromPalettedData(*data, info->width, info->height, palette);
+    auto result = Image::fromPalettedData(*data, info->width, info->height, palette);
+    if (!result.has_value())
+    {
+        return nullptr;
+    }
+    return std::move(*result);
 }
 
 const Palette& ImageLoader::loadPalette(int paletteId)
@@ -80,18 +85,16 @@ const Palette& ImageLoader::loadPalette(int paletteId)
         rgbData = *data;
     }
 
-    try
+    auto result = Palette::fromRGBData(rgbData);
+    if (result.has_value())
     {
-        Palette pal = Palette::fromRGBData(rgbData);
-        paletteCache[paletteId] = pal;
+        paletteCache[paletteId] = *result;
         return paletteCache[paletteId];
     }
-    catch (...)
-    {
-        static Palette defaultPal = Palette::createDefaultPalette();
-        paletteCache[paletteId] = defaultPal;
-        return paletteCache[paletteId];
-    }
+
+    static Palette defaultPal = Palette::createDefaultPalette();
+    paletteCache[paletteId] = defaultPal;
+    return paletteCache[paletteId];
 }
 
 } // namespace runeharbor::graphics

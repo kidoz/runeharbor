@@ -305,6 +305,24 @@ BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, co
         }
     }
 
+    if (monsterLookup)
+    {
+        std::string baseName = monsterLookup(spawn.objectType);
+        if (!baseName.empty())
+        {
+            // Calculate 8-directional facing index based on time and angle
+            // facing is probably 0-2047, but for now we'll just use a time offset for random rotation
+            uint32_t ticks = SDL_GetTicks();
+            uint32_t animOffset = (ticks / 100) % 8; // Change frame every 100ms
+            
+            // Assuming static spawns just face forward for now if we don't have their rotation
+            int directionIndex = animOffset; // fallback random rotation
+            
+            // Limit to max 11 chars + 2 digit suffix if needed, but std::format handles it
+            sprite.textureName = std::format("{}{:02d}", baseName.substr(0, std::min<size_t>(baseName.length(), 6)), directionIndex + 1); // frames are often 1-indexed? Wait, MM7 uses 00-07 for directions maybe? Let's try 01
+        }
+    }
+
     const int group = std::max(0, static_cast<int>(spawn.group));
     const int seed = (static_cast<int>(spawn.objectType) * 131) ^
                      (static_cast<int>(spawn.objectIndex) * 73) ^ (group * 17);

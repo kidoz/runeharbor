@@ -38,6 +38,7 @@ class InGameState : public IGameState
         spellbook_.setTextureLookup(lookup);
         restWidget_.setTextureLookup(lookup);
         mapWidget_.setTextureLookup(lookup);
+        hud_.setTextureLookup(lookup);
     }
 
   private:

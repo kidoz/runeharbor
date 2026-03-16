@@ -1125,9 +1125,11 @@ void Application::wireUpMapTextures()
                         rgb = *palData;
                     }
 
-                    auto palette = graphics::Palette::fromRGBData(rgb);
-                    palette.setColor(0, graphics::Palette::Color(0, 0, 0, 0));
-                    return palette;
+                    if (auto result = graphics::Palette::fromRGBData(rgb); result.has_value())
+                    {
+                        result->setColor(0, graphics::Palette::Color(0, 0, 0, 0));
+                        return *result;
+                    }
                 }
 
                 auto palette = graphics::Palette::createDefaultPalette();
@@ -1153,15 +1155,18 @@ void Application::wireUpMapTextures()
                         {
                             rgb = *embeddedPalette;
                         }
-                        palette = graphics::Palette::fromRGBData(rgb);
-                        palette.setColor(0, graphics::Palette::Color(0, 0, 0, 0));
+                        if (auto result = graphics::Palette::fromRGBData(rgb); result.has_value())
+                        {
+                            palette = *result;
+                            palette.setColor(0, graphics::Palette::Color(0, 0, 0, 0));
+                        }
                     }
 
-                    auto image = graphics::Image::fromPalettedData(*data, info->width, info->height,
-                                                                   palette);
-                    if (image)
+                    auto imageResult = graphics::Image::fromPalettedData(*data, info->width, info->height,
+                                                                       palette);
+                    if (imageResult.has_value() && *imageResult)
                     {
-                        void* tex = renderer->createTexture(*image);
+                        void* tex = renderer->createTexture(**imageResult);
                         if (tex)
                         {
                             mapTextureCache[name] = tex;
@@ -1778,21 +1783,14 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
         if (pcx.has_value())
         {
             // Successfully decoded as PCX
-            try
             {
-                std::unique_ptr<graphics::Image> image;
-                if (pcx->is24Bit())
+                auto imageResult = pcx->is24Bit()
+                    ? graphics::Image::fromRGBAData(pcx->rgbaPixels, pcx->width, pcx->height)
+                    : graphics::Image::fromPalettedData(pcx->indices, pcx->width, pcx->height,
+                                                        pcx->palette);
+                if (imageResult.has_value() && *imageResult)
                 {
-                    image = graphics::Image::fromRGBAData(pcx->rgbaPixels, pcx->width, pcx->height);
-                }
-                else
-                {
-                    image = graphics::Image::fromPalettedData(pcx->indices, pcx->width, pcx->height,
-                                                              pcx->palette);
-                }
-                if (image)
-                {
-                    void* tex = renderer->createTexture(*image);
+                    void* tex = renderer->createTexture(**imageResult);
                     if (tex)
                     {
                         renderer->destroyTexture(textureHandle);
@@ -1804,10 +1802,11 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
                         return true;
                     }
                 }
-            }
-            catch (const std::exception& ex)
-            {
-                logger.warning(std::format("Failed to convert PCX '{}': {}", name, ex.what()));
+                else if (!imageResult.has_value())
+                {
+                    logger.warning(std::format("Failed to convert PCX '{}': {}", name,
+                                               imageResult.error().message));
+                }
             }
             continue;
         }
@@ -1824,29 +1823,27 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
         }
 
         auto& frame = sprite.frames[0];
-        try
+        auto imageResult = graphics::Image::fromPalettedData(frame.data, frame.width, frame.height,
+                                                             sprite.palette);
+        if (imageResult.has_value() && *imageResult)
         {
-            auto image = graphics::Image::fromPalettedData(frame.data, frame.width, frame.height,
-                                                           sprite.palette);
-            if (image)
+            void* tex = renderer->createTexture(**imageResult);
+            if (tex)
             {
-                void* tex = renderer->createTexture(*image);
-                if (tex)
-                {
-                    renderer->destroyTexture(textureHandle);
-                    textureHandle = tex;
-                    width = static_cast<int>(frame.width);
-                    height = static_cast<int>(frame.height);
-                    logger.info(std::format("Loaded UI texture '{}' as sprite: {} ({}x{})", label,
-                                            name, width, height));
-                    return true;
-                }
+                renderer->destroyTexture(textureHandle);
+                textureHandle = tex;
+                width = static_cast<int>(frame.width);
+                height = static_cast<int>(frame.height);
+                logger.info(std::format("Loaded UI texture '{}' as sprite: {} ({}x{})", label,
+                                        name, width, height));
+                return true;
             }
         }
-        catch (const std::exception& e)
+        else if (!imageResult.has_value())
         {
             logger.warning(
-                std::format("Failed to convert sprite frame to image'{}': {}", name, e.what()));
+                std::format("Failed to convert sprite frame to image '{}': {}", name,
+                            imageResult.error().message));
         }
     }
 
@@ -1889,33 +1886,32 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
             continue;
         }
 
-        try
-        {
-            auto palette = graphics::Palette::fromRGBData(*palData);
-            // Index 0 is transparent
-            palette.setColor(0, graphics::Palette::Color(0, 0, 0, 0));
-
-            auto image = graphics::Image::fromPalettedData(*pixelData, imgInfo->width,
-                                                           imgInfo->height, palette);
-            if (image)
-            {
-                void* tex = renderer->createTexture(*image);
-                if (tex)
-                {
-                    renderer->destroyTexture(textureHandle);
-                    textureHandle = tex;
-                    width = static_cast<int>(imgInfo->width);
-                    height = static_cast<int>(imgInfo->height);
-                    logger.info(std::format("Loaded UI texture '{}' as paletted: {} ({}x{})", label,
-                                            name, width, height));
-                    return true;
-                }
-            }
-        }
-        catch (const std::exception& ex)
+        auto paletteResult = graphics::Palette::fromRGBData(*palData);
+        if (!paletteResult.has_value())
         {
             logger.warning(
-                std::format("Failed to convert paletted image '{}': {}", name, ex.what()));
+                std::format("Failed to convert paletted image '{}': {}", name, paletteResult.error().message));
+            continue;
+        }
+        auto palette = *paletteResult;
+        // Index 0 is transparent
+        palette.setColor(0, graphics::Palette::Color(0, 0, 0, 0));
+
+        auto imageResult = graphics::Image::fromPalettedData(*pixelData, imgInfo->width,
+                                                             imgInfo->height, palette);
+        if (imageResult.has_value() && *imageResult)
+        {
+            void* tex = renderer->createTexture(**imageResult);
+            if (tex)
+            {
+                renderer->destroyTexture(textureHandle);
+                textureHandle = tex;
+                width = static_cast<int>(imgInfo->width);
+                height = static_cast<int>(imgInfo->height);
+                logger.info(std::format("Loaded UI texture '{}' as paletted: {} ({}x{})", label,
+                                        name, width, height));
+                return true;
+            }
         }
     }
 
@@ -2021,24 +2017,23 @@ bool Application::loadPcxSequence(const std::string& prefix, std::vector<void*>&
             continue;
         }
 
-        try
         {
-            std::unique_ptr<graphics::Image> image;
-            if (pcx->is24Bit())
+            auto imageResult = pcx->is24Bit()
+                ? graphics::Image::fromRGBAData(pcx->rgbaPixels, pcx->width, pcx->height)
+                : graphics::Image::fromPalettedData(pcx->indices, pcx->width, pcx->height,
+                                                    pcx->palette);
+            if (!imageResult.has_value())
             {
-                image = graphics::Image::fromRGBAData(pcx->rgbaPixels, pcx->width, pcx->height);
+                logger.warning(std::format("Failed to convert PCX '{}': {}", entry.name,
+                                           imageResult.error().message));
+                continue;
             }
-            else
-            {
-                image = graphics::Image::fromPalettedData(pcx->indices, pcx->width, pcx->height,
-                                                          pcx->palette);
-            }
-            if (!image)
+            if (!*imageResult)
             {
                 continue;
             }
 
-            void* tex = renderer->createTexture(*image);
+            void* tex = renderer->createTexture(**imageResult);
             if (!tex)
             {
                 continue;
@@ -2051,10 +2046,6 @@ bool Application::loadPcxSequence(const std::string& prefix, std::vector<void*>&
             {
                 frameNumbers->push_back(entry.index);
             }
-        }
-        catch (const std::exception& ex)
-        {
-            logger.warning(std::format("Failed to convert PCX '{}': {}", entry.name, ex.what()));
         }
     }
 

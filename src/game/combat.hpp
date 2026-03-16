@@ -149,7 +149,7 @@ class CombatSystem
     // Access active monsters
     const std::vector<MonsterInstance>& getMonsters() const { return monsters_; }
     MonsterInstance* getMonster(int instanceIndex);
-
+    
     // Get monster definition by original ID (e.g. objectType from spawn point)
     const formats::MonsterEntry* getMonsterDef(int monsterId) const;
 

@@ -62,7 +62,10 @@ Sprite SpriteParser::parse(const std::vector<uint8_t>& data)
     }
     std::vector<uint8_t> paletteData(768);
     std::memcpy(paletteData.data(), p, 768);
-    sprite.palette = graphics::Palette::fromRGBData(paletteData);
+    if (auto pal = graphics::Palette::fromRGBData(paletteData); pal.has_value())
+    {
+        sprite.palette = *pal;
+    }
     p += 768;
 
     for (int i = 0; i < header->frameCount; i++)

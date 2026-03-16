@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "palette.hpp"
 
-#include <stdexcept>
-
 namespace runeharbor::graphics
 {
 
@@ -15,11 +13,12 @@ Palette::Palette()
     }
 }
 
-Palette Palette::fromRGBData(const std::vector<uint8_t>& data)
+std::expected<Palette, util::Error> Palette::fromRGBData(const std::vector<uint8_t>& data)
 {
     if (data.size() != 768)
     {
-        throw std::runtime_error("Palette data must be exactly 768 bytes (256 × 3 RGB)");
+        return std::unexpected(
+            util::Error("Palette data must be exactly 768 bytes (256 × 3 RGB)"));
     }
 
     Palette palette;

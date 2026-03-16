@@ -52,6 +52,11 @@ test_sources = files(
     'media/smacker_decoder_test.cpp',
     'media/bink_decoder_test.cpp',
     'engine/application_test.cpp',
+    'game/character_test.cpp',
+    'game/party_test.cpp',
+    'game/combat_test.cpp',
+    'game/inventory_test.cpp',
+    'graphics/light_stack_test.cpp',
 )
 
 # Reuse source files from main build (without main.cpp)

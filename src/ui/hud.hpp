@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <functional>
+#include <string>
+
 namespace runeharbor::graphics
 {
 class IRenderer;
@@ -27,6 +30,9 @@ class HUD
 {
   public:
     HUD() = default;
+
+    using TextureLookup = std::function<void*(const std::string&, int& w, int& h)>;
+    void setTextureLookup(TextureLookup lookup) { textureLookup_ = lookup; }
 
     /// Set the game world to read party/calendar data from
     void setGameWorld(game::GameWorld* world) { gameWorld_ = world; }
@@ -58,6 +64,7 @@ class HUD
 
     game::GameWorld* gameWorld_ = nullptr;
     engine::MapScene* mapScene_ = nullptr;
+    TextureLookup textureLookup_;
 };
 
 } // namespace runeharbor::ui

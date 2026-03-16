@@ -407,7 +407,11 @@ int CombatSystem::rollDamage(const std::string& diceExpr)
     int bonus = 0;
     if (plusPos != std::string::npos)
     {
-        std::from_chars(diceExpr.data() + plusPos, diceExpr.data() + diceExpr.size(), bonus);
+        // std::from_chars doesn't parse leading '+', so skip it
+        size_t bonusStart = plusPos;
+        if (diceExpr[plusPos] == '+')
+            bonusStart++;
+        std::from_chars(diceExpr.data() + bonusStart, diceExpr.data() + diceExpr.size(), bonus);
     }
 
     int total = bonus;

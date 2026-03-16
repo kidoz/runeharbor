@@ -148,13 +148,13 @@ std::optional<PcxImage> decodePCX(const std::vector<uint8_t>& data, util::ILogge
         if (data.size() >= 769 && data[data.size() - 769] == 0x0C)
         {
             std::vector<uint8_t> paletteData(data.end() - 768, data.end());
-            try
+            if (auto pal = graphics::Palette::fromRGBData(paletteData); pal.has_value())
             {
-                result.palette = graphics::Palette::fromRGBData(paletteData);
+                result.palette = *pal;
             }
-            catch (const std::exception& ex)
+            else
             {
-                logger.warning(std::format("PCX palette load failed: {}", ex.what()));
+                logger.warning(std::format("PCX palette load failed: {}", pal.error().message));
             }
         }
         else

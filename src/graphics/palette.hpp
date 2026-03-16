@@ -2,7 +2,10 @@
 #pragma once
 
 #include <cstdint>
+#include <expected>
 #include <vector>
+
+#include "../util/error.hpp"
 
 namespace runeharbor::graphics
 {
@@ -25,7 +28,7 @@ class Palette
     Palette();
 
     /// Load palette from 768-byte RGB data (256 colors × 3 bytes)
-    static Palette fromRGBData(const std::vector<uint8_t>& data);
+    static std::expected<Palette, util::Error> fromRGBData(const std::vector<uint8_t>& data);
 
     /// Create a default VGA-style palette for testing
     static Palette createDefaultPalette();
