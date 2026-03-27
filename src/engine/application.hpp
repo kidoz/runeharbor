@@ -400,6 +400,7 @@ class Application
     void configureGameplayCallbacks();
     void loadMapStatsTable();
     void playEventSound(int soundId);
+    void playUiSound(const std::string& soundName);
     std::string resolveSoundNameById(int soundId) const;
     int resolveMapDifficulty(const std::string& mapName, int fallback) const;
     int resolveMapRespawnDays(const std::string& mapName, int fallback) const;

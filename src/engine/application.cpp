@@ -345,6 +345,9 @@ void Application::updateStateContext()
     stateCtx->arrusFont = arrusFont_.get();
     stateCtx->smallnumFont = smallnumFont_.get();
 
+    // Audio
+    stateCtx->playUiSound = [this](const std::string& name) { playUiSound(name); };
+
     if (sharedData)
     {
         sharedData->mapScene = mapScene.get();
@@ -542,12 +545,20 @@ bool Application::loadGameData(const std::filesystem::path& dataPath)
         sndArchive_->close();
     }
     loadedSounds_.clear();
-    const std::array<std::string, 3> sndCandidates = {"Audio.snd", "audio.snd", "AUDIO.SND"};
+    const std::array<std::string, 6> sndCandidates = {"Audio.snd",           "audio.snd",
+                                                      "AUDIO.SND",           "../SOUNDS/Audio.snd",
+                                                      "../SOUNDS/audio.snd", "../SOUNDS/AUDIO.SND"};
     for (const auto& name : sndCandidates)
     {
         const auto sndPath = dataPath / name;
         if (!std::filesystem::exists(sndPath))
         {
+            // Also try relative to the parent of dataPath for better flexibility
+            const auto altPath = dataPath.parent_path() / "SOUNDS" / name;
+            if (std::filesystem::exists(altPath) && sndArchive_ && sndArchive_->open(altPath))
+            {
+                break;
+            }
             continue;
         }
         if (sndArchive_ && sndArchive_->open(sndPath))
@@ -1162,8 +1173,8 @@ void Application::wireUpMapTextures()
                         }
                     }
 
-                    auto imageResult = graphics::Image::fromPalettedData(*data, info->width, info->height,
-                                                                       palette);
+                    auto imageResult = graphics::Image::fromPalettedData(*data, info->width,
+                                                                         info->height, palette);
                     if (imageResult.has_value() && *imageResult)
                     {
                         void* tex = renderer->createTexture(**imageResult);
@@ -1784,10 +1795,11 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
         {
             // Successfully decoded as PCX
             {
-                auto imageResult = pcx->is24Bit()
-                    ? graphics::Image::fromRGBAData(pcx->rgbaPixels, pcx->width, pcx->height)
-                    : graphics::Image::fromPalettedData(pcx->indices, pcx->width, pcx->height,
-                                                        pcx->palette);
+                auto imageResult =
+                    pcx->is24Bit()
+                        ? graphics::Image::fromRGBAData(pcx->rgbaPixels, pcx->width, pcx->height)
+                        : graphics::Image::fromPalettedData(pcx->indices, pcx->width, pcx->height,
+                                                            pcx->palette);
                 if (imageResult.has_value() && *imageResult)
                 {
                     void* tex = renderer->createTexture(**imageResult);
@@ -1834,16 +1846,15 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
                 textureHandle = tex;
                 width = static_cast<int>(frame.width);
                 height = static_cast<int>(frame.height);
-                logger.info(std::format("Loaded UI texture '{}' as sprite: {} ({}x{})", label,
-                                        name, width, height));
+                logger.info(std::format("Loaded UI texture '{}' as sprite: {} ({}x{})", label, name,
+                                        width, height));
                 return true;
             }
         }
         else if (!imageResult.has_value())
         {
-            logger.warning(
-                std::format("Failed to convert sprite frame to image '{}': {}", name,
-                            imageResult.error().message));
+            logger.warning(std::format("Failed to convert sprite frame to image '{}': {}", name,
+                                       imageResult.error().message));
         }
     }
 
@@ -1889,16 +1900,16 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
         auto paletteResult = graphics::Palette::fromRGBData(*palData);
         if (!paletteResult.has_value())
         {
-            logger.warning(
-                std::format("Failed to convert paletted image '{}': {}", name, paletteResult.error().message));
+            logger.warning(std::format("Failed to convert paletted image '{}': {}", name,
+                                       paletteResult.error().message));
             continue;
         }
         auto palette = *paletteResult;
         // Index 0 is transparent
         palette.setColor(0, graphics::Palette::Color(0, 0, 0, 0));
 
-        auto imageResult = graphics::Image::fromPalettedData(*pixelData, imgInfo->width,
-                                                             imgInfo->height, palette);
+        auto imageResult =
+            graphics::Image::fromPalettedData(*pixelData, imgInfo->width, imgInfo->height, palette);
         if (imageResult.has_value() && *imageResult)
         {
             void* tex = renderer->createTexture(**imageResult);
@@ -2018,10 +2029,11 @@ bool Application::loadPcxSequence(const std::string& prefix, std::vector<void*>&
         }
 
         {
-            auto imageResult = pcx->is24Bit()
-                ? graphics::Image::fromRGBAData(pcx->rgbaPixels, pcx->width, pcx->height)
-                : graphics::Image::fromPalettedData(pcx->indices, pcx->width, pcx->height,
-                                                    pcx->palette);
+            auto imageResult =
+                pcx->is24Bit()
+                    ? graphics::Image::fromRGBAData(pcx->rgbaPixels, pcx->width, pcx->height)
+                    : graphics::Image::fromPalettedData(pcx->indices, pcx->width, pcx->height,
+                                                        pcx->palette);
             if (!imageResult.has_value())
             {
                 logger.warning(std::format("Failed to convert PCX '{}': {}", entry.name,
@@ -4030,6 +4042,67 @@ void Application::playEventSound(int soundId)
     if (audioSystem_->playSound(lowerName) < 0)
     {
         logger.debug(std::format("Event PlaySound {} failed to start '{}'", soundId, soundName));
+    }
+}
+
+void Application::playUiSound(const std::string& soundName)
+{
+    if (bootConfig_.noSound || !audioSystem_ || !audioSystem_->isInitialized() || soundName.empty())
+    {
+        return;
+    }
+
+    const std::string lowerName = toLower(soundName);
+
+    // Lazy-load WAV payload from Audio.snd on first use.
+    if (!loadedSounds_.contains(lowerName))
+    {
+        if (!sndArchive_ || !sndArchive_->isOpen())
+        {
+            logger.debug(std::format("UI PlaySound skipped (Audio.snd not mounted)"));
+            return;
+        }
+
+        std::vector<std::string> candidates;
+        if (soundName.find('.') != std::string::npos)
+        {
+            candidates.push_back(soundName);
+        }
+        else
+        {
+            candidates.push_back(soundName + ".wav");
+            candidates.push_back(soundName + ".WAV");
+            candidates.push_back(soundName);
+        }
+
+        std::optional<std::vector<uint8_t>> wavData;
+        for (const auto& candidate : candidates)
+        {
+            wavData = sndArchive_->extractFile(candidate);
+            if (wavData.has_value())
+            {
+                break;
+            }
+        }
+
+        if (!wavData.has_value() || wavData->empty())
+        {
+            logger.debug(std::format("UI PlaySound skipped (missing WAV for '{}')", soundName));
+            return;
+        }
+
+        if (!audioSystem_->loadSound(lowerName, *wavData))
+        {
+            logger.debug(std::format("UI PlaySound skipped (failed to decode '{}')", soundName));
+            return;
+        }
+
+        loadedSounds_.insert(lowerName);
+    }
+
+    if (audioSystem_->playSound(lowerName) < 0)
+    {
+        logger.debug(std::format("UI PlaySound failed to start '{}'", soundName));
     }
 }
 

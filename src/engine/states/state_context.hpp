@@ -4,6 +4,7 @@
 #include <SDL3/SDL_scancode.h>
 
 #include <algorithm>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -224,6 +225,9 @@ struct StateContext
     /// Render a simple text menu
     void renderMenu(const std::vector<std::string>& items, int selectedIndex, int x, int y,
                     int scale) const;
+
+    // --- Audio helpers ---
+    std::function<void(const std::string&)> playUiSound;
 };
 
 } // namespace runeharbor::engine

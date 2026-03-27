@@ -140,6 +140,55 @@ const std::vector<std::vector<int>> kClassAvailableSkills = {
     {2, 9, 13, 14, 15, 19, 20, 25, 36, 35},
 };
 
+const char* getFaceReadySound(int faceId)
+{
+    switch (faceId)
+    {
+    case 0:
+        return "HM101a";
+    case 1:
+        return "HM201a";
+    case 2:
+        return "HM301a";
+    case 3:
+        return "HM401e";
+    case 4:
+        return "HF101a";
+    case 5:
+        return "HF201a";
+    case 6:
+        return "HF301d";
+    case 7:
+        return "Hf401b";
+    case 8:
+        return "EM101a";
+    case 9:
+        return "EM201b";
+    case 10:
+        return "Elf F101a";
+    case 11:
+        return "EF201a";
+    case 12:
+        return "DM101b";
+    case 13:
+        return "DM201a";
+    case 14:
+        return "DF101a";
+    case 15:
+        return "DF201c";
+    case 16:
+        return "GM101c";
+    case 17:
+        return "GM201a";
+    case 18:
+        return "GF101a";
+    case 19:
+        return "GF201a";
+    default:
+        return "HM101a";
+    }
+}
+
 } // namespace
 
 CharacterCreationState::CharacterCreationState(StateContext& ctx) : ctx(ctx) {}
@@ -268,7 +317,11 @@ std::optional<GameStateId> CharacterCreationState::update()
     if (ctx.isKeyPressed(SDL_SCANCODE_4))
         activeCharacterIndex = 3;
     if (activeCharacterIndex != prevActive)
+    {
+        if (ctx.playUiSound)
+            ctx.playUiSound(getFaceReadySound(party[activeCharacterIndex].faceId));
         rebuildAvailableSkills();
+    }
 
     // Mouse click: column selection + bottom buttons
     if (ctx.window.wasMousePressed(platform::MouseButton::Left))
@@ -286,6 +339,8 @@ std::optional<GameStateId> CharacterCreationState::update()
                 if (activeCharacterIndex != i)
                 {
                     activeCharacterIndex = i;
+                    if (ctx.playUiSound)
+                        ctx.playUiSound(getFaceReadySound(party[activeCharacterIndex].faceId));
                     rebuildAvailableSkills();
                 }
                 break;
@@ -316,12 +371,16 @@ std::optional<GameStateId> CharacterCreationState::update()
                         // Deselect
                         sk.selected = false;
                         std::erase(ch.skills, std::string(sk.name));
+                        if (ctx.playUiSound)
+                            ctx.playUiSound("ClickSkill");
                     }
                     else if (extraCount < kMaxExtraSkills)
                     {
                         // Select
                         sk.selected = true;
                         ch.skills.push_back(sk.name);
+                        if (ctx.playUiSound)
+                            ctx.playUiSound("ClickSkill");
                     }
                     break;
                 }
@@ -344,11 +403,13 @@ std::optional<GameStateId> CharacterCreationState::update()
                 ext = ".odm";
             }
 
-            if (ctx.shared->gameWorld) {
+            if (ctx.shared->gameWorld)
+            {
                 auto& party = ctx.shared->gameWorld->party();
                 // MM7 starts the new game at this exact coordinate on Emerald Island
-                party.setWorldPosition(12552.0f, 800.0f, 193.0f);
-                party.setOrientation(512.0f, 0.0f);
+                // RE doc 27-game-flow.md §7.2: X=12552, Y=1816, Z=512, angles=0
+                party.setWorldPosition(12552.0f, 1816.0f, 512.0f);
+                party.setOrientation(0.0f, 0.0f);
             }
 
             ctx.shared->quickStartReady = true;
@@ -844,6 +905,21 @@ void CharacterCreationState::updateCharacterForFace(Character& ch)
         ch.baseStats.byIndex(i) = kFaceBaseStats[groupIdx][i];
     }
     ch.stats = ch.baseStats;
+
+    // Approximate MM7 gender mapping
+    // Human (0-7): 0-3 Male, 4-7 Female
+    // Elf (8-11): 8-9 Male, 10-11 Female
+    // Dwarf (12-15): 12-13 Male, 14-15 Female
+    // Goblin (16-19): 16-17 Male, 18-19 Female
+    if (ch.faceId < 4 || (ch.faceId >= 8 && ch.faceId < 10) ||
+        (ch.faceId >= 12 && ch.faceId < 14) || (ch.faceId >= 16 && ch.faceId < 18))
+    {
+        ch.gender = Gender::Male;
+    }
+    else
+    {
+        ch.gender = Gender::Female;
+    }
 }
 
 void CharacterCreationState::updateSkillsForClass(Character& ch)

@@ -49,6 +49,7 @@ std::optional<GameStateId> TitleState::update()
         layoutButtons();
     }
 
+    int oldSelected = selectedIndex;
     updateHover();
 
     // Keyboard navigation
@@ -60,6 +61,11 @@ std::optional<GameStateId> TitleState::update()
     if (ctx.isKeyPressed(SDL_SCANCODE_DOWN))
     {
         selectedIndex = (selectedIndex + 1) % count;
+    }
+
+    if (selectedIndex != oldSelected && ctx.playUiSound)
+    {
+        ctx.playUiSound("ClickMovingSelector");
     }
 
     // Activation (Enter or mouse click)
@@ -79,6 +85,10 @@ std::optional<GameStateId> TitleState::update()
 
     if (activated)
     {
+        if (ctx.playUiSound)
+        {
+            ctx.playUiSound("ClickIn");
+        }
         switch (selectedIndex)
         {
         case 0:
