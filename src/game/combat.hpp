@@ -17,7 +17,47 @@ namespace runeharbor::game
 
 class GameWorld;
 
+// AI hostility levels index into this aggression range table (RE: 0x4DF380)
+// Distance at which a monster becomes aggressive toward the party
+inline constexpr std::array<int, 5> kAggroRangeTable = {
+    0,     // 0 = Friendly (no aggression)
+    1024,  // 1 = Low hostility
+    2560,  // 2 = Medium hostility
+    5120,  // 3 = High hostility
+    10240, // 4 = Maximum (always hostile)
+};
+
+// Hostility matrix dimensions (RE: 89×89 at 0x5C8B40, loaded from hostile.txt)
+inline constexpr int kHostilityMatrixSize = 89;
+
+// Max visible actors for AI targeting (RE: bubble-sorted list at 0x4F7458)
+inline constexpr int kMaxVisibleActors = 30;
+
+// Target ID encoding: (actorIndex << 3) | type  (RE: confirmed in decompiled code)
+enum class TargetType : uint8_t
+{
+    None = 0,
+    Actor = 3,
+    Party = 4,
+};
+
+inline uint32_t encodeTargetId(int index, TargetType type)
+{
+    return static_cast<uint32_t>((index << 3) | static_cast<int>(type));
+}
+
+inline int decodeTargetIndex(uint32_t targetId)
+{
+    return static_cast<int>(targetId >> 3);
+}
+
+inline TargetType decodeTargetType(uint32_t targetId)
+{
+    return static_cast<TargetType>(targetId & 0x7);
+}
+
 // Live monster instance in combat
+// RE: original Actor struct is 836 bytes (stride 0x344) at 0x5FEFFC
 struct MonsterInstance
 {
     int monsterId = 0;    // Reference to MonsterEntry
@@ -32,10 +72,22 @@ struct MonsterInstance
     int group = 0;        // Map/script group id (for event opcodes)
     uint16_t topic = 0;   // Script dialog topic id
 
-    // Position in world
+    // Position in world (RE: +0x66/+0x68/+0x6A as i16, stored as float for engine use)
     float x = 0, y = 0, z = 0;
 
-    // AI state (matches MM7 binary values)
+    // Velocity for physics (RE: +0x6C, i16[3])
+    float velocityX = 0, velocityY = 0, velocityZ = 0;
+
+    // Facing angle (RE: +0x72, u16 0-2047, 0=East, 512=North)
+    uint16_t facingAngle = 0;
+
+    // Indoor sector tracking (RE: +0x7A, u16 sectorId for BLV)
+    uint16_t sectorId = 0;
+
+    // Sprite type (RE: +0x08, u16)
+    uint16_t spriteType = 0;
+
+    // AI state (matches MM7 binary values, RE: +0x88)
     enum class AIState : uint8_t
     {
         Standing = 0,
@@ -57,6 +109,9 @@ struct MonsterInstance
     };
     AIState aiState = AIState::Standing;
 
+    // AI timer (RE: +0x90, time in current state)
+    int aiTimer = 0;
+
     enum class Personality : uint8_t
     {
         Normal = 0,
@@ -67,7 +122,32 @@ struct MonsterInstance
     };
     Personality personality = Personality::Normal;
 
-    int targetCharacter = -1; // Which party member to attack (-1 = none)
+    // Hostility level 0-4, indexes into kAggroRangeTable (RE: +0x15)
+    uint8_t hostilityLevel = 0;
+
+    // Alliance/faction group for hostility matrix lookup (RE: +0x60)
+    uint16_t allianceGroup = 0;
+
+    // Team membership for group checks (RE: +0x2C4)
+    int teamId = 0;
+
+    // Target ID using encoded format (RE: +0x29C, bits 0-2=type, 3+=index)
+    uint32_t targetId = 0;
+
+    // Hostility override; 9999 = friendly (RE: +0x2C8)
+    int hostilityOverride = 0;
+
+    // Condition timestamps (RE: i64 timestamps, 0 = not active)
+    int64_t charmTime = 0;    // RE: +0xE4
+    int64_t deadTime = 0;     // RE: +0x164
+    int64_t paralyzeTime = 0; // RE: +0x194
+
+    // Flags (RE: +0x00 and +0x24)
+    uint32_t flags = 0;         // Bit 15=hostile, 19=always-hostile
+    uint32_t flagsExtended = 0; // Bit 19=permanently hostile (0x80000)
+
+    // Legacy fields (kept for backward compat with existing combat code)
+    int targetCharacter = -1;
     float aggroRange = 2048.0f;
     bool hostile = true;
 
@@ -85,6 +165,19 @@ struct MonsterInstance
     std::array<int, 8> scriptFields = {};
 
     bool isAlive() const { return aiState != AIState::Dead && currentHP > 0; }
+
+    bool isPermanentlyHostile() const { return (flagsExtended & 0x80000) != 0; }
+
+    bool isFriendlyOverride() const { return hostilityOverride == 9999; }
+
+    int effectiveAggroRange() const
+    {
+        if (isFriendlyOverride())
+            return 0;
+        if (hostilityLevel < kAggroRangeTable.size())
+            return kAggroRangeTable[hostilityLevel];
+        return kAggroRangeTable.back();
+    }
 };
 
 // Result of an attack roll
@@ -149,7 +242,7 @@ class CombatSystem
     // Access active monsters
     const std::vector<MonsterInstance>& getMonsters() const { return monsters_; }
     MonsterInstance* getMonster(int instanceIndex);
-    
+
     // Get monster definition by original ID (e.g. objectType from spawn point)
     const formats::MonsterEntry* getMonsterDef(int monsterId) const;
 

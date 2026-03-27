@@ -17,8 +17,7 @@ std::expected<Palette, util::Error> Palette::fromRGBData(const std::vector<uint8
 {
     if (data.size() != 768)
     {
-        return std::unexpected(
-            util::Error("Palette data must be exactly 768 bytes (256 × 3 RGB)"));
+        return std::unexpected(util::Error("Palette data must be exactly 768 bytes (256 × 3 RGB)"));
     }
 
     Palette palette;

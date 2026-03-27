@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <fstream>
@@ -123,6 +124,7 @@ class ImageLODArchive
     std::filesystem::path archivePath;
     std::vector<ImageLODDirectoryEntry> entries;
     std::vector<std::string> resolvedNames;
+    std::unordered_map<std::string, size_t> nameToIndex;
     std::streamoff dataSectionStart = 0;
     int64_t offsetDelta = 0;   // Delta to add to entry.offset for actual file position
     bool externalOnly = false; // True if no entries have LIB. marker (ICONS.LOD pattern)

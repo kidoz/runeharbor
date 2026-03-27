@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <fstream>
@@ -72,6 +73,7 @@ class LODArchive
     std::filesystem::path archivePath;
     std::vector<LODDirectoryEntry> entries;
     std::vector<DataEntry> dataEntries;
+    std::unordered_map<std::string, size_t> nameToIndex;
     std::streamoff dataSectionStart = 0;
     bool opened = false;
     bool dataIndexBuilt = false;

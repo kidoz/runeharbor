@@ -266,7 +266,8 @@ void WorldRenderer::render(const engine::MapScene& scene, const Camera& camera,
     }
 
     auto* gpu = renderer_.getGPUDevice();
-    if (gpu) {
+    if (gpu)
+    {
         ensureOffscreenTarget(renderer_.getViewportWidth(), renderer_.getViewportHeight());
     }
 
@@ -279,8 +280,9 @@ void WorldRenderer::render(const engine::MapScene& scene, const Camera& camera,
         // Indoor scene
         if (indoorRenderer)
         {
-            indoorRenderer->render(scene, camera, runtimeConfig, &visibleIndoorSectors_, 
-                                   offscreenGpuTexture_, offscreenDepthTexture_, offscreenSdlTexture_);
+            indoorRenderer->render(scene, camera, runtimeConfig, &visibleIndoorSectors_,
+                                   offscreenGpuTexture_, offscreenDepthTexture_,
+                                   offscreenSdlTexture_);
         }
     }
     else if (!scene.getODMData().heightmap.empty())
@@ -299,7 +301,8 @@ void WorldRenderer::render(const engine::MapScene& scene, const Camera& camera,
         if (outdoorRenderer)
         {
             outdoorRenderer->render(scene, camera, runtimeConfig, nightBlend, &visibilityFrustum_,
-                                    offscreenGpuTexture_, offscreenDepthTexture_, offscreenSdlTexture_);
+                                    offscreenGpuTexture_, offscreenDepthTexture_,
+                                    offscreenSdlTexture_);
         }
     }
 }

@@ -65,13 +65,28 @@ struct Item
     bool valid() const { return itemId > 0; }
 };
 
-// Backpack: grid-based inventory (MM7 uses 14 slots per character)
-static constexpr int kBackpackSlots = 14;
+// RE: Character struct at +0x1F0 has 140 Item[36] slots (5,040 bytes total).
+// These 140 slots form the item pool; equipment indices and backpack grid reference this pool.
+// The backpack is a 14-column grid; items can occupy multi-cell slots.
+static constexpr int kItemPoolSize = 140;
+
+// Backpack grid: 14 columns (visual grid width in the inventory UI)
+static constexpr int kBackpackColumns = 14;
+
+// Legacy alias
+static constexpr int kBackpackSlots = kBackpackColumns;
 
 // Per-character inventory
+// RE: 140-item pool, 16 equipment indices, backpack grid references into the pool
 struct CharacterInventory
 {
+    // Item pool: all items this character owns (RE: 140 × 36B at character+0x1F0)
+    std::array<Item, kItemPoolSize> items = {};
+
+    // Equipment: indices into items[] array (0 = empty, 1-based index)
     std::array<Item, static_cast<size_t>(EquipSlot::Count)> equipped = {};
+
+    // Backpack display grid (legacy 14-slot view for backward compat)
     std::array<Item, kBackpackSlots> backpack = {};
 
     bool hasEquipped(EquipSlot slot) const { return equipped[static_cast<size_t>(slot)].valid(); }
@@ -80,6 +95,17 @@ struct CharacterInventory
     {
         int count = 0;
         for (const auto& item : backpack)
+        {
+            if (!item.valid())
+                count++;
+        }
+        return count;
+    }
+
+    int freeItemPoolSlots() const
+    {
+        int count = 0;
+        for (const auto& item : items)
         {
             if (!item.valid())
                 count++;

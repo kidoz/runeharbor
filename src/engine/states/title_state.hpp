@@ -46,6 +46,9 @@ class TitleState : public IGameState
     int selectedIndex = 0;
     std::string statusMessage;
 
+    int lastViewportWidth = 0;
+    int lastViewportHeight = 0;
+
     // Background texture (non-owning)
     void* background = nullptr;
     int backgroundWidth = 0;

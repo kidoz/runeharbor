@@ -268,19 +268,12 @@ std::vector<std::string> ImageLODArchive::listFiles() const
 
 std::streamoff ImageLODArchive::calculateDataOffset(const ImageLODDirectoryEntry& targetEntry) const
 {
-    // For mixed archives (BITMAPS.LOD): files stored with absolute offsets in the directory entry.
-    // The previous sequential calculation was incorrect.
-    // We trust the offset stored in the directory entry.
-
-    // Note: For some archives, we might need to apply offsetDelta,
-    // but based on reverse engineering, BITMAPS.LOD entries have absolute file offsets.
-    // If offsetDelta is set (e.g. ICONS.LOD logic), we might want to respect it,
-    // but typically mixed archives don't use it in the same way.
-
-    // Checking if it's mixed or external-only to be safe?
-    // The method is mostly used for extractCustom (mixed).
-
-    return static_cast<std::streamoff>(targetEntry.offset);
+    // Both mixed (BITMAPS.LOD) and external-only archives use relative offsets.
+    // Entry offsets are relative to the start of the entry table (offset 288 = 0x120).
+    // For external-only, offsetDelta equals 288 (entries[0].offset).
+    // For mixed archives, offsetDelta may not be set, so we use 288 directly.
+    constexpr std::streamoff kEntryTableStart = 288;
+    return kEntryTableStart + static_cast<std::streamoff>(targetEntry.offset);
 }
 
 std::optional<std::vector<uint8_t>>
@@ -477,45 +470,23 @@ std::optional<std::vector<uint8_t>> ImageLODArchive::extractFile(const std::stri
         return std::nullopt;
     }
 
-    // Find entry (case-insensitive search)
-    const ImageLODDirectoryEntry* targetEntry = nullptr;
-    for (size_t i = 0; i < entries.size(); i++)
-    {
-        // Skip container entry for external-only archives
-        if (externalOnly && i == 0)
-        {
-            continue;
-        }
+    std::string lowerName = filename;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
 
-        std::string entryName = buildFilename(i);
-
-        if (entryName.size() != filename.size())
-        {
-            continue;
-        }
-
-        bool match = true;
-        for (size_t j = 0; j < entryName.size(); j++)
-        {
-            if (std::tolower(static_cast<unsigned char>(entryName[j])) !=
-                std::tolower(static_cast<unsigned char>(filename[j])))
-            {
-                match = false;
-                break;
-            }
-        }
-
-        if (match)
-        {
-            targetEntry = &entries[i];
-            break;
-        }
-    }
-
-    if (!targetEntry)
+    auto it = nameToIndex.find(lowerName);
+    if (it == nameToIndex.end())
     {
         return std::nullopt;
     }
+
+    // Skip container entry for external-only archives
+    if (externalOnly && it->second == 0)
+    {
+        return std::nullopt;
+    }
+
+    const ImageLODDirectoryEntry* targetEntry = &entries[it->second];
 
     ImageEntryType entryType = detectEntryType(*targetEntry);
     logger.debug(std::format("Extracting '{}' from {} (type: {}, offset: {}, size: {})", filename,
@@ -548,41 +519,17 @@ std::optional<ImageFileHeader> ImageLODArchive::getFileInfo(const std::string& f
         return std::nullopt;
     }
 
-    // Find entry (case-insensitive search)
-    const ImageLODDirectoryEntry* targetEntry = nullptr;
-    for (size_t i = 0; i < entries.size(); i++)
-    {
-        std::string entryName = buildFilename(i);
+    std::string lowerName = filename;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
 
-        if (entryName.size() != filename.size())
-        {
-            continue;
-        }
-
-        bool match = true;
-        for (size_t j = 0; j < entryName.size(); j++)
-        {
-            if (std::tolower(static_cast<unsigned char>(entryName[j])) !=
-                std::tolower(static_cast<unsigned char>(filename[j])))
-            {
-                match = false;
-                break;
-            }
-        }
-
-        if (match)
-        {
-            targetEntry = &entries[i];
-            break;
-        }
-    }
-
-    if (!targetEntry)
+    auto it = nameToIndex.find(lowerName);
+    if (it == nameToIndex.end())
     {
         return std::nullopt;
     }
 
-    ImageEntryType entryType = detectEntryType(*targetEntry);
+    const ImageLODDirectoryEntry* targetEntry = &entries[it->second];
 
     // For external-only archives, read the 48-byte ImageFileHeader directly.
     if (externalOnly)
@@ -607,13 +554,8 @@ std::optional<ImageFileHeader> ImageLODArchive::getFileInfo(const std::string& f
         return imgHeader;
     }
 
-    // Mixed BITMAPS external entries do not have reliable ImageFileHeader metadata.
-    if (entryType == ImageEntryType::ExternalFormat)
-    {
-        return std::nullopt;
-    }
-
-    // For mixed archives with Custom format, read the 48-byte header.
+    // For mixed archives (both CustomFormat and ExternalFormat entries),
+    // read the 48-byte ImageFileHeader from the entry's data offset.
     std::streamoff dataOffset;
     dataOffset = calculateDataOffset(*targetEntry);
 
@@ -646,31 +588,17 @@ std::optional<std::vector<uint8_t>> ImageLODArchive::extractPalette(const std::s
         return std::nullopt;
     }
 
-    // Find entry (case-insensitive)
-    const ImageLODDirectoryEntry* targetEntry = nullptr;
-    for (size_t i = 0; i < entries.size(); i++)
+    std::string lowerName = filename;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    auto it = nameToIndex.find(lowerName);
+    if (it == nameToIndex.end())
     {
-        std::string entryName = buildFilename(i);
-        if (entryName.size() != filename.size())
-        {
-            continue;
-        }
-        bool match = true;
-        for (size_t j = 0; j < entryName.size(); j++)
-        {
-            if (std::tolower(static_cast<unsigned char>(entryName[j])) !=
-                std::tolower(static_cast<unsigned char>(filename[j])))
-            {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-        {
-            targetEntry = &entries[i];
-            break;
-        }
+        return std::nullopt;
     }
+
+    const ImageLODDirectoryEntry* targetEntry = &entries[it->second];
     if (!targetEntry)
     {
         return std::nullopt;
@@ -742,11 +670,18 @@ std::optional<std::vector<uint8_t>> ImageLODArchive::extractPalette(const std::s
 bool ImageLODArchive::resolveEntryNames()
 {
     resolvedNames.clear();
+    nameToIndex.clear();
     resolvedNames.reserve(entries.size());
+    nameToIndex.reserve(entries.size());
 
     for (size_t i = 0; i < entries.size(); i++)
     {
-        resolvedNames.push_back(buildFilename(i));
+        std::string name = buildFilename(i);
+        resolvedNames.push_back(name);
+        
+        std::transform(name.begin(), name.end(), name.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        nameToIndex[name] = i;
     }
 
     return true;

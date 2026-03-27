@@ -36,8 +36,8 @@ class OutdoorRenderer
     void setSpriteFrameTable(const formats::SpriteFrameTable* table);
     void render(const engine::MapScene& scene, const Camera& camera,
                 const game::RuntimeConfig* runtimeConfig = nullptr, float nightBlend = 0.0f,
-                const Frustum* frustumOverride = nullptr,
-                SDL_GPUTexture* colorTex = nullptr, SDL_GPUTexture* depthTex = nullptr, SDL_Texture* blitTex = nullptr);
+                const Frustum* frustumOverride = nullptr, SDL_GPUTexture* colorTex = nullptr,
+                SDL_GPUTexture* depthTex = nullptr, SDL_Texture* blitTex = nullptr);
     void invalidateGPUCache();
 
   private:

@@ -311,15 +311,19 @@ BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, co
         if (!baseName.empty())
         {
             // Calculate 8-directional facing index based on time and angle
-            // facing is probably 0-2047, but for now we'll just use a time offset for random rotation
+            // facing is probably 0-2047, but for now we'll just use a time offset for random
+            // rotation
             uint32_t ticks = SDL_GetTicks();
             uint32_t animOffset = (ticks / 100) % 8; // Change frame every 100ms
-            
+
             // Assuming static spawns just face forward for now if we don't have their rotation
             int directionIndex = animOffset; // fallback random rotation
-            
+
             // Limit to max 11 chars + 2 digit suffix if needed, but std::format handles it
-            sprite.textureName = std::format("{}{:02d}", baseName.substr(0, std::min<size_t>(baseName.length(), 6)), directionIndex + 1); // frames are often 1-indexed? Wait, MM7 uses 00-07 for directions maybe? Let's try 01
+            sprite.textureName =
+                std::format("{}{:02d}", baseName.substr(0, std::min<size_t>(baseName.length(), 6)),
+                            directionIndex + 1); // frames are often 1-indexed? Wait, MM7 uses 00-07
+                                                 // for directions maybe? Let's try 01
         }
     }
 
@@ -390,7 +394,8 @@ void IndoorRenderer::setSpriteFrameTable(const formats::SpriteFrameTable* table)
 void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                             const runeharbor::game::RuntimeConfig* runtimeConfig,
                             const std::unordered_set<uint16_t>* visibleSectors,
-                            SDL_GPUTexture* colorTex, SDL_GPUTexture* depthTex, SDL_Texture* blitTex)
+                            SDL_GPUTexture* colorTex, SDL_GPUTexture* depthTex,
+                            SDL_Texture* blitTex)
 {
     const auto& blvData = scene.getBLVData();
     if (blvData.vertices.empty() || blvData.faces.empty())
@@ -410,7 +415,8 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         SDL_FlushRenderer(renderer.getSDLRenderer());
 
         SDL_GPUCommandBuffer* cmdBuf = SDL_AcquireGPUCommandBuffer(gpuDevice);
-        if (cmdBuf) {
+        if (cmdBuf)
+        {
             SDL_GPUColorTargetInfo colorTarget = {};
             colorTarget.texture = colorTex;
             colorTarget.clear_color = {0.0f, 0.0f, 0.0f, 0.0f}; // Transparent
@@ -426,14 +432,16 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
             depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
             depthTarget.cycle = false;
 
-            SDL_GPURenderPass* renderPass = SDL_BeginGPURenderPass(cmdBuf, &colorTarget, 1, &depthTarget);
-            
+            SDL_GPURenderPass* renderPass =
+                SDL_BeginGPURenderPass(cmdBuf, &colorTarget, 1, &depthTarget);
+
             renderIndoorGPU(blvData, camera, runtimeConfig, visibleSectors, cmdBuf, renderPass);
-            
+
             SDL_EndGPURenderPass(renderPass);
             SDL_SubmitGPUCommandBuffer(cmdBuf);
 
-            if (blitTex) {
+            if (blitTex)
+            {
                 SDL_SetTextureBlendMode(blitTex, SDL_BLENDMODE_BLEND);
                 float w, h;
                 SDL_GetTextureSize(blitTex, &w, &h);
@@ -600,7 +608,8 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
     {
         if (op.type == RenderOpType::Face)
         {
-            if (gpuWallsDrawn) continue; // GPU already drew the walls
+            if (gpuWallsDrawn)
+                continue; // GPU already drew the walls
 
             const auto& face = blvData.faces[op.index];
             const SDL_FColor faceColor = litIndoorFaceColor(blvData, face, op.cx, op.cy, op.cz,
@@ -960,7 +969,7 @@ void IndoorRenderer::initGPUPipeline()
     pipelineInfo.target_info.num_color_targets = 1;
     SDL_GPUColorTargetDescription targetDesc = {};
     targetDesc.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-    
+
     // Enable blending for transparency
     targetDesc.blend_state.enable_blend = true;
     targetDesc.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
@@ -1175,7 +1184,9 @@ void IndoorRenderer::renderIndoorGPU(const formats::BLVMapData& blvData, const C
     (void)blvData;
     (void)runtimeConfig;
 
-    if (!gpuInitialized || !indoorVertexBuffer || !indoorIndexBuffer || !indoorPipeline || !cmdBuf || !renderPass) {
+    if (!gpuInitialized || !indoorVertexBuffer || !indoorIndexBuffer || !indoorPipeline ||
+        !cmdBuf || !renderPass)
+    {
         return;
     }
 

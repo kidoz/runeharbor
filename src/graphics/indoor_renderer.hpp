@@ -37,7 +37,8 @@ class IndoorRenderer
     void render(const engine::MapScene& scene, const Camera& camera,
                 const runeharbor::game::RuntimeConfig* runtimeConfig = nullptr,
                 const std::unordered_set<uint16_t>* visibleSectors = nullptr,
-                SDL_GPUTexture* colorTex = nullptr, SDL_GPUTexture* depthTex = nullptr, SDL_Texture* blitTex = nullptr);
+                SDL_GPUTexture* colorTex = nullptr, SDL_GPUTexture* depthTex = nullptr,
+                SDL_Texture* blitTex = nullptr);
     void invalidateGPUCache();
 
     LightStack& getStationaryLightStack() { return stationaryLights_; }

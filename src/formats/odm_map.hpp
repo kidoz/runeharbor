@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -207,11 +208,17 @@ struct ODMMapData
     static constexpr int TERRAIN_SIZE = 128;
     std::vector<HeightmapCell> heightmap; // [y * TERRAIN_SIZE + x]
 
-    // Tile textures
+    // Tile textures: per tileIndex (0-255) → texture name from LOD
     std::vector<std::string> tileTextures;
+
+    // Raw tileset IDs from header (4 groups)
+    std::array<uint8_t, 4> tilesetIds = {};
 
     // Building geometry
     std::vector<ParsedBuilding> buildings;
+
+    // Decorations (trees, rocks, signs, etc.)
+    std::vector<ParsedDecoration> decorations;
 
     // Spawns
     std::vector<ODMSpawnPoint> spawns;
@@ -252,6 +259,7 @@ class ODMMap
     bool parseHeightmap(const std::vector<uint8_t>& data, size_t& offset);
     bool skipTerrainNormals(const std::vector<uint8_t>& data, size_t& offset);
     bool parseBuildings(const std::vector<uint8_t>& data, size_t& offset);
+    bool parseDecorations(const std::vector<uint8_t>& data, size_t& offset);
     bool parseSpawns(const std::vector<uint8_t>& data, size_t& offset);
 
     ParsedFace convertFace(const ODMFaceOnDisk& diskFace, const std::string& texName) const;

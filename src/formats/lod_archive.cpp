@@ -174,36 +174,18 @@ std::optional<std::vector<uint8_t>> LODArchive::extractFile(const std::string& f
         return std::nullopt;
     }
 
-    const DataEntry* target = nullptr;
-    for (const auto& entry : dataEntries)
-    {
-        if (entry.name.size() != filename.size())
-        {
-            continue;
-        }
+    std::string lowerName = filename;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
 
-        bool match = true;
-        for (size_t j = 0; j < entry.name.size(); j++)
-        {
-            if (std::tolower(entry.name[j]) != std::tolower(filename[j]))
-            {
-                match = false;
-                break;
-            }
-        }
-
-        if (match)
-        {
-            target = &entry;
-            break;
-        }
-    }
-
-    if (!target)
+    auto it = nameToIndex.find(lowerName);
+    if (it == nameToIndex.end())
     {
         logger.debug(std::format("File not found in archive: {}", filename));
         return std::nullopt;
     }
+
+    const DataEntry* target = &dataEntries[it->second];
 
     if (target->dataOffset <= 0 || target->compressedSize == 0)
     {
@@ -266,7 +248,9 @@ bool LODArchive::buildDataIndex()
     }
 
     dataEntries.clear();
+    nameToIndex.clear();
     dataEntries.reserve(entries.size());
+    nameToIndex.reserve(entries.size());
 
     file.seekg(0, std::ios::end);
     std::streamoff fileSize = file.tellg();
@@ -312,7 +296,13 @@ bool LODArchive::buildDataIndex()
         std::streamoff dataOffset = static_cast<std::streamoff>(entry.offset) + 8;
         uint32_t compressedSize = (entry.size > 8) ? (entry.size - 8) : 0;
 
+        size_t index = dataEntries.size();
         dataEntries.push_back({name, compressedSize, uncompressedSize, dataOffset, flags});
+
+        std::string lowerName = name;
+        std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        nameToIndex[lowerName] = index;
     }
 
     dataIndexBuilt = !dataEntries.empty();

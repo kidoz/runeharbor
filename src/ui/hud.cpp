@@ -2,9 +2,10 @@
 #include "hud.hpp"
 
 #include <algorithm>
+#include <string>
+
 #include <cmath>
 #include <cstdio>
-#include <string>
 
 #include "../engine/map_scene.hpp"
 #include "../game/game_world.hpp"
@@ -162,19 +163,27 @@ void HUD::render(graphics::IRenderer& renderer, const graphics::DebugText& debug
         int w, h;
         // Right panel
         void* tex_r = textureLookup_("ib-r-A", w, h);
-        if (tex_r) renderer.renderTexture(tex_r, sx(476, scale, offsetX), sy(0, scale, offsetY), sw(164, scale), sh(480, scale));
+        if (tex_r)
+            renderer.renderTexture(tex_r, sx(476, scale, offsetX), sy(0, scale, offsetY),
+                                   sw(164, scale), sh(480, scale));
 
         // Bottom panel
         void* tex_b = textureLookup_("ib-b-A", w, h);
-        if (tex_b) renderer.renderTexture(tex_b, sx(0, scale, offsetX), sy(359, scale, offsetY), sw(476, scale), sh(121, scale));
+        if (tex_b)
+            renderer.renderTexture(tex_b, sx(0, scale, offsetX), sy(359, scale, offsetY),
+                                   sw(476, scale), sh(121, scale));
 
         // Top border
         void* tex_t = textureLookup_("ib-t-A", w, h);
-        if (tex_t) renderer.renderTexture(tex_t, sx(0, scale, offsetX), sy(0, scale, offsetY), sw(476, scale), sh(8, scale));
+        if (tex_t)
+            renderer.renderTexture(tex_t, sx(0, scale, offsetX), sy(0, scale, offsetY),
+                                   sw(476, scale), sh(8, scale));
 
         // Left border
         void* tex_l = textureLookup_("ib-l-A", w, h);
-        if (tex_l) renderer.renderTexture(tex_l, sx(0, scale, offsetX), sy(8, scale, offsetY), sw(8, scale), sh(351, scale));
+        if (tex_l)
+            renderer.renderTexture(tex_l, sx(0, scale, offsetX), sy(8, scale, offsetY),
+                                   sw(8, scale), sh(351, scale));
     }
 
     renderPartyBar(renderer, debugText, scale, offsetX, offsetY);
@@ -203,15 +212,28 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
         {
             int w, h;
             int frameIndex = 1; // Default (Healthy)
-            
-            if (ch.hasCondition(game::ConditionIndex::Eradicated) || ch.hasCondition(game::ConditionIndex::Stoned)) {
+
+            if (ch.hasCondition(game::ConditionIndex::Eradicated) ||
+                ch.hasCondition(game::ConditionIndex::Stoned))
+            {
                 frameIndex = 56; // Eradicated / Stoned / Special dead
-            } else if (ch.hasCondition(game::ConditionIndex::Dead)) {
+            }
+            else if (ch.hasCondition(game::ConditionIndex::Dead))
+            {
                 frameIndex = 55; // Dead
-            } else if (ch.hasCondition(game::ConditionIndex::Asleep) || ch.hasCondition(game::ConditionIndex::Unconscious)) {
+            }
+            else if (ch.hasCondition(game::ConditionIndex::Asleep) ||
+                     ch.hasCondition(game::ConditionIndex::Unconscious))
+            {
                 frameIndex = 54; // Unconscious / Asleep (Approximate)
-            } else if (ch.hasCondition(game::ConditionIndex::Poison1) || ch.hasCondition(game::ConditionIndex::Poison2) || ch.hasCondition(game::ConditionIndex::Poison3) ||
-                       ch.hasCondition(game::ConditionIndex::Disease1) || ch.hasCondition(game::ConditionIndex::Disease2) || ch.hasCondition(game::ConditionIndex::Disease3)) {
+            }
+            else if (ch.hasCondition(game::ConditionIndex::Poison1) ||
+                     ch.hasCondition(game::ConditionIndex::Poison2) ||
+                     ch.hasCondition(game::ConditionIndex::Poison3) ||
+                     ch.hasCondition(game::ConditionIndex::Disease1) ||
+                     ch.hasCondition(game::ConditionIndex::Disease2) ||
+                     ch.hasCondition(game::ConditionIndex::Disease3))
+            {
                 frameIndex = 47; // Sick / Poisoned (Approximate)
             }
 
@@ -219,9 +241,10 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
             std::snprintf(buf, sizeof(buf), "pc%02d-%02d", ch.faceId + 1, frameIndex);
             std::string texName(buf);
             portraitTex = textureLookup_(texName, w, h);
-            
+
             // Fallback to base name if specific frame not found
-            if (!portraitTex) {
+            if (!portraitTex)
+            {
                 std::snprintf(buf, sizeof(buf), "pc%02d", ch.faceId + 1);
                 portraitTex = textureLookup_(buf, w, h);
             }
@@ -229,7 +252,9 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
 
         if (portraitTex)
         {
-            renderer.renderTexture(portraitTex, sx(baseX, scale, offsetX), sy(kPartyBarY + 14, scale, offsetY), sw(kPortraitW, scale), sh(kPortraitH, scale));
+            renderer.renderTexture(portraitTex, sx(baseX, scale, offsetX),
+                                   sy(kPartyBarY + 14, scale, offsetY), sw(kPortraitW, scale),
+                                   sh(kPortraitH, scale));
         }
         else
         {
@@ -278,7 +303,8 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
                 hpG = 160;
                 hpB = 20;
             }
-            renderer.drawFilledRect(hpBarX, hpBarY + (hpBarH - hpFill), hpBarW, hpFill, hpR, hpG, hpB, 220);
+            renderer.drawFilledRect(hpBarX, hpBarY + (hpBarH - hpFill), hpBarW, hpFill, hpR, hpG,
+                                    hpB, 220);
         }
         renderer.drawRect(hpBarX, hpBarY, hpBarW, hpBarH, 80, 80, 80, 255);
 
@@ -293,15 +319,16 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
         if (ch.maxSpellPoints > 0)
         {
             int spFill = std::clamp(ch.spellPoints * spBarH / ch.maxSpellPoints, 0, spBarH);
-            renderer.drawFilledRect(spBarX, spBarY + (spBarH - spFill), spBarW, spFill, 40, 80, 220, 220);
+            renderer.drawFilledRect(spBarX, spBarY + (spBarH - spFill), spBarW, spFill, 40, 80, 220,
+                                    220);
         }
         renderer.drawRect(hpBarX, spBarY, hpBarW, hpBarH, 80, 80, 80, 255);
 
         // HP/SP numbers
         if (sdl)
         {
-            // Simple hover/overlay text (original game shows this on hover in the status bar, we show it overlaid or nearby for now)
-            // Just putting them near the bars to avoid overlap
+            // Simple hover/overlay text (original game shows this on hover in the status bar, we
+            // show it overlaid or nearby for now) Just putting them near the bars to avoid overlap
             std::string hpStr = std::to_string(ch.hitPoints);
             std::string spStr = std::to_string(ch.spellPoints);
             debugText.drawText(sdl, hpBarX - 4, hpBarY + hpBarH + 2, 1, 255, 100, 100, hpStr);

@@ -517,10 +517,10 @@ collectMapEventCandidates(const formats::BLVMapData& blvData, const formats::ODM
                     continue;
                 }
                 const auto& v = building.vertices[vi];
-                centroid =
-                    centroid + gameplayToRenderPosition(static_cast<float>(v.x + building.worldX),
-                                                        static_cast<float>(v.y + building.worldY),
-                                                        static_cast<float>(v.z + building.worldZ));
+                // BSP model vertices are in absolute world coordinates
+                centroid = centroid + gameplayToRenderPosition(static_cast<float>(v.x),
+                                                               static_cast<float>(v.y),
+                                                               static_cast<float>(v.z));
                 valid++;
             }
             if (valid <= 0)

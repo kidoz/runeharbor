@@ -21,7 +21,7 @@ setup-asan:
 
 # Build the project
 build:
-    ninja -C {{build_dir}}
+    ninja -C {{build_dir}} src/runeharbor tests/runeharbor_tests
 
 # Run the engine
 run: build

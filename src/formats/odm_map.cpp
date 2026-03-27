@@ -6,6 +6,7 @@
 #include <limits>
 #include <optional>
 
+#include <cstdio>
 #include <cstring>
 
 namespace runeharbor::formats
@@ -19,6 +20,110 @@ constexpr size_t kGridSize = ODMMapData::TERRAIN_SIZE * ODMMapData::TERRAIN_SIZE
 constexpr size_t kTerrainBytesCompact = kGridSize * 3;                          // u8 + u8 + u8
 constexpr size_t kTerrainBytesWide = kGridSize * 2 + kGridSize * 4 + kGridSize; // u16 + u32 + u8
 constexpr size_t kTerrainCmapBytes = 0x20000 + 0x10000;
+
+// MM7 tileset ID → texture group name prefix.
+// These are the standard tilesets used across all outdoor maps.
+// Each tileset provides a base texture; numbered variants (e.g. grastyl, gras02, gras03)
+// are used for variety within a group.
+const char* tilesetGroupName(uint8_t tilesetId)
+{
+    switch (tilesetId)
+    {
+    case 0:
+        return "dirttyl";
+    case 1:
+        return "grastyl";
+    case 2:
+        return "snwtyl";
+    case 3:
+        return "sndtyl";
+    case 4:
+        return "voltyl";
+    case 5:
+        return "crktyl";
+    case 6:
+        return "swmtyl";
+    case 7:
+        return "watertyl";
+    case 8:
+        return "trtyl";
+    case 9:
+        return "crktyl";
+    default:
+        return "dirttyl";
+    }
+}
+
+// Build the tile table: for each possible tileIndex (0-255), resolve which tileset
+// group it belongs to and produce the texture name.
+// MM7 tile layout: each of the 4 tilesets owns a contiguous range of ~22 tile IDs.
+// Tile 0 = first tileset base, tiles 1-21 = first tileset variants, etc.
+// Special: tile IDs >= 90 are "road", "water overlay", etc.
+std::vector<std::string> buildTileTextureTable(const std::array<uint8_t, 4>& tilesetIds)
+{
+    // Tiles per tileset group (MM7 standard)
+    constexpr int kTilesPerGroup = 22;
+    constexpr int kNumGroups = 4;
+    constexpr int kGroupedTiles = kNumGroups * kTilesPerGroup; // 88
+
+    std::vector<std::string> table(256);
+
+    for (int group = 0; group < kNumGroups; group++)
+    {
+        const char* baseName = tilesetGroupName(tilesetIds[static_cast<size_t>(group)]);
+        int startId = group * kTilesPerGroup;
+
+        for (int t = 0; t < kTilesPerGroup; t++)
+        {
+            int tileId = startId + t;
+            if (t == 0)
+            {
+                // Base tile: use the full "tyl" name (e.g. "dirttyl")
+                table[static_cast<size_t>(tileId)] = baseName;
+            }
+            else
+            {
+                // Variant tiles: strip "tyl" suffix to get prefix, then:
+                //   t=1: prefix only (e.g. "dirt")
+                //   t=2: prefix + "1" (e.g. "dirt1")
+                //   t=3: prefix + "2" (e.g. "dirt2")
+                // This matches the LOD naming: DIRTtyl, DIRT, DIRT1, DIRT2, ...
+                std::string prefix(baseName);
+                if (prefix.size() >= 3 && prefix.substr(prefix.size() - 3) == "tyl")
+                {
+                    prefix = prefix.substr(0, prefix.size() - 3);
+                }
+
+                if (t == 1)
+                {
+                    table[static_cast<size_t>(tileId)] = prefix;
+                }
+                else
+                {
+                    table[static_cast<size_t>(tileId)] = prefix + std::to_string(t - 1);
+                }
+            }
+        }
+    }
+
+    // Tiles 88-89: transition tiles (use first tileset base as fallback)
+    for (int t = kGroupedTiles; t < kGroupedTiles + 2 && t < 256; t++)
+    {
+        table[static_cast<size_t>(t)] = tilesetGroupName(tilesetIds[0]);
+    }
+
+    // Tiles 90+: road tiles. Use "pending" texture for road overlays.
+    // 90-107 = road group 1, 108-125 = road group 2, etc.
+    for (int t = 90; t < 256; t++)
+    {
+        if (table[static_cast<size_t>(t)].empty())
+        {
+            table[static_cast<size_t>(t)] = tilesetGroupName(tilesetIds[0]);
+        }
+    }
+
+    return table;
+}
 
 bool looksLikeTerrainNormalsSection(const std::vector<uint8_t>& data, size_t offset)
 {
@@ -197,6 +302,11 @@ bool ODMMap::parse(const std::vector<uint8_t>& data, ProgressCallback progress)
 
     reportProgress(0.85f);
 
+    if (!parseDecorations(data, offset))
+    {
+        logger.debug("No decorations found or parse failed");
+    }
+
     // Skip sprites, IDList, OMAP sections to get to spawns
     // These sections have variable sizes and are not yet parsed
     // Spawn parsing is best-effort from current offset
@@ -222,8 +332,19 @@ bool ODMMap::parseHeader(const std::vector<uint8_t>& data)
 
     mapData.levelName = extractString(header->levelName, sizeof(header->levelName));
 
-    logger.debug(std::format("ODM header: name='{}'",
-                             mapData.levelName.empty() ? "(none)" : mapData.levelName));
+    // Extract tileset IDs: 4 groups × 4 bytes each; byte 0 of each group is the set ID
+    for (int i = 0; i < 4; i++)
+    {
+        mapData.tilesetIds[static_cast<size_t>(i)] = header->tilesets[i * 4];
+    }
+
+    // Build the full tile texture lookup table from the 4 tileset IDs
+    mapData.tileTextures = buildTileTextureTable(mapData.tilesetIds);
+
+    logger.debug(std::format("ODM header: name='{}', tilesets=[{},{},{},{}]",
+                             mapData.levelName.empty() ? "(none)" : mapData.levelName,
+                             mapData.tilesetIds[0], mapData.tilesetIds[1], mapData.tilesetIds[2],
+                             mapData.tilesetIds[3]));
 
     return true;
 }
@@ -629,6 +750,69 @@ ParsedFace ODMMap::convertFace(const ODMFaceOnDisk& df, const std::string& texNa
     face.maxZ = df.bboxMaxZ;
 
     return face;
+}
+
+bool ODMMap::parseDecorations(const std::vector<uint8_t>& data, size_t& offset)
+{
+    // After buildings: decoration count (u32) + decoration records (32B each) + names (32ch each)
+    if (offset + 4 > data.size())
+    {
+        return false;
+    }
+
+    uint32_t decorCount = 0;
+    std::memcpy(&decorCount, data.data() + offset, 4);
+
+    if (decorCount == 0 || decorCount > 10000)
+    {
+        return false;
+    }
+
+    constexpr size_t kDecorRecordSize = sizeof(BLVDecorationOnDisk); // 32 bytes
+    constexpr size_t kDecorNameSize = 32;
+
+    size_t recordsSize = static_cast<size_t>(decorCount) * kDecorRecordSize;
+    size_t namesSize = static_cast<size_t>(decorCount) * kDecorNameSize;
+
+    if (offset + 4 + recordsSize + namesSize > data.size())
+    {
+        // Try without names block (some maps may not have separate names)
+        if (offset + 4 + recordsSize > data.size())
+        {
+            return false;
+        }
+        namesSize = 0;
+    }
+
+    const uint8_t* records = data.data() + offset + 4;
+    const uint8_t* names = (namesSize > 0) ? (records + recordsSize) : nullptr;
+
+    mapData.decorations.reserve(decorCount);
+    for (uint32_t i = 0; i < decorCount; i++)
+    {
+        BLVDecorationOnDisk disk{};
+        std::memcpy(&disk, records + i * kDecorRecordSize, kDecorRecordSize);
+
+        ParsedDecoration dec;
+        dec.x = disk.x;
+        dec.y = disk.y;
+        dec.z = disk.z;
+        dec.eventId = disk.eventId;
+        dec.hidden = (disk.flags & 0x0020) != 0; // Invisible flag
+
+        if (names)
+        {
+            dec.name = extractString(reinterpret_cast<const char*>(names + i * kDecorNameSize),
+                                     kDecorNameSize);
+        }
+
+        mapData.decorations.push_back(std::move(dec));
+    }
+
+    offset += 4 + recordsSize + namesSize;
+
+    logger.debug(std::format("Parsed {} outdoor decorations", mapData.decorations.size()));
+    return true;
 }
 
 bool ODMMap::parseSpawns(const std::vector<uint8_t>& data, size_t& offset)

@@ -4,8 +4,9 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
-#include <cmath>
 #include <vector>
+
+#include <cmath>
 
 #include "math3d.hpp"
 

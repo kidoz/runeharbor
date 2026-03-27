@@ -15,8 +15,8 @@ namespace
 #pragma pack(push, 1)
 struct GameLODChunkHeader
 {
-    uint32_t unknown0;
-    uint32_t unknown1;
+    uint32_t magic;      // e.g. 0x00016741
+    uint32_t formatType; // e.g. 0x6969766d ("mvii" LE)
     uint32_t compressedSize;
     uint32_t decompressedSize;
 };
