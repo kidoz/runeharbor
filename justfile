@@ -21,7 +21,7 @@ setup-asan:
 
 # Build the project
 build:
-    ninja -C {{build_dir}} src/runeharbor tests/runeharbor_tests
+    ninja -C {{build_dir}} src/runeharbor src/runeharbor_asset_check tests/runeharbor_tests
 
 # Run the engine
 run: build
@@ -34,6 +34,10 @@ run-with-data DATA_PATH: build
 # Run with game data path and map
 run-map DATA_PATH MAP_NAME: build
     ./{{build_dir}}/src/runeharbor --data "{{DATA_PATH}}" --map "{{MAP_NAME}}"
+
+# Validate MM7 assets and write a JSON coverage report
+asset-check DATA_PATH REPORT="tmp/mm7_asset_report.json": build
+    ./{{build_dir}}/src/runeharbor_asset_check "{{DATA_PATH}}" --json "{{REPORT}}"
 
 # ============================================================================
 # LOD Archive Tools
