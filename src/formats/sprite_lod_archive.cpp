@@ -99,34 +99,9 @@ bool SpriteLODArchive::readDirectory()
     constexpr std::streamoff directoryOffset = 0x100;
     file.seekg(directoryOffset, std::ios::beg);
 
-    // First entry is metadata (like "sprites08")
-    // Format: [name:12][unknown:4][dirStart:4][unknown:4][zero:4][entryCount:4]
-    SpriteLODDirectoryEntry metaEntry;
-    file.read(reinterpret_cast<char*>(&metaEntry), sizeof(SpriteLODDirectoryEntry));
-
-    if (!file.good())
+    while (file.good())
     {
-        logger.error("Failed to read sprite directory metadata");
-        return false;
-    }
-
-    logger.debug(std::format("Sprite archive metadata: {}", buildFilename(metaEntry)));
-
-    // Entry count is in the last 4 bytes of the metadata entry (reserved[1])
-    uint32_t entryCount = metaEntry.reserved[1];
-    logger.debug(std::format("Expected {} sprite entries", entryCount));
-
-    if (entryCount == 0 || entryCount > 100000)
-    {
-        logger.warning(std::format("Invalid entry count {}, falling back to scan", entryCount));
-        entryCount = 0; // Will scan until non-text
-    }
-
-    // Read directory entries
-    entries.reserve(entryCount > 0 ? entryCount : 10000);
-
-    for (uint32_t i = 0; i < (entryCount > 0 ? entryCount : 100000); i++)
-    {
+        std::streamoff entryPos = file.tellg();
         SpriteLODDirectoryEntry entry;
         file.read(reinterpret_cast<char*>(&entry), sizeof(SpriteLODDirectoryEntry));
 
@@ -135,31 +110,30 @@ bool SpriteLODArchive::readDirectory()
             break;
         }
 
-        // If no entry count, check for end of directory
-        if (entryCount == 0)
+        if (entry.name[0] == '\0')
         {
-            if (entry.name[0] == '\0' || (static_cast<unsigned char>(entry.name[0]) < 0x20 ||
-                                          static_cast<unsigned char>(entry.name[0]) > 0x7E))
-            {
-                break;
-            }
+            dataSectionStart = entryPos + 8;
+            logger.debug(std::format("Sprite directory ends at 0x{:X}, data starts at 0x{:X}",
+                                     static_cast<uint64_t>(entryPos),
+                                     static_cast<uint64_t>(dataSectionStart)));
+            break;
         }
 
         entries.push_back(entry);
     }
 
-    // Data section starts after all entries
-    dataSectionStart = directoryOffset + sizeof(SpriteLODDirectoryEntry) +
-                       entries.size() * sizeof(SpriteLODDirectoryEntry);
-
-    logger.debug(std::format("Read {} sprite directory entries, data starts at 0x{:X}",
-                             entries.size(), static_cast<uint64_t>(dataSectionStart)));
-
-    if (entries.empty())
+    if (entries.size() <= 1)
     {
         logger.error("No sprites found in archive directory");
         return false;
     }
+
+    // First entry is the archive container metadata (for example "sprites08"). Its offset is the
+    // delta added to subsequent entry offsets to get an absolute file position.
+    offsetDelta = static_cast<std::streamoff>(entries.front().offset);
+    logger.debug(std::format("Sprite archive metadata: {}, offset delta 0x{:X}",
+                             buildFilename(entries.front()), static_cast<uint64_t>(offsetDelta)));
+    logger.debug(std::format("Read {} sprite directory entries", entries.size()));
 
     return true;
 }
@@ -167,7 +141,7 @@ bool SpriteLODArchive::readDirectory()
 std::string SpriteLODArchive::buildFilename(const SpriteLODDirectoryEntry& entry) const
 {
     std::string name;
-    for (int i = 0; i < 12 && entry.name[i] != '\0'; i++)
+    for (int i = 0; i < 16 && entry.name[i] != '\0'; i++)
     {
         name += entry.name[i];
     }
@@ -189,15 +163,7 @@ std::vector<std::string> SpriteLODArchive::listFiles() const
 
 std::streamoff SpriteLODArchive::calculateDataOffset(size_t entryIndex) const
 {
-    // Sprites are stored sequentially in directory order starting at dataSectionStart
-    std::streamoff offset = dataSectionStart;
-
-    for (size_t i = 0; i < entryIndex; i++)
-    {
-        offset += entries[i].size;
-    }
-
-    return offset;
+    return offsetDelta + static_cast<std::streamoff>(entries[entryIndex].offset);
 }
 
 std::optional<std::vector<uint8_t>> SpriteLODArchive::extractFile(const std::string& filename)
@@ -208,10 +174,10 @@ std::optional<std::vector<uint8_t>> SpriteLODArchive::extractFile(const std::str
         return std::nullopt;
     }
 
-    // Find entry index (case-insensitive)
+    // Find entry index (case-insensitive). Entry 0 is archive metadata, not a sprite.
     size_t entryIndex = 0;
     bool found = false;
-    for (size_t i = 0; i < entries.size(); i++)
+    for (size_t i = 1; i < entries.size(); i++)
     {
         std::string entryName = buildFilename(entries[i]);
 
@@ -238,7 +204,7 @@ std::optional<std::vector<uint8_t>> SpriteLODArchive::extractFile(const std::str
 
     if (!found)
     {
-        logger.error(std::format("Sprite not found: {}", filename));
+        logger.debug(std::format("Sprite not found: {}", filename));
         return std::nullopt;
     }
 
@@ -385,10 +351,10 @@ std::optional<SpriteFileHeader> SpriteLODArchive::getFileInfo(const std::string&
         return std::nullopt;
     }
 
-    // Find entry index
+    // Find entry index. Entry 0 is archive metadata, not a sprite.
     size_t entryIndex = 0;
     bool found = false;
-    for (size_t i = 0; i < entries.size(); i++)
+    for (size_t i = 1; i < entries.size(); i++)
     {
         std::string entryName = buildFilename(entries[i]);
 

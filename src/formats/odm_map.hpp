@@ -171,9 +171,10 @@ struct ODMSpawnPoint
 struct ParsedBuilding
 {
     std::string name;
-    std::vector<ODMVertex3D> vertices; // Model-local vertices (int32)
-    std::vector<ParsedFace> faces;     // Faces referencing local vertices
-    int32_t worldX = 0;                // World position
+    std::vector<ODMVertex3D>
+        vertices;                  // Absolute world vertices (int32). worldX/Y/Z is anchor only.
+    std::vector<ParsedFace> faces; // Faces referencing vertices by index
+    int32_t worldX = 0;            // World position
     int32_t worldY = 0;
     int32_t worldZ = 0;
 

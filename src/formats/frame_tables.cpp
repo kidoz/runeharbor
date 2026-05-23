@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -161,10 +162,12 @@ bool SpriteFrameTable::parse(const std::vector<uint8_t>& data)
         frame.animDuration = raw.animDuration;
         frame.animLength = raw.animLength;
         frame.animOffset = raw.animOffset;
-        frame.lightRadius = raw.lightRadius;
-        frame.lightR = raw.lightR;
-        frame.lightG = raw.lightG;
-        frame.lightB = raw.lightB;
+        frame.lightRadius = static_cast<int16_t>(
+            std::clamp(raw.lightRadius, static_cast<int32_t>(std::numeric_limits<int16_t>::min()),
+                       static_cast<int32_t>(std::numeric_limits<int16_t>::max())));
+        frame.lightR = 0;
+        frame.lightG = 0;
+        frame.lightB = 0;
         entries_.push_back(std::move(frame));
     }
 

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <format>
+#include <string_view>
 
 #include <cctype>
 #include <cstring>
@@ -32,6 +33,47 @@ bool isPlausibleImageHeader(const ImageFileHeader& header, uint32_t entrySize)
     }
 
     return true;
+}
+
+bool isPaletteName(std::string_view filename)
+{
+    if (filename.size() < 3)
+    {
+        return false;
+    }
+
+    return std::tolower(static_cast<unsigned char>(filename[0])) == 'p' &&
+           std::tolower(static_cast<unsigned char>(filename[1])) == 'a' &&
+           std::tolower(static_cast<unsigned char>(filename[2])) == 'l';
+}
+
+bool isRawPaletteRecord(std::string_view filename, const ImageFileHeader& header,
+                        uint32_t entrySize)
+{
+    return isPaletteName(filename) && entrySize >= sizeof(ImageFileHeader) + 768 &&
+           header.dataSize == 0 && header.compressedSize == 0 && header.width == 0 &&
+           header.height == 0 && header.decompressedSize == 0;
+}
+
+std::optional<std::vector<uint8_t>> readRawPaletteRecord(std::ifstream& file,
+                                                         std::streamoff actualOffset)
+{
+    file.clear();
+    file.seekg(actualOffset + static_cast<std::streamoff>(sizeof(ImageFileHeader)), std::ios::beg);
+    if (!file.good())
+    {
+        return std::nullopt;
+    }
+
+    std::vector<uint8_t> palette(768);
+    file.read(reinterpret_cast<char*>(palette.data()),
+              static_cast<std::streamsize>(palette.size()));
+    if (!file.good())
+    {
+        return std::nullopt;
+    }
+
+    return palette;
 }
 } // namespace
 
@@ -279,41 +321,11 @@ std::streamoff ImageLODArchive::calculateDataOffset(const ImageLODDirectoryEntry
 std::optional<std::vector<uint8_t>>
 ImageLODArchive::extractExternal(const ImageLODDirectoryEntry& entry, const std::string& filename)
 {
-    // Mixed BITMAPS.LOD "External" entries often store raw indexed payload directly at
-    // entry.offset, without a 48-byte ImageFileHeader.
-    if (!externalOnly)
-    {
-        const std::streamoff rawOffset =
-            static_cast<std::streamoff>(entry.offset) + static_cast<std::streamoff>(offsetDelta);
-        file.clear();
-        file.seekg(rawOffset, std::ios::beg);
-        if (!file.good())
-        {
-            logger.error(std::format("Failed to seek to 0x{:X} for '{}'",
-                                     static_cast<uint64_t>(rawOffset), filename));
-            return std::nullopt;
-        }
-
-        std::vector<uint8_t> raw(entry.size);
-        file.read(reinterpret_cast<char*>(raw.data()), static_cast<std::streamsize>(raw.size()));
-        if (!file.good())
-        {
-            logger.error(std::format("Failed to read {} bytes for '{}'", raw.size(), filename));
-            return std::nullopt;
-        }
-
-        logger.debug(
-            std::format("Extracted '{}': {} bytes (mixed-external raw)", filename, raw.size()));
-        return raw;
-    }
-
-    // External-only archive format (ICONS.LOD):
-    // Actual position = entry.offset + offsetDelta
+    // External entries in both BITMAPS.LOD and ICONS.LOD use the same data position rule:
+    // actual position = 0x120 + entry.offset.
     // Data layout: [48-byte ImageFileHeader][zlib compressed pixel data]
-    // The ImageFileHeader contains name, dimensions, decompressedSize at offset 40.
-
-    std::streamoff actualOffset =
-        static_cast<std::streamoff>(entry.offset) + static_cast<std::streamoff>(offsetDelta);
+    // followed by an optional embedded 768-byte palette.
+    const std::streamoff actualOffset = calculateDataOffset(entry);
 
     file.clear();
     file.seekg(actualOffset, std::ios::beg);
@@ -334,6 +346,11 @@ ImageLODArchive::extractExternal(const ImageLODDirectoryEntry& entry, const std:
         return std::nullopt;
     }
 
+    if (isRawPaletteRecord(filename, imgHeader, entry.size))
+    {
+        return readRawPaletteRecord(file, actualOffset);
+    }
+
     if (!isPlausibleImageHeader(imgHeader, entry.size))
     {
         logger.error(std::format("Invalid image header for '{}'", filename));
@@ -347,6 +364,10 @@ ImageLODArchive::extractExternal(const ImageLODDirectoryEntry& entry, const std:
     }
 
     uint32_t compressedSize = entry.size - sizeof(ImageFileHeader);
+    if (imgHeader.compressedSize > 0 && imgHeader.compressedSize <= compressedSize)
+    {
+        compressedSize = imgHeader.compressedSize;
+    }
     std::vector<uint8_t> compressed(compressedSize);
     file.read(reinterpret_cast<char*>(compressed.data()), compressedSize);
 
@@ -423,6 +444,11 @@ ImageLODArchive::extractCustom(const ImageLODDirectoryEntry& entry, const std::s
     headerName = headerName.substr(0, headerName.find('\0'));
     logger.debug(std::format("Image header: name='{}', size={}x{}, decompSize={}", headerName,
                              imgHeader.width, imgHeader.height, imgHeader.decompressedSize));
+
+    if (isRawPaletteRecord(filename, imgHeader, entry.size))
+    {
+        return readRawPaletteRecord(file, dataOffset);
+    }
 
     uint32_t compressedSize = entry.size - sizeof(ImageFileHeader);
     std::vector<uint8_t> compressed(compressedSize);
@@ -609,12 +635,7 @@ std::optional<std::vector<uint8_t>> ImageLODArchive::extractPalette(const std::s
     ImageEntryType entryType = detectEntryType(*targetEntry);
     if (externalOnly || entryType == ImageEntryType::ExternalFormat)
     {
-        if (!externalOnly)
-        {
-            return std::nullopt;
-        }
-        actualOffset = static_cast<std::streamoff>(targetEntry->offset) +
-                       static_cast<std::streamoff>(offsetDelta);
+        actualOffset = calculateDataOffset(*targetEntry);
     }
     else
     {
@@ -678,7 +699,7 @@ bool ImageLODArchive::resolveEntryNames()
     {
         std::string name = buildFilename(i);
         resolvedNames.push_back(name);
-        
+
         std::transform(name.begin(), name.end(), name.begin(),
                        [](unsigned char c) { return std::tolower(c); });
         nameToIndex[name] = i;

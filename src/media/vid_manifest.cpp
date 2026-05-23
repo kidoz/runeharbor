@@ -2,6 +2,7 @@
 #include "vid_manifest.hpp"
 
 #include <algorithm>
+#include <cstdint>
 
 #include <cctype>
 #include <fstream>
@@ -47,29 +48,46 @@ bool VidManifest::load(const std::filesystem::path& path)
         return false;
     }
 
-    std::vector<uint8_t> data((std::istreambuf_iterator<char>(file)),
-                              std::istreambuf_iterator<char>());
-
-    std::string current;
-    for (size_t i = 0; i < data.size(); i++)
+    uint32_t count = 0;
+    file.read(reinterpret_cast<char*>(&count), sizeof(count));
+    if (!file || count == 0 || count > 10000)
     {
-        uint8_t c = data[i];
-        if (isPrintable(c))
-        {
-            current.push_back(static_cast<char>(c));
-            continue;
-        }
-
-        if (current.size() >= 4 && isVideoName(current))
-        {
-            clipRefs.push_back({current});
-        }
-        current.clear();
+        return false;
     }
 
-    if (current.size() >= 4 && isVideoName(current))
+    clipRefs.reserve(count);
+    for (uint32_t i = 0; i < count; i++)
     {
-        clipRefs.push_back({current});
+        char nameBuffer[40] = {};
+        uint32_t offset = 0;
+        file.read(nameBuffer, sizeof(nameBuffer));
+        file.read(reinterpret_cast<char*>(&offset), sizeof(offset));
+        if (!file)
+        {
+            clipRefs.clear();
+            return false;
+        }
+
+        std::string name;
+        for (char c : nameBuffer)
+        {
+            if (c == '\0')
+            {
+                break;
+            }
+            const auto byte = static_cast<uint8_t>(c);
+            if (!isPrintable(byte))
+            {
+                name.clear();
+                break;
+            }
+            name.push_back(c);
+        }
+
+        if (isVideoName(name))
+        {
+            clipRefs.push_back({std::move(name)});
+        }
     }
 
     if (clipRefs.empty())

@@ -14,20 +14,17 @@ namespace runeharbor::formats
 // Raw on-disk layout: 60 bytes per entry
 struct SpriteFrameEntryRaw
 {
-    char iconName[12];    // 0x00
-    char textureName[12]; // 0x0C
-    int16_t paletteId;    // 0x18
-    int16_t paletteIndex; // 0x1A
-    uint32_t attributes;  // 0x1C
-    int16_t animDuration; // 0x20
-    int16_t animLength;   // 0x22
-    int16_t animOffset;   // 0x24
-    int16_t lightRadius;  // 0x26
-    uint8_t lightR;       // 0x28
-    uint8_t lightG;       // 0x29
-    uint8_t lightB;       // 0x2A
-    uint8_t pad;          // 0x2B
-    uint8_t reserved[16]; // 0x2C
+    uint32_t frameFlags;  // 0x00
+    char iconName[12];    // 0x04
+    char textureName[12]; // 0x10
+    uint8_t reserved[16]; // 0x1C
+    int16_t animDuration; // 0x2C
+    int16_t animLength;   // 0x2E
+    int16_t animOffset;   // 0x30
+    uint16_t attributes;  // 0x32
+    int32_t lightRadius;  // 0x34
+    int16_t paletteId;    // 0x38
+    int16_t paletteIndex; // 0x3A
 };
 static_assert(sizeof(SpriteFrameEntryRaw) == 60, "SpriteFrameEntryRaw must be 60 bytes");
 

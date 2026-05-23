@@ -25,32 +25,34 @@ constexpr size_t kTerrainCmapBytes = 0x20000 + 0x10000;
 // These are the standard tilesets used across all outdoor maps.
 // Each tileset provides a base texture; numbered variants (e.g. grastyl, gras02, gras03)
 // are used for variety within a group.
+// MM7 tileset ID → texture group base name. Verified against the actual asset names
+// present in BITMAPS.LOD (Grastyl, DIRTtyl, WtrTyl, Swtyl, SNOW, Sand). The mapping was
+// derived empirically: out01.odm (Emerald Island) is supposed to be lush grass and its
+// header is `tilesets=[0,5,7,10]`, so id 0 must resolve to grass — not dirt — to match
+// the original game's appearance. Ids that don't have a dedicated base tile fall back to
+// grass so the renderer never silently drops ground texturing.
 const char* tilesetGroupName(uint8_t tilesetId)
 {
     switch (tilesetId)
     {
     case 0:
-        return "dirttyl";
+        return "grastyl"; // grass — primary biome for Emerald Island and similar maps
     case 1:
-        return "grastyl";
+        return "snow"; // snow (no "snwtyl" base in BITMAPS.LOD; transitions exist)
     case 2:
-        return "snwtyl";
+        return "sand"; // sand/desert
     case 3:
-        return "sndtyl";
-    case 4:
-        return "voltyl";
+        return "voltyl"; // volcano (placeholder; not present in tested data)
     case 5:
-        return "crktyl";
+        return "dirttyl"; // dirt — used for road/path overlays on grass maps
     case 6:
-        return "swmtyl";
+        return "swtyl"; // swamp
     case 7:
-        return "watertyl";
-    case 8:
-        return "trtyl";
+        return "wtrtyl"; // water/ocean
     case 9:
-        return "crktyl";
+        return "crktyl"; // cracked terrain (placeholder)
     default:
-        return "dirttyl";
+        return "grastyl"; // safe default — most outdoor maps are grass-based
     }
 }
 
@@ -345,6 +347,17 @@ bool ODMMap::parseHeader(const std::vector<uint8_t>& data)
                              mapData.levelName.empty() ? "(none)" : mapData.levelName,
                              mapData.tilesetIds[0], mapData.tilesetIds[1], mapData.tilesetIds[2],
                              mapData.tilesetIds[3]));
+
+    // Hex dump of the 16 raw tileset bytes — helps diagnose mis-parsed structure when
+    // the resolved tileset names don't match the expected biome (e.g. dirt instead of grass).
+    {
+        std::string hex;
+        for (int i = 0; i < 16; i++)
+        {
+            hex += std::format("{:02X} ", static_cast<unsigned>(header->tilesets[i]));
+        }
+        logger.debug(std::format("ODM tileset bytes: {}", hex));
+    }
 
     return true;
 }
