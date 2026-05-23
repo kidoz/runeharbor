@@ -1594,6 +1594,8 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
         return false;
     party.setWorldPosition(px, py, pz);
     party.setOrientation(yaw, pitch);
+    fprintf(stderr, "[SAVE-LOAD] map='%s' pos=(%.1f,%.1f,%.1f) yaw=%.1f pitch=%.1f\n",
+            mapName.c_str(), px, py, pz, yaw, pitch);
 
     // Game time
     uint64_t gameTime;

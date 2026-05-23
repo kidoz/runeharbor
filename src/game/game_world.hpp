@@ -17,8 +17,6 @@ namespace runeharbor::game
 // MM7 game calendar: time stored as totalTicks (128 ticks per second)
 struct GameCalendar
 {
-    int64_t totalTicks = 0;
-
     // Starting date: 1st of January, year 1168 (MM7 default)
     static constexpr int kStartYear = 1168;
     static constexpr int64_t kTicksPerSecond = 128;
@@ -34,6 +32,9 @@ struct GameCalendar
     static constexpr int kDawnEndHour = 6;
     static constexpr int kDuskStartHour = 20;
     static constexpr int kDuskEndHour = 21;
+    static constexpr int kDefaultStartHour = 9;
+
+    int64_t totalTicks = kDefaultStartHour * kTicksPerHour;
 
     int dayOfWeek() const
     {

@@ -139,7 +139,8 @@ void Party::initDefault()
     food_ = 7;
     alignment_ = Alignment::Neutral;
     reputation_ = 0;
-    gameTime_ = 0;
+    constexpr uint64_t kDefaultStartTicks = 9ull * 128ull * 3600ull;
+    gameTime_ = kDefaultStartTicks;
     activeMemberIndex_ = 0;
 
     // Emerald Island starting position (MM7 default new-game spawn)

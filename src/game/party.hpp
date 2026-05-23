@@ -61,6 +61,10 @@ class Party
     float worldX() const { return worldX_; }
     float worldY() const { return worldY_; }
     float worldZ() const { return worldZ_; }
+    float velocityX() const { return velocityX_; }
+    void setVelocityX(float vx) { velocityX_ = vx; }
+    float velocityY() const { return velocityY_; }
+    void setVelocityY(float vy) { velocityY_ = vy; }
     float velocityZ() const { return velocityZ_; }
     void setVelocityZ(float vz) { velocityZ_ = vz; }
     void setWorldPosition(float x, float y, float z);
@@ -98,6 +102,8 @@ class Party
     float worldX_ = 0.0f;
     float worldY_ = 0.0f;
     float worldZ_ = 0.0f;
+    float velocityX_ = 0.0f;
+    float velocityY_ = 0.0f;
     float velocityZ_ = 0.0f;
     float yaw_ = 0.0f;
     float pitch_ = 0.0f;
