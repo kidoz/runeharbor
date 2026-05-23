@@ -257,6 +257,41 @@ TEST_CASE("SkillValue", "[game][character]")
     }
 }
 
+TEST_CASE("Character skill name mapping", "[game][character]")
+{
+    SECTION("maps creation display names to skill ids")
+    {
+        REQUIRE(skillIdFromName("Sword") == SkillId::Sword);
+        REQUIRE(skillIdFromName("Leather Armor") == SkillId::Leather);
+        REQUIRE(skillIdFromName("Spirit Magic") == SkillId::Spirit);
+        REQUIRE(skillIdFromName("Body Bld") == SkillId::BodyBuilding);
+        REQUIRE(skillIdFromName("Mon. Lore") == SkillId::MonsterLore);
+    }
+
+    SECTION("syncs display skills into gameplay skill levels")
+    {
+        Character ch;
+        ch.skills = {"Mace", "Spirit Magic", "Perception"};
+
+        syncSkillLevelsFromDisplaySkills(ch);
+
+        REQUIRE(ch.skillLevels[static_cast<size_t>(SkillId::Mace)].learned());
+        REQUIRE(ch.skillLevels[static_cast<size_t>(SkillId::Spirit)].learned());
+        REQUIRE(ch.skillLevels[static_cast<size_t>(SkillId::Perception)].learned());
+        REQUIRE_FALSE(ch.skillLevels[static_cast<size_t>(SkillId::Sword)].learned());
+    }
+
+    SECTION("forgetSkill clears one skill")
+    {
+        Character ch;
+        learnSkill(ch, SkillId::Sword);
+        REQUIRE(ch.skillLevels[static_cast<size_t>(SkillId::Sword)].learned());
+
+        forgetSkill(ch, SkillId::Sword);
+        REQUIRE_FALSE(ch.skillLevels[static_cast<size_t>(SkillId::Sword)].learned());
+    }
+}
+
 TEST_CASE("baseClassIndex", "[game][character]")
 {
     REQUIRE(baseClassIndex(CharacterClass::Knight) == 0);

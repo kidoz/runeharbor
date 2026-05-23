@@ -3,7 +3,9 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace runeharbor::game
@@ -316,5 +318,11 @@ struct Character
     // Resting
     void rest(int hours);
 };
+
+std::optional<SkillId> skillIdFromName(std::string_view name);
+void learnSkill(Character& character, SkillId skillId, int level = 1,
+                SkillMastery mastery = SkillMastery::Normal);
+void forgetSkill(Character& character, SkillId skillId);
+void syncSkillLevelsFromDisplaySkills(Character& character);
 
 } // namespace runeharbor::game

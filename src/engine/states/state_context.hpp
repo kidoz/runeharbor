@@ -77,6 +77,11 @@ struct SharedGameData
     int loadingScreenIndex = 0;
     bool loadFromSave = false;
     bool quickStartReady = false;
+    bool arrivalOverrideActive = false;
+    float arrivalX = 0.0f;
+    float arrivalY = 0.0f;
+    float arrivalZ = 0.0f;
+    float arrivalYaw = 0.0f;
     bool hasPendingEventRuntimeState = false;
     std::vector<uint8_t> pendingEventRuntimeState;
     // 3D world viewport within 640x480 game coordinates ([screen] INI section).

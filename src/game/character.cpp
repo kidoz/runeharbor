@@ -2,9 +2,92 @@
 #include "character.hpp"
 
 #include <algorithm>
+#include <string>
+#include <string_view>
+
+#include <cctype>
 
 namespace runeharbor::game
 {
+
+namespace
+{
+std::string normalizeSkillName(std::string_view name)
+{
+    std::string normalized;
+    normalized.reserve(name.size());
+    for (char c : name)
+    {
+        if (std::isalnum(static_cast<unsigned char>(c)))
+        {
+            normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+        }
+    }
+    return normalized;
+}
+
+struct SkillAlias
+{
+    std::string_view name;
+    SkillId id;
+};
+
+constexpr SkillAlias kSkillAliases[] = {
+    {"staff", SkillId::Staff},
+    {"sword", SkillId::Sword},
+    {"dagger", SkillId::Dagger},
+    {"axe", SkillId::Axe},
+    {"spear", SkillId::Spear},
+    {"bow", SkillId::Bow},
+    {"mace", SkillId::Mace},
+    {"blaster", SkillId::Blaster},
+    {"shield", SkillId::Shield},
+    {"leather", SkillId::Leather},
+    {"leatherarmor", SkillId::Leather},
+    {"chain", SkillId::Chain},
+    {"chainarmor", SkillId::Chain},
+    {"plate", SkillId::Plate},
+    {"platearmor", SkillId::Plate},
+    {"fire", SkillId::Fire},
+    {"firemagic", SkillId::Fire},
+    {"air", SkillId::Air},
+    {"airmagic", SkillId::Air},
+    {"water", SkillId::Water},
+    {"watermagic", SkillId::Water},
+    {"earth", SkillId::Earth},
+    {"earthmagic", SkillId::Earth},
+    {"spirit", SkillId::Spirit},
+    {"spiritmagic", SkillId::Spirit},
+    {"mind", SkillId::Mind},
+    {"mindmagic", SkillId::Mind},
+    {"body", SkillId::Body},
+    {"bodymagic", SkillId::Body},
+    {"light", SkillId::Light},
+    {"lightmagic", SkillId::Light},
+    {"dark", SkillId::Dark},
+    {"darkmagic", SkillId::Dark},
+    {"identify", SkillId::ItemId},
+    {"itemid", SkillId::ItemId},
+    {"merchant", SkillId::Merchant},
+    {"repair", SkillId::Repair},
+    {"bodybld", SkillId::BodyBuilding},
+    {"bodybuilding", SkillId::BodyBuilding},
+    {"meditation", SkillId::Meditation},
+    {"perception", SkillId::Perception},
+    {"diplomacy", SkillId::Diplomacy},
+    {"thievery", SkillId::Thievery},
+    {"disarm", SkillId::DisarmTrap},
+    {"disarmtrap", SkillId::DisarmTrap},
+    {"dodging", SkillId::Dodging},
+    {"unarmed", SkillId::Unarmed},
+    {"monlore", SkillId::MonsterLore},
+    {"monsterlore", SkillId::MonsterLore},
+    {"armsmaster", SkillId::Armsmaster},
+    {"stealing", SkillId::Stealing},
+    {"alchemy", SkillId::Alchemy},
+    {"learning", SkillId::Learning},
+};
+} // namespace
 
 int Character::effectiveStat(int statIndex) const
 {
@@ -166,6 +249,43 @@ void Character::rest(int hours)
             std::min(maxHitPoints, hitPoints + static_cast<int>(maxHitPoints * regenFraction));
         spellPoints = std::min(maxSpellPoints,
                                spellPoints + static_cast<int>(maxSpellPoints * regenFraction));
+    }
+}
+
+std::optional<SkillId> skillIdFromName(std::string_view name)
+{
+    const std::string normalized = normalizeSkillName(name);
+    for (const SkillAlias& alias : kSkillAliases)
+    {
+        if (normalized == alias.name)
+        {
+            return alias.id;
+        }
+    }
+    return std::nullopt;
+}
+
+void learnSkill(Character& character, SkillId skillId, int level, SkillMastery mastery)
+{
+    auto& skill = character.skillLevels[static_cast<size_t>(skillId)];
+    skill.level = static_cast<uint8_t>(std::clamp(level, 1, 63));
+    skill.mastery = mastery == SkillMastery::None ? SkillMastery::Normal : mastery;
+}
+
+void forgetSkill(Character& character, SkillId skillId)
+{
+    character.skillLevels[static_cast<size_t>(skillId)] = {};
+}
+
+void syncSkillLevelsFromDisplaySkills(Character& character)
+{
+    std::fill(character.skillLevels.begin(), character.skillLevels.end(), SkillValue{});
+    for (const std::string& name : character.skills)
+    {
+        if (const auto skillId = skillIdFromName(name); skillId.has_value())
+        {
+            learnSkill(character, *skillId);
+        }
     }
 }
 

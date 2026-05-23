@@ -33,6 +33,10 @@ constexpr CharacterClass kBaseClasses[] = {
 };
 constexpr int kBaseClassCount = 9;
 
+// Original create-party class selector order: Knight/Cleric/Archer,
+// Paladin/Druid/Monk, Ranger/Sorcerer/Thief.
+constexpr int kClassGridDisplayIndices[] = {0, 6, 4, 3, 7, 2, 5, 8, 1};
+
 // Reverse: find display index from CharacterClass
 int baseClassDisplayIndex(CharacterClass c)
 {
@@ -139,6 +143,20 @@ const std::vector<std::vector<int>> kClassAvailableSkills = {
     // Sorcerer(8): Dagger, Leather, Air, Water, Earth, Light, Dark, Meditation, Learning, Alchemy
     {2, 9, 13, 14, 15, 19, 20, 25, 36, 35},
 };
+
+void syncCreationSkills(Character& ch)
+{
+    game::syncSkillLevelsFromDisplaySkills(ch);
+}
+
+void finalizeCreationCharacter(Character& ch)
+{
+    ch.baseStats = ch.stats;
+    ch.recalculateDerived();
+    ch.hitPoints = ch.maxHitPoints;
+    ch.spellPoints = ch.maxSpellPoints;
+    syncCreationSkills(ch);
+}
 
 const char* getFaceReadySound(int faceId)
 {
@@ -306,6 +324,40 @@ std::optional<GameStateId> CharacterCreationState::update()
     }
     auto& party = *ctx.shared->party;
 
+    const auto changeFace = [this](Character& ch, int delta)
+    {
+        const int oldGroup = faceGroupFromId(ch.faceId);
+        ch.faceId = (ch.faceId + delta + kPortraitCount) % kPortraitCount;
+        const int newGroup = faceGroupFromId(ch.faceId);
+        if (oldGroup != newGroup)
+        {
+            updateCharacterForFace(ch);
+        }
+    };
+
+    const auto changeClass = [this](Character& ch, int delta)
+    {
+        int displayIdx = baseClassDisplayIndex(ch.charClass);
+        displayIdx = (displayIdx + delta + kBaseClassCount) % kBaseClassCount;
+        ch.charClass = kBaseClasses[displayIdx];
+        updateSkillsForClass(ch);
+        rebuildAvailableSkills();
+    };
+
+    const auto adjustStat = [this](Character& ch, int statIdx, int delta)
+    {
+        const int groupIdx = faceGroupFromId(ch.faceId);
+        const int minVal = ch.baseStats.byIndex(statIdx) - 2;
+        const int maxVal = kFaceStatMax[groupIdx][statIdx];
+        if (delta > 0 && calculateBonusPointsRemaining() <= 0)
+        {
+            return;
+        }
+
+        int& stat = ch.stats.byIndex(statIdx);
+        stat = std::clamp(stat + delta, minVal, maxVal);
+    };
+
     // Select active character with 1-4
     int prevActive = activeCharacterIndex;
     if (ctx.isKeyPressed(SDL_SCANCODE_1))
@@ -330,11 +382,14 @@ std::optional<GameStateId> CharacterCreationState::update()
         int gameX = ctx.unscaleX(mouseState.x);
         int gameY = ctx.unscaleY(mouseState.y);
 
-        constexpr int colX[] = {10, 163, 321, 478};
-        constexpr int colWidth = 150;
+        const auto inRect = [](int x, int y, int rx, int ry, int rw, int rh)
+        { return x >= rx && x < rx + rw && y >= ry && y < ry + rh; };
+
+        constexpr int colX[] = {8, 166, 324, 482};
+        constexpr int colWidth = 153;
         for (int i = 0; i < 4; i++)
         {
-            if (gameX >= colX[i] && gameX < colX[i] + colWidth && gameY >= 30 && gameY < 420)
+            if (inRect(gameX, gameY, colX[i], 30, colWidth, 360))
             {
                 if (activeCharacterIndex != i)
                 {
@@ -347,23 +402,132 @@ std::optional<GameStateId> CharacterCreationState::update()
             }
         }
 
-        // Available skill buttons at bottom (Y=368..390, each ~60px wide)
-        if (gameY >= 368 && gameY <= 400 && !availableSkills.empty())
+        Character& ch = party[activeCharacterIndex];
+        const int panelX = colX[activeCharacterIndex];
+        const int panelCenterX = panelX + colWidth / 2;
+        bool handledPanelClick = false;
+
+        if (inRect(gameX, gameY, panelX, 120, colWidth, 22))
         {
-            constexpr int skillBtnY = 368;
-            constexpr int skillBtnW = 60;
-            constexpr int skillBtnH = 28;
-            constexpr int skillStartX = 8;
-            int skillsPerRow = (620 - skillStartX) / skillBtnW;
-            int totalSkills = static_cast<int>(availableSkills.size());
-            for (int si = 0; si < totalSkills && si < skillsPerRow; si++)
+            menuRowIndex = 0;
+            isNaming = true;
+            handledPanelClick = true;
+        }
+
+        if (!handledPanelClick && inRect(gameX, gameY, panelX + 70, 90, 78, 35))
+        {
+            menuRowIndex = 2;
+            changeClass(ch, gameX < panelX + 109 ? -1 : 1);
+            handledPanelClick = true;
+        }
+
+        if (!handledPanelClick && inRect(gameX, gameY, panelX, 35, colWidth, 82))
+        {
+            menuRowIndex = 1;
+            if (gameX < panelCenterX - 20)
             {
-                int bx = skillStartX + si * skillBtnW;
-                if (gameX >= bx && gameX < bx + skillBtnW - 2 && gameY >= skillBtnY &&
-                    gameY < skillBtnY + skillBtnH)
+                changeFace(ch, -1);
+            }
+            else if (gameX > panelCenterX + 20)
+            {
+                changeFace(ch, 1);
+            }
+            handledPanelClick = true;
+        }
+
+        constexpr int statsStartY = 169;
+        constexpr int statSpacing = 17;
+        for (int s = 0; s < 7; s++)
+        {
+            const int statY = statsStartY + s * statSpacing;
+            if (!inRect(gameX, gameY, panelX, statY - 2, colWidth, statSpacing))
+            {
+                continue;
+            }
+
+            menuRowIndex = 3 + s;
+            const int minusW = minusButton.w > 0 ? minusButton.w : 12;
+            const int minusH = minusButton.h > 0 ? minusButton.h : 12;
+            const int plusW = plusButton.w > 0 ? plusButton.w : 12;
+            const int plusH = plusButton.h > 0 ? plusButton.h : 12;
+            const int minusX = panelX + colWidth - 30 - minusW;
+            const int plusX = panelX + colWidth - 14;
+            if (inRect(gameX, gameY, minusX, statY, minusW, minusH))
+            {
+                adjustStat(ch, s, -1);
+            }
+            else if (inRect(gameX, gameY, plusX, statY, plusW, plusH))
+            {
+                adjustStat(ch, s, 1);
+            }
+            break;
+        }
+
+        // Class selector: original bottom 3x3 class grid.
+        {
+            constexpr int classGridStartX = 329;
+            constexpr int classGridY = 417;
+            constexpr int classGridColW = 57;
+            constexpr int classGridRows = 3;
+            constexpr int classGridRowH = 17;
+            for (int i = 0; i < kBaseClassCount; i++)
+            {
+                const int col = i % 3;
+                const int row = i / classGridRows;
+                const int bx = classGridStartX + col * classGridColW;
+                const int by = classGridY + row * classGridRowH;
+                if (inRect(gameX, gameY, bx, by, classGridColW - 2, classGridRowH))
+                {
+                    const int displayIdx = kClassGridDisplayIndices[i];
+                    if (ch.charClass != kBaseClasses[displayIdx])
+                    {
+                        ch.charClass = kBaseClasses[displayIdx];
+                        updateSkillsForClass(ch);
+                        rebuildAvailableSkills();
+                    }
+                    menuRowIndex = 2;
+                    break;
+                }
+            }
+        }
+
+        // Original bottom bonus buttons adjust the currently selected stat row.
+        if (menuRowIndex >= 3 && menuRowIndex <= 9)
+        {
+            const int statIdx = menuRowIndex - 3;
+            const int minusW = minusButton.w > 0 ? minusButton.w : 12;
+            const int minusH = minusButton.h > 0 ? minusButton.h : 12;
+            const int plusW = plusButton.w > 0 ? plusButton.w : 12;
+            const int plusH = plusButton.h > 0 ? plusButton.h : 12;
+            if (inRect(gameX, gameY, 489, 402, minusW, minusH))
+            {
+                adjustStat(ch, statIdx, -1);
+            }
+            else if (inRect(gameX, gameY, 619, 402, plusW, plusH))
+            {
+                adjustStat(ch, statIdx, 1);
+            }
+        }
+
+        // Available skill buttons use the same grid as render(): 3 rows, 3 columns.
+        if (!availableSkills.empty())
+        {
+            constexpr int skillGridY = 417;
+            constexpr int skillGridColW = 100;
+            constexpr int skillGridStartX = 17;
+            constexpr int skillGridRows = 3;
+            constexpr int skillRowH = 17;
+            constexpr size_t maxVisibleSkills = 9;
+            const size_t skillCount = std::min(availableSkills.size(), maxVisibleSkills);
+            for (size_t si = 0; si < skillCount; si++)
+            {
+                const int col = static_cast<int>(si) / skillGridRows;
+                const int row = static_cast<int>(si) % skillGridRows;
+                const int bx = skillGridStartX + col * skillGridColW;
+                const int by = skillGridY + row * skillRowH;
+                if (inRect(gameX, gameY, bx, by, skillGridColW - 2, skillRowH))
                 {
                     auto& sk = availableSkills[si];
-                    Character& ch = party[activeCharacterIndex];
                     // Count current extra skills (beyond the 2 starting ones)
                     int extraCount = static_cast<int>(ch.skills.size()) - 2;
                     if (sk.selected)
@@ -371,6 +535,7 @@ std::optional<GameStateId> CharacterCreationState::update()
                         // Deselect
                         sk.selected = false;
                         std::erase(ch.skills, std::string(sk.name));
+                        syncCreationSkills(ch);
                         if (ctx.playUiSound)
                             ctx.playUiSound("ClickSkill");
                     }
@@ -379,6 +544,7 @@ std::optional<GameStateId> CharacterCreationState::update()
                         // Select
                         sk.selected = true;
                         ch.skills.push_back(sk.name);
+                        syncCreationSkills(ch);
                         if (ctx.playUiSound)
                             ctx.playUiSound("ClickSkill");
                     }
@@ -388,8 +554,15 @@ std::optional<GameStateId> CharacterCreationState::update()
         }
 
         // OK button
-        if (gameX >= 560 && gameX <= 620 && gameY >= 440 && gameY <= 465)
+        const int okW = okButton.w > 0 ? okButton.w : 52;
+        const int okH = okButton.h > 0 ? okButton.h : 34;
+        if (inRect(gameX, gameY, 580, 431, okW, okH))
         {
+            for (auto& ch : party)
+            {
+                finalizeCreationCharacter(ch);
+            }
+
             std::string startMap = "out01.odm";
             if (!ctx.shared->newGameStartMapName.empty())
             {
@@ -410,6 +583,12 @@ std::optional<GameStateId> CharacterCreationState::update()
                 // RE doc 27-game-flow.md §7.2: X=12552, Y=1816, Z=512, angles=0
                 party.setWorldPosition(12552.0f, 1816.0f, 512.0f);
                 party.setOrientation(0.0f, 0.0f);
+
+                ctx.shared->arrivalOverrideActive = true;
+                ctx.shared->arrivalX = 12552.0f;
+                ctx.shared->arrivalY = 1816.0f;
+                ctx.shared->arrivalZ = 512.0f;
+                ctx.shared->arrivalYaw = 0.0f;
             }
 
             ctx.shared->quickStartReady = true;
@@ -419,9 +598,10 @@ std::optional<GameStateId> CharacterCreationState::update()
             return GameStateId::Loading;
         }
         // CLEAR button
-        if (gameX >= 490 && gameX <= 555 && gameY >= 440 && gameY <= 465)
+        const int clearW = clearButton.w > 0 ? clearButton.w : 52;
+        const int clearH = clearButton.h > 0 ? clearButton.h : 34;
+        if (inRect(gameX, gameY, 527, 431, clearW, clearH))
         {
-            Character& ch = party[activeCharacterIndex];
             ch.stats = ch.baseStats;
         }
     }
@@ -474,38 +654,15 @@ std::optional<GameStateId> CharacterCreationState::update()
     {
         if (menuRowIndex == 1) // FACE
         {
-            int oldGroup = faceGroupFromId(activeChar.faceId);
-            activeChar.faceId = (activeChar.faceId + hDelta + 20) % 20;
-            int newGroup = faceGroupFromId(activeChar.faceId);
-            if (oldGroup != newGroup)
-            {
-                updateCharacterForFace(activeChar);
-            }
+            changeFace(activeChar, hDelta);
         }
         else if (menuRowIndex == 2) // CLASS
         {
-            int displayIdx = baseClassDisplayIndex(activeChar.charClass);
-            displayIdx = (displayIdx + hDelta + kBaseClassCount) % kBaseClassCount;
-            activeChar.charClass = kBaseClasses[displayIdx];
-            updateSkillsForClass(activeChar);
-            rebuildAvailableSkills();
+            changeClass(activeChar, hDelta);
         }
         else if (menuRowIndex >= 3 && menuRowIndex <= 9) // STATS
         {
-            int statIdx = menuRowIndex - 3;
-            int groupIdx = faceGroupFromId(activeChar.faceId);
-            int minVal = activeChar.baseStats.byIndex(statIdx) - 2;
-            int maxVal = kFaceStatMax[groupIdx][statIdx];
-
-            if (hDelta > 0 && calculateBonusPointsRemaining() <= 0)
-            {
-                // No bonus points left
-            }
-            else
-            {
-                int& stat = activeChar.stats.byIndex(statIdx);
-                stat = std::clamp(stat + hDelta, minVal, maxVal);
-            }
+            adjustStat(activeChar, menuRowIndex - 3, hDelta);
         }
     }
 
@@ -621,13 +778,13 @@ void CharacterCreationState::render()
     constexpr int colX[] = {8, 166, 324, 482}; // stride 158 (0x9E)
     constexpr int colWidth = 153;              // 0x99
 
-    constexpr int portraitY = 35;     // 0x23 from Ghidra
-    constexpr int nameY = 124;        // 0x7C from Ghidra
-    constexpr int statsStartY = 169;  // 0xA9 from Ghidra
-    constexpr int statSpacing = 17;   // fontHeight(arrus=19) - 2, matching original formula
-    constexpr int classLabelY = 291;  // 0x123 — class display below all 7 stats
-    constexpr int skillsStartY = 311; // 0x137 — per-char skills below class label
-    constexpr int skillSpacing = 17;  // same as statSpacing
+    constexpr int portraitY = 35;      // 0x23 from Ghidra
+    constexpr int nameY = 124;         // 0x7C from Ghidra
+    constexpr int statsStartY = 169;   // 0xA9 from Ghidra
+    constexpr int statSpacing = 17;    // fontHeight(arrus=19) - 2, matching original formula
+    constexpr int skillsHeaderY = 291; // Original labels this region "Skills"
+    constexpr int skillsStartY = 311;  // 0x137 — per-char skills below header
+    constexpr int skillSpacing = 17;   // same as statSpacing
     // Ghidra: class name overlaid on portrait right side; class icon also on portrait right
     constexpr int nameClassX[] = {18, 177, 336, 495}; // local_13c stride 0x9F
     constexpr int classOverlayY = 100;                // class name on portrait (Ghidra line 98)
@@ -664,6 +821,12 @@ void CharacterCreationState::render()
         if (isActive && faceMask.tex)
         {
             drawOverlay(faceMask, faceMaskX[c], faceMaskY);
+        }
+
+        // Race label in the portrait header area, matching the original's race/class pairing.
+        {
+            std::string_view raceStr = kFaceGroupNames[faceGroupFromId(ch.faceId)];
+            drawText(nameClassX[c] + 70, 35, raceStr, labelFont, 255, 255, 235);
         }
 
         // 4. Portrait navigation arrows (when face row is selected)
@@ -773,43 +936,71 @@ void CharacterCreationState::render()
             }
         }
 
-        // 8. Class label below stats (Ghidra: Y=0x123=291, X=colX[c])
+        // 8. Skills header below stats.
         {
-            int displayIdx = baseClassDisplayIndex(ch.charClass);
-            std::string classStr = kBaseClassNames[displayIdx];
-            int cw = measureGameText(classStr, labelFont);
-            int cx = panelCenterX - cw / 2;
+            std::string_view skillsLabel = "Skills";
+            int sw = measureGameText(skillsLabel, labelFont);
+            int cx = panelCenterX - sw / 2;
             if (cx < panelX)
                 cx = panelX;
-            drawText(cx, classLabelY, classStr, labelFont, 255, 255, 235);
+            drawText(cx, skillsHeaderY, skillsLabel, labelFont, 220, 190, 100);
         }
 
-        // 9. Per-character skills (Ghidra: Y=0x137=311, spacing=statSpacing)
+        // 9. Per-character skills (four original slots: two starting skills plus two choices).
         auto* skillFont = labelFont;
-        int skillY = skillsStartY;
-        for (const auto& skill : ch.skills)
+        for (int slot = 0; slot < 4; slot++)
         {
-            drawText(panelX + 6, skillY, skill, skillFont, 150, 230, 150);
-            skillY += skillSpacing;
+            const bool hasSkill = slot < static_cast<int>(ch.skills.size());
+            std::string skill = hasSkill ? ch.skills[slot] : "None";
+            uint8_t sr = 255;
+            uint8_t sg = 255;
+            uint8_t sb = 235;
+            if (!hasSkill)
+            {
+                sr = 0;
+                sg = 220;
+                sb = 220;
+            }
+            else if (slot >= 2)
+            {
+                sr = 80;
+                sg = 230;
+                sb = 120;
+            }
+
+            const int skillW = measureGameText(skill, skillFont);
+            int skillX = panelCenterX - skillW / 2;
+            if (skillX < panelX + 4)
+                skillX = panelX + 4;
+            drawText(skillX, skillsStartY + slot * skillSpacing, skill, skillFont, sr, sg, sb);
         }
     }
 
-    // 10b. Stat points remaining + "Available Skills" header
-    //    Ghidra: "stat points" left label at FUN_0044c52e+0x25 (~37), Y=0x18B (395)
-    //    "Available Skills" label centered at same Y level
+    // 10b. Bottom section headers: Available Skills, Class, Bonus.
     {
-        // Stat points (bonus) on left — Ghidra line 355
+        std::string_view availLabel = "Available Skills";
+        int aw = measureGameText(availLabel, labelFont);
+        drawText(166 - aw / 2, 395, availLabel, labelFont, 255, 255, 200);
+
+        std::string_view classLabel = "Class";
+        int cw = measureGameText(classLabel, labelFont);
+        drawText(410 - cw / 2, 395, classLabel, labelFont, 255, 255, 200);
+
         int bonusPoints = calculateBonusPointsRemaining();
         uint8_t bonusR = bonusPoints > 0 ? 255 : 200;
         uint8_t bonusG = bonusPoints > 0 ? 230 : 200;
         uint8_t bonusB = 150;
-        drawText(37, 395, std::format("Bonus  {}", bonusPoints), labelFont, bonusR, bonusG, bonusB);
+        drawText(529, 395, "Bonus", labelFont, bonusR, bonusG, bonusB);
+        drawText(536, 417, std::to_string(bonusPoints), numFont, bonusR, bonusG, bonusB);
 
-        // "Available Skills" label — centered
-        std::string_view availLabel = "Available Skills";
-        int aw = measureGameText(availLabel, labelFont);
-        int ax = (kGameWidth - aw) / 2;
-        drawText(ax, 395, availLabel, labelFont, 255, 255, 200);
+        if (minusButton.tex)
+        {
+            drawOverlay(minusButton, 489, 402);
+        }
+        if (plusButton.tex)
+        {
+            drawOverlay(plusButton, 619, 402);
+        }
     }
 
     // 10c. Available skills grid — 3-column × 3-row at Y=417 (0x1A1)
@@ -819,6 +1010,7 @@ void CharacterCreationState::render()
         constexpr int skillGridStartX = 17; // 0x11 from original
         constexpr int skillGridRows = 3;
         constexpr int skillRowH = 17; // fontHeight - 2
+        constexpr size_t maxVisibleSkills = 9;
         auto* skillBtnFont = numFont;
 
         int extraCount = 0;
@@ -828,7 +1020,8 @@ void CharacterCreationState::render()
             extraCount = static_cast<int>(ch.skills.size()) - 2;
         }
 
-        for (size_t si = 0; si < availableSkills.size(); si++)
+        const size_t skillCount = std::min(availableSkills.size(), maxVisibleSkills);
+        for (size_t si = 0; si < skillCount; si++)
         {
             const auto& sk = availableSkills[si];
             int col = static_cast<int>(si) / skillGridRows;
@@ -859,6 +1052,31 @@ void CharacterCreationState::render()
                 sb = 120;
             }
             drawText(bx + 2, by + 1, sk.name, skillBtnFont, sr, sg, sb);
+        }
+    }
+
+    // 11. Original bottom class grid.
+    {
+        constexpr int classGridStartX = 329;
+        constexpr int classGridY = 417;
+        constexpr int classGridColW = 57;
+        constexpr int classGridRows = 3;
+        constexpr int classGridRowH = 17;
+        auto* classGridFont = numFont;
+        const Character& activeChar = party[activeCharacterIndex];
+
+        for (int i = 0; i < kBaseClassCount; i++)
+        {
+            const int displayIdx = kClassGridDisplayIndices[i];
+            const int col = i % 3;
+            const int row = i / classGridRows;
+            const int bx = classGridStartX + col * classGridColW;
+            const int by = classGridY + row * classGridRowH;
+            const bool selected = activeChar.charClass == kBaseClasses[displayIdx];
+            const uint8_t cr = selected ? 0 : 255;
+            const uint8_t cg = selected ? 220 : 255;
+            const uint8_t cb = selected ? 220 : 235;
+            drawText(bx, by + 1, kBaseClassNames[displayIdx], classGridFont, cr, cg, cb);
         }
     }
 
@@ -928,6 +1146,7 @@ void CharacterCreationState::updateSkillsForClass(Character& ch)
     ch.skills.clear();
     ch.skills.push_back(kClassStartingSkills[classIdx].skill1);
     ch.skills.push_back(kClassStartingSkills[classIdx].skill2);
+    syncCreationSkills(ch);
 }
 
 } // namespace runeharbor::engine
