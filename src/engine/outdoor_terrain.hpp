@@ -50,6 +50,9 @@ inline float sampleOutdoorTerrainHeight(const formats::ODMMapData& odmData, floa
     return h0 + fy * (h1 - h0);
 }
 
+// Clamp the party's Z so it can never sit below the terrain floor.
+// Above-ground Z (jumping, falling, freshly loaded save) is preserved;
+// sub-terrain Z gets snapped up to the floor.
 inline float clampOutdoorPartyZ(const formats::ODMMapData& odmData, float worldX, float worldY,
                                 float currentZ)
 {
@@ -58,7 +61,8 @@ inline float clampOutdoorPartyZ(const formats::ODMMapData& odmData, float worldX
         return currentZ;
     }
 
-    return sampleOutdoorTerrainHeight(odmData, worldX, worldY);
+    const float floor = sampleOutdoorTerrainHeight(odmData, worldX, worldY);
+    return std::max(currentZ, floor);
 }
 
 } // namespace runeharbor::engine

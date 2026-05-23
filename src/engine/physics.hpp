@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <optional>
 #include "../formats/blv_map.hpp"
 #include "../formats/odm_map.hpp"
 #include "../game/party.hpp"
@@ -17,15 +18,7 @@ struct PhysicsConfig
     float stepHeight = 48.0f;
 };
 
-// Returns true if position was adjusted (collision occurred)
-bool resolveIndoorCollision(const formats::BLVMapData& blv, float& px, float& py, float& pz,
-                            float radius, float height);
-
-bool resolveOutdoorCollision(const formats::ODMMapData& odm, float& px, float& py, float& pz,
-                             float radius, float height);
-
-// Applies gravity and resolves collisions for the party.
-// Returns the new Z velocity.
+// Applies gravity and resolves collisions for the party using continuous collision detection.
 void updatePartyPhysics(game::Party& party, const formats::BLVMapData* blv,
                         const formats::ODMMapData* odm, float deltaMs, const PhysicsConfig& config);
 
