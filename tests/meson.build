@@ -35,6 +35,9 @@ test_sources = files(
     'util/console_logger_test.cpp',
     'platform/window_test.cpp',
     'formats/lod_archive_test.cpp',
+    'formats/image_lod_archive_test.cpp',
+    'formats/sprite_lod_archive_test.cpp',
+    'formats/frame_tables_test.cpp',
     'formats/event_file_parser_test.cpp',
     'formats/global_text_parser_test.cpp',
     'formats/spells_parser_test.cpp',
@@ -51,12 +54,16 @@ test_sources = files(
     'formats/credits_parser_test.cpp',
     'media/smacker_decoder_test.cpp',
     'media/bink_decoder_test.cpp',
+    'media/vid_manifest_test.cpp',
     'engine/application_test.cpp',
+    'engine/physics_test.cpp',
     'game/character_test.cpp',
     'game/party_test.cpp',
     'game/combat_test.cpp',
     'game/inventory_test.cpp',
     'graphics/light_stack_test.cpp',
+    'graphics/sprite_decoder_test.cpp',
+    'graphics/outdoor_renderer_math_test.cpp',
 )
 
 # Reuse source files from main build (without main.cpp)
