@@ -218,7 +218,13 @@ BillboardSprite makeIndoorDecorationBillboard(const formats::ParsedDecoration& d
         auto entry = spriteFrameTable->findEntryByIcon(decoration.name);
         if (entry && !entry->textureName.empty())
         {
-            sprite.textureName = entry->textureName;
+            std::string tn = entry->textureName;
+            while (!tn.empty() && std::isspace(static_cast<unsigned char>(tn.back())))
+                tn.pop_back();
+            size_t start = 0;
+            while (start < tn.length() && std::isspace(static_cast<unsigned char>(tn[start])))
+                start++;
+            sprite.textureName = tn.substr(start);
             sprite.attributes = entry->attributes;
         }
     }
@@ -298,7 +304,16 @@ BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, co
                 if (entry)
                 {
                     if (!entry->textureName.empty())
-                        sprite.textureName = entry->textureName;
+                    {
+                        std::string tn = entry->textureName;
+                        while (!tn.empty() && std::isspace(static_cast<unsigned char>(tn.back())))
+                            tn.pop_back();
+                        size_t start = 0;
+                        while (start < tn.length() &&
+                               std::isspace(static_cast<unsigned char>(tn[start])))
+                            start++;
+                        sprite.textureName = tn.substr(start);
+                    }
                     sprite.attributes = entry->attributes;
                 }
             }

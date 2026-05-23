@@ -36,8 +36,7 @@ class OutdoorRenderer
     void setSpriteFrameTable(const formats::SpriteFrameTable* table);
     void render(const engine::MapScene& scene, const Camera& camera,
                 const game::RuntimeConfig* runtimeConfig = nullptr, float nightBlend = 0.0f,
-                const Frustum* frustumOverride = nullptr, SDL_GPUTexture* colorTex = nullptr,
-                SDL_GPUTexture* depthTex = nullptr, SDL_Texture* blitTex = nullptr);
+                const Frustum* frustumOverride = nullptr);
     void invalidateGPUCache();
 
   private:
@@ -45,10 +44,6 @@ class OutdoorRenderer
     void renderTerrain(const formats::ODMMapData& odmData, const Camera& camera,
                        const game::RuntimeConfig* runtimeConfig, float nightBlend,
                        const Frustum* frustumOverride);
-    void renderTerrainGPU(const formats::ODMMapData& odmData, const Camera& camera,
-                          const game::RuntimeConfig* runtimeConfig, float nightBlend,
-                          const Frustum* frustumOverride, SDL_GPUCommandBuffer* cmdBuf,
-                          SDL_GPURenderPass* renderPass);
     void renderBuildings(const formats::ODMMapData& odmData, const Camera& camera,
                          const game::RuntimeConfig* runtimeConfig, float nightBlend,
                          const Frustum* frustumOverride);
@@ -56,40 +51,47 @@ class OutdoorRenderer
                                const game::RuntimeConfig* runtimeConfig, float nightBlend,
                                const Frustum* frustumOverride);
 
-    void initGPUPipeline();
-    void buildGPUTerrain(const formats::ODMMapData& odmData);
 
-    struct GPUVertex
-    {
-        float x, y, z;
-        float r, g, b, a;
-        float u, v;
-    };
-
-    struct GPUDrawCall
-    {
-        std::string textureName;
-        uint32_t indexStart;
-        uint32_t indexCount;
-    };
 
     SDLRenderer& renderer;
     util::ILogger& logger;
     TextureLookup textureLookup;
     MonsterSpriteLookup monsterSpriteLookup;
     const formats::SpriteFrameTable* spriteFrameTable = nullptr;
-
-    // GPU State
-    SDL_GPUDevice* gpuDevice = nullptr;
-    SDL_GPUGraphicsPipeline* terrainPipeline = nullptr;
-    SDL_GPUShader* vertexShader = nullptr;
-    SDL_GPUShader* fragmentShader = nullptr;
-    SDL_GPUBuffer* terrainVertexBuffer = nullptr;
-    SDL_GPUBuffer* terrainIndexBuffer = nullptr;
-    SDL_GPUSampler* defaultSampler = nullptr;
-    uint32_t terrainIndexCount = 0;
-    bool gpuInitialized = false;
-    std::vector<GPUDrawCall> terrainDrawCalls;
 };
+
+namespace detail {
+    struct OutdoorLightingParams
+    {
+        float shadeStart = 2048.0f;
+        float shadeMistStart = 4096.0f;
+        float mistFull = 8192.0f;
+        bool noMist = false;
+        float gammaScale = 1.0f;
+        float ambientScale = 1.0f;
+        SDL_FColor mistColor = {153.0f / 255.0f, 193.0f / 255.0f, 237.0f / 255.0f, 1.0f};
+    };
+
+    SDL_FColor applyOutdoorLighting(SDL_FColor color, float distance, const OutdoorLightingParams& params);
+
+    struct SpawnBillboard
+    {
+        Vec3 basePos;
+        float halfWidth = 24.0f;
+        float height = 56.0f;
+        float distanceSq = 0.0f;
+        SDL_FColor color = {1.0f, 1.0f, 1.0f, 0.75f};
+        std::string textureName;
+        uint32_t attributes = 0;
+    };
+
+    SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, const Vec3& cameraPos,
+                                             const game::RuntimeConfig* config,
+                                             const OutdoorRenderer::MonsterSpriteLookup& monsterLookup,
+                                             const formats::SpriteFrameTable* spriteFrameTable,
+                                             uint32_t ticks = 0);
+                                             
+    float calcHorizonY(float viewportHeight, float fovY, float cameraPitch);
+} // namespace detail
 
 } // namespace runeharbor::graphics

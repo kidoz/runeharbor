@@ -300,9 +300,7 @@ void WorldRenderer::render(const engine::MapScene& scene, const Camera& camera,
         // Outdoor scene
         if (outdoorRenderer)
         {
-            outdoorRenderer->render(scene, camera, runtimeConfig, nightBlend, &visibilityFrustum_,
-                                    offscreenGpuTexture_, offscreenDepthTexture_,
-                                    offscreenSdlTexture_);
+            outdoorRenderer->render(scene, camera, runtimeConfig, nightBlend, &visibilityFrustum_);
         }
     }
 }

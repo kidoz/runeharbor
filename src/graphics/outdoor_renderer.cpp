@@ -9,6 +9,7 @@
 
 #include <SDL3_shadercross/SDL_shadercross.h>
 #include <cmath>
+#include <numbers>
 
 #include "../game/game_world.hpp"
 #include "clip_utils.hpp"
@@ -28,16 +29,7 @@ float waterWavePhase(float worldX, float worldZ, float timeSeconds)
     return timeSeconds * 2.4f + worldX * 0.0025f + worldZ * 0.0020f;
 }
 
-struct OutdoorLightingParams
-{
-    float shadeStart = 2048.0f;
-    float shadeMistStart = 4096.0f;
-    float mistFull = 8192.0f;
-    bool noMist = false;
-    float gammaScale = 1.0f;
-    float ambientScale = 1.0f;
-    SDL_FColor mistColor = {153.0f / 255.0f, 193.0f / 255.0f, 237.0f / 255.0f, 1.0f};
-};
+
 
 float gammaToScale(int gamma)
 {
@@ -65,6 +57,9 @@ std::array<uint8_t, 3> blendRgb(const std::array<uint8_t, 3>& day,
     return out;
 }
 
+} // namespace
+
+namespace detail {
 OutdoorLightingParams makeOutdoorLightingParams(const game::RuntimeConfig* runtimeConfig,
                                                 float nightBlend, bool terrainPass)
 {
@@ -143,21 +138,20 @@ SDL_FColor applyOutdoorLighting(SDL_FColor color, float distance,
     return color;
 }
 
-struct SpawnBillboard
+
+
+float calcHorizonY(float viewportHeight, float fovY, float cameraPitch)
 {
-    Vec3 basePos;
-    float halfWidth = kMinSpawnBillboardHalfWidth;
-    float height = kMinSpawnBillboardHeight;
-    float distanceSq = 0.0f;
-    SDL_FColor color = {1.0f, 1.0f, 1.0f, 0.75f};
-    std::string textureName;
-    uint32_t attributes = 0;
-};
+    const float viewPlaneDist = (viewportHeight / 2.0f) / std::tan(fovY / 2.0f);
+    float horizonY = (viewportHeight / 2.0f) + viewPlaneDist * std::tan(cameraPitch);
+    return std::clamp(horizonY, 0.0f, viewportHeight * 2.0f);
+}
 
 SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, const Vec3& cameraPos,
                                          [[maybe_unused]] const game::RuntimeConfig* config,
                                          const OutdoorRenderer::MonsterSpriteLookup& monsterLookup,
-                                         const formats::SpriteFrameTable* spriteFrameTable)
+                                         const formats::SpriteFrameTable* spriteFrameTable,
+                                         uint32_t ticks)
 {
     SpawnBillboard sprite;
     sprite.basePos = gameplayToRenderPosition(
@@ -173,15 +167,14 @@ SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, co
         std::string baseName = monsterLookup(spawn.objectType);
         if (!baseName.empty())
         {
-            uint32_t ticks = SDL_GetTicks();
             // Implement the 8-directional facing system.
             // In MM7, circle is 2048 units. Slowly spin in place to simulate idle rotation if
             // stationary.
             int facing = (ticks / 10) % 2048;
 
-            // Calculate angle from sprite to camera
-            float dx = cameraPos.x - sprite.basePos.x;
-            float dz = cameraPos.z - sprite.basePos.z;
+            // Calculate angle from camera to sprite
+            float dx = sprite.basePos.x - cameraPos.x;
+            float dz = sprite.basePos.z - cameraPos.z;
             float camAngle = std::atan2(dx, dz);
 
             // Convert to MM7 angle (0 to 2047)
@@ -215,41 +208,6 @@ SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, co
         }
     }
 
-    if (monsterLookup)
-    {
-        std::string baseName = monsterLookup(spawn.objectType);
-        if (!baseName.empty())
-        {
-            uint32_t ticks = SDL_GetTicks();
-            // MM7 monsters slowly spin in place when idle. 2048 is a full circle.
-            // Let's simulate a slow spin by using ticks.
-            int facing = (ticks / 10) % 2048;
-
-            // Camera relative angle
-            float dx = cameraPos.x - sprite.basePos.x;
-            float dz = cameraPos.z - sprite.basePos.z;
-            float camAngle = std::atan2(dx, dz);
-            int camFacing = static_cast<int>((camAngle + M_PI) * 1024.0f / M_PI) % 2048;
-            if (camFacing < 0)
-                camFacing += 2048;
-
-            // Direction index is the difference between where the sprite is facing and where the
-            // camera is
-            int relativeFacing = (facing - camFacing + 2048) % 2048;
-            int directionIndex = ((relativeFacing + 128) >> 8) & 7;
-
-            // e.g. "Goblina" -> "Goblin01"
-            std::string prefix = baseName.substr(0, std::min<size_t>(baseName.length(), 6));
-
-            // Use walk animation frames 1-8 (in MM7, walk frame index might be related to time)
-            int animFrame = (ticks / 150) % 4 + 1; // 4 frames for walk? Just an example.
-
-            // But we don't have the frame table. We just want 8-directional facing.
-            // Let's use the direction index (0-7) mapped to the expected 1-8 sprite naming pattern
-            sprite.textureName =
-                std::format("{}{:02d}", prefix, directionIndex + 1); // Using base + direction
-        }
-    }
 
     const int group = std::max(0, static_cast<int>(spawn.group));
     const int seed = (static_cast<int>(spawn.objectType) * 163) ^
@@ -274,52 +232,28 @@ SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, co
     return sprite;
 }
 
+} // namespace detail
+
+namespace {
+
+std::string toLowerCopy(std::string_view value)
+{
+    std::string result(value);
+    std::transform(result.begin(), result.end(), result.begin(),
+                   [](unsigned char c){ return std::tolower(c); });
+    return result;
+}
+
 } // namespace
 
 OutdoorRenderer::OutdoorRenderer(SDLRenderer& renderer, util::ILogger& logger)
     : renderer(renderer), logger(logger)
 {
-    gpuDevice = renderer.getGPUDevice();
-    if (gpuDevice)
-    {
-        initGPUPipeline();
-    }
-    else
-    {
-        logger.warning(
-            "OutdoorRenderer: No SDL_GPUDevice available. Falling back to software projection.");
-    }
+    (void)this->logger;
 }
 
 OutdoorRenderer::~OutdoorRenderer()
 {
-    if (gpuDevice)
-    {
-        if (terrainPipeline)
-        {
-            SDL_ReleaseGPUGraphicsPipeline(gpuDevice, terrainPipeline);
-        }
-        if (vertexShader)
-        {
-            SDL_ReleaseGPUShader(gpuDevice, vertexShader);
-        }
-        if (fragmentShader)
-        {
-            SDL_ReleaseGPUShader(gpuDevice, fragmentShader);
-        }
-        if (terrainVertexBuffer)
-        {
-            SDL_ReleaseGPUBuffer(gpuDevice, terrainVertexBuffer);
-        }
-        if (terrainIndexBuffer)
-        {
-            SDL_ReleaseGPUBuffer(gpuDevice, terrainIndexBuffer);
-        }
-        if (defaultSampler)
-        {
-            SDL_ReleaseGPUSampler(gpuDevice, defaultSampler);
-        }
-    }
 }
 
 void OutdoorRenderer::setTextureLookup(TextureLookup lookup)
@@ -339,8 +273,7 @@ void OutdoorRenderer::setSpriteFrameTable(const formats::SpriteFrameTable* table
 
 void OutdoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                              const game::RuntimeConfig* runtimeConfig, float nightBlend,
-                             const Frustum* frustumOverride, SDL_GPUTexture* colorTex,
-                             SDL_GPUTexture* depthTex, SDL_Texture* blitTex)
+                             const Frustum* frustumOverride)
 {
     const auto& odmData = scene.getODMData();
     if (odmData.heightmap.empty())
@@ -348,9 +281,12 @@ void OutdoorRenderer::render(const engine::MapScene& scene, const Camera& camera
         return;
     }
 
-    if (gpuInitialized && terrainIndexCount == 0)
+    Frustum localFrustum;
+    const Frustum* finalFrustum = frustumOverride;
+    if (!finalFrustum)
     {
-        buildGPUTerrain(odmData);
+        localFrustum.extractFromMatrix(camera.getViewProjectionMatrix());
+        finalFrustum = &localFrustum;
     }
 
     const float blend = clamp01(nightBlend);
@@ -358,62 +294,10 @@ void OutdoorRenderer::render(const engine::MapScene& scene, const Camera& camera
     // Draw the sky via SDL_Renderer (software/2D path)
     renderSky(runtimeConfig, blend);
 
-    // TODO: GPU terrain path disabled — SDL_Renderer textures don't expose GPU texture pointer.
-    // Need to create terrain textures as SDL_GPU textures directly, or use a texture atlas.
-    if (false && gpuInitialized && terrainIndexCount > 0 && colorTex && depthTex)
-    {
-        // Flush the 2D renderer to ensure any pending texture uploads are processed
-        // before we try to sample those textures in the raw GPU pass.
-        SDL_FlushRenderer(renderer.getSDLRenderer());
-
-        SDL_GPUCommandBuffer* cmdBuf = SDL_AcquireGPUCommandBuffer(gpuDevice);
-        if (cmdBuf)
-        {
-            SDL_GPUColorTargetInfo colorTarget = {};
-            colorTarget.texture = colorTex;
-            // Transparent background so the SDL sky shows through!
-            colorTarget.clear_color = {0.0f, 0.0f, 0.0f, 0.0f};
-            colorTarget.load_op = SDL_GPU_LOADOP_CLEAR;
-            colorTarget.store_op = SDL_GPU_STOREOP_STORE;
-
-            SDL_GPUDepthStencilTargetInfo depthTarget = {};
-            depthTarget.texture = depthTex;
-            depthTarget.clear_depth = 1.0f; // Clear depth to far plane
-            depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
-            depthTarget.store_op = SDL_GPU_STOREOP_DONT_CARE;
-            depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-            depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-            depthTarget.cycle = false;
-
-            SDL_GPURenderPass* renderPass =
-                SDL_BeginGPURenderPass(cmdBuf, &colorTarget, 1, &depthTarget);
-
-            renderTerrainGPU(odmData, camera, runtimeConfig, blend, frustumOverride, cmdBuf,
-                             renderPass);
-
-            SDL_EndGPURenderPass(renderPass);
-            SDL_SubmitGPUCommandBuffer(cmdBuf);
-
-            // Blit the transparent GPU result over the SDL sky!
-            if (blitTex)
-            {
-                // Ensure proper blend mode so transparent background works
-                SDL_SetTextureBlendMode(blitTex, SDL_BLENDMODE_BLEND);
-
-                float w, h;
-                SDL_GetTextureSize(blitTex, &w, &h);
-                renderer.renderTexture(blitTex, 0, 0, static_cast<int>(w), static_cast<int>(h));
-            }
-        }
-    }
-    else
-    {
-        renderTerrain(odmData, camera, runtimeConfig, blend, frustumOverride);
-    }
-
+    renderTerrain(odmData, camera, runtimeConfig, blend, finalFrustum);
     // These draw on top of the terrain/sky using SDL_Renderer
-    renderBuildings(odmData, camera, runtimeConfig, blend, frustumOverride);
-    renderSpawnBillboards(odmData, camera, runtimeConfig, blend, frustumOverride);
+    renderBuildings(odmData, camera, runtimeConfig, blend, finalFrustum);
+    renderSpawnBillboards(odmData, camera, runtimeConfig, blend, finalFrustum);
 }
 
 void OutdoorRenderer::renderSky(const game::RuntimeConfig* runtimeConfig, float nightBlend)
@@ -454,8 +338,8 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
     const float vpW = static_cast<float>(renderer.getViewportWidth());
     const float vpH = static_cast<float>(renderer.getViewportHeight());
     const Vec3 cameraPos = camera.getPosition();
-    const OutdoorLightingParams terrainLighting =
-        makeOutdoorLightingParams(runtimeConfig, nightBlend, true);
+    const detail::OutdoorLightingParams terrainLighting =
+        detail::makeOutdoorLightingParams(runtimeConfig, nightBlend, true);
 
     constexpr int SIZE = formats::ODMMapData::TERRAIN_SIZE;
     constexpr float CELL_SIZE = 512.0f;
@@ -503,7 +387,7 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
         const float dy = worldPos.y - cameraPos.y;
         const float dz = worldPos.z - cameraPos.z;
         const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-        return applyOutdoorLighting(heightColor(worldPos.y), dist, terrainLighting);
+        return detail::applyOutdoorLighting(heightColor(worldPos.y), dist, terrainLighting);
     };
 
     // Batch terrain triangles grouped by tile texture for textured rendering.
@@ -716,8 +600,8 @@ void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const 
     const Vec3 cameraPos = camera.getPosition();
     const float vpW = static_cast<float>(renderer.getViewportWidth());
     const float vpH = static_cast<float>(renderer.getViewportHeight());
-    const OutdoorLightingParams buildingLighting =
-        makeOutdoorLightingParams(runtimeConfig, nightBlend, false);
+    const detail::OutdoorLightingParams buildingLighting =
+        detail::makeOutdoorLightingParams(runtimeConfig, nightBlend, false);
     const bool animateWater = (runtimeConfig == nullptr) || !runtimeConfig->noWavyWater;
     const float waterTimeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
     Frustum localFrustum;
@@ -897,7 +781,7 @@ void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const 
             const float dy = wp.y - cameraPos.y;
             const float dz = wp.z - cameraPos.z;
             const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-            color = applyOutdoorLighting(color, dist, buildingLighting);
+            color = detail::applyOutdoorLighting(color, dist, buildingLighting);
             if (face.isWater() && animateWater)
             {
                 const float wave = std::sin(waterWavePhase(wp.x, wp.z, waterTimeSeconds));
@@ -1015,10 +899,10 @@ void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
         frustum = &localFrustum;
     }
 
-    const OutdoorLightingParams billboardLighting =
-        makeOutdoorLightingParams(runtimeConfig, nightBlend, false);
+    const detail::OutdoorLightingParams billboardLighting =
+        detail::makeOutdoorLightingParams(runtimeConfig, nightBlend, false);
 
-    std::vector<SpawnBillboard> sprites;
+    std::vector<detail::SpawnBillboard> sprites;
     sprites.reserve(odmData.spawns.size());
     for (const auto& spawn : odmData.spawns)
     {
@@ -1035,11 +919,11 @@ void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
             continue;
         }
 
-        sprites.push_back(makeOutdoorSpawnBillboard(spawn, cameraPos, runtimeConfig,
-                                                    monsterSpriteLookup, spriteFrameTable));
+        sprites.push_back(detail::makeOutdoorSpawnBillboard(spawn, cameraPos, runtimeConfig,
+                                                            monsterSpriteLookup, spriteFrameTable, SDL_GetTicks()));
     }
 
-    std::sort(sprites.begin(), sprites.end(), [](const SpawnBillboard& a, const SpawnBillboard& b)
+    std::sort(sprites.begin(), sprites.end(), [](const detail::SpawnBillboard& a, const detail::SpawnBillboard& b)
               { return a.distanceSq > b.distanceSq; });
 
     if (!sprites.empty())
@@ -1065,7 +949,7 @@ void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
         right.normalize();
 
         const float distance = std::sqrt(sprite.distanceSq);
-        SDL_FColor drawColor = applyOutdoorLighting(sprite.color, distance, billboardLighting);
+        SDL_FColor drawColor = detail::applyOutdoorLighting(sprite.color, distance, billboardLighting);
         SDL_Texture* texture = nullptr;
         float actualHalfWidth = sprite.halfWidth;
         float actualHeight = sprite.height;
@@ -1149,380 +1033,9 @@ void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
     }
 }
 
-void OutdoorRenderer::initGPUPipeline()
-{
-    if (!gpuDevice)
-        return;
-
-    if (!SDL_ShaderCross_Init())
-    {
-        logger.error("Failed to initialize SDL_shadercross: " + std::string(SDL_GetError()));
-        return;
-    }
-
-    SDL_ShaderCross_SPIRV_Info vertexSpirv = {};
-    vertexSpirv.bytecode = shaders::world_vert_data;
-    vertexSpirv.bytecode_size = shaders::world_vert_size;
-    vertexSpirv.entrypoint = "main";
-    vertexSpirv.shader_stage = SDL_SHADERCROSS_SHADERSTAGE_VERTEX;
-
-    SDL_ShaderCross_GraphicsShaderResourceInfo vertexResInfo = {};
-    vertexResInfo.num_samplers = 0;
-    vertexResInfo.num_storage_textures = 0;
-    vertexResInfo.num_storage_buffers = 0;
-    vertexResInfo.num_uniform_buffers = 1;
-
-    vertexShader =
-        SDL_ShaderCross_CompileGraphicsShaderFromSPIRV(gpuDevice, &vertexSpirv, &vertexResInfo, 0);
-
-    SDL_ShaderCross_SPIRV_Info fragmentSpirv = {};
-    fragmentSpirv.bytecode = shaders::world_frag_data;
-    fragmentSpirv.bytecode_size = shaders::world_frag_size;
-    fragmentSpirv.entrypoint = "main";
-    fragmentSpirv.shader_stage = SDL_SHADERCROSS_SHADERSTAGE_FRAGMENT;
-
-    SDL_ShaderCross_GraphicsShaderResourceInfo fragmentResInfo = {};
-    fragmentResInfo.num_samplers = 1;
-    fragmentResInfo.num_storage_textures = 0;
-    fragmentResInfo.num_storage_buffers = 0;
-    fragmentResInfo.num_uniform_buffers = 1;
-
-    fragmentShader = SDL_ShaderCross_CompileGraphicsShaderFromSPIRV(gpuDevice, &fragmentSpirv,
-                                                                    &fragmentResInfo, 0);
-
-    if (!vertexShader || !fragmentShader)
-    {
-        logger.error("Failed to compile cross shaders: " + std::string(SDL_GetError()));
-        SDL_ShaderCross_Quit();
-        return;
-    }
-
-    SDL_GPUGraphicsPipelineCreateInfo pipelineInfo = {};
-    pipelineInfo.vertex_shader = vertexShader;
-    pipelineInfo.fragment_shader = fragmentShader;
-    pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-
-    SDL_GPUVertexBufferDescription vertexBufferDesc[1] = {};
-    vertexBufferDesc[0].slot = 0;
-    vertexBufferDesc[0].pitch = sizeof(GPUVertex);
-    vertexBufferDesc[0].input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
-    vertexBufferDesc[0].instance_step_rate = 0;
-
-    SDL_GPUVertexAttribute vertexAttributes[3] = {};
-    // Position
-    vertexAttributes[0].location = 0;
-    vertexAttributes[0].buffer_slot = 0;
-    vertexAttributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
-    vertexAttributes[0].offset = offsetof(GPUVertex, x);
-    // Color
-    vertexAttributes[1].location = 1;
-    vertexAttributes[1].buffer_slot = 0;
-    vertexAttributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
-    vertexAttributes[1].offset = offsetof(GPUVertex, r);
-    // Texcoord
-    vertexAttributes[2].location = 2;
-    vertexAttributes[2].buffer_slot = 0;
-    vertexAttributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
-    vertexAttributes[2].offset = offsetof(GPUVertex, u);
-
-    pipelineInfo.vertex_input_state.num_vertex_attributes = 3;
-    pipelineInfo.vertex_input_state.vertex_attributes = vertexAttributes;
-
-    pipelineInfo.vertex_input_state.num_vertex_buffers = 1;
-    pipelineInfo.vertex_input_state.vertex_buffer_descriptions = vertexBufferDesc;
-
-    // Rasterizer state
-    pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
-    pipelineInfo.rasterizer_state.front_face =
-        SDL_GPU_FRONTFACE_CLOCKWISE; // Y-flip in shader reverses winding order
-
-    // Depth Stencil state
-    pipelineInfo.depth_stencil_state.enable_depth_test = true;
-    pipelineInfo.depth_stencil_state.enable_depth_write = true;
-    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
-
-    // Target state (Assuming standard rendering out to window for now)
-    pipelineInfo.target_info.num_color_targets = 1;
-    SDL_GPUColorTargetDescription targetDesc = {};
-    targetDesc.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-
-    // Enable blending so transparent pixels from the texture do not overwrite the background sky
-    targetDesc.blend_state.enable_blend = true;
-    targetDesc.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-    targetDesc.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-    targetDesc.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
-    targetDesc.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-    targetDesc.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-    targetDesc.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-    targetDesc.blend_state.enable_color_write_mask = false; // default all channels
-
-    pipelineInfo.target_info.color_target_descriptions = &targetDesc;
-    pipelineInfo.target_info.has_depth_stencil_target = true;
-    pipelineInfo.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
-
-    terrainPipeline = SDL_CreateGPUGraphicsPipeline(gpuDevice, &pipelineInfo);
-    if (!terrainPipeline)
-    {
-        logger.error("Failed to create pipeline: " + std::string(SDL_GetError()));
-    }
-
-    SDL_GPUSamplerCreateInfo samplerInfo = {};
-    samplerInfo.min_filter = SDL_GPU_FILTER_NEAREST;
-    samplerInfo.mag_filter = SDL_GPU_FILTER_NEAREST;
-    samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
-    samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    defaultSampler = SDL_CreateGPUSampler(gpuDevice, &samplerInfo);
-
-    gpuInitialized = true;
-}
 
 void OutdoorRenderer::invalidateGPUCache()
 {
-    terrainIndexCount = 0;
-    terrainDrawCalls.clear();
-    if (gpuDevice)
-    {
-        if (terrainVertexBuffer)
-        {
-            SDL_ReleaseGPUBuffer(gpuDevice, terrainVertexBuffer);
-            terrainVertexBuffer = nullptr;
-        }
-        if (terrainIndexBuffer)
-        {
-            SDL_ReleaseGPUBuffer(gpuDevice, terrainIndexBuffer);
-            terrainIndexBuffer = nullptr;
-        }
-    }
-}
-
-void OutdoorRenderer::buildGPUTerrain(const formats::ODMMapData& odmData)
-{
-    if (!gpuDevice || odmData.heightmap.empty())
-        return;
-
-    terrainDrawCalls.clear();
-
-    constexpr int SIZE = formats::ODMMapData::TERRAIN_SIZE;
-    constexpr float CELL_SIZE = 512.0f;
-    constexpr float HALF = SIZE / 2.0f;
-
-    // We can have multiple textures (up to 4 tile sets usually in MM7)
-    // We group the quads by their tileIndex to batch draw calls.
-    std::unordered_map<uint8_t, std::vector<uint32_t>> tileQuads;
-
-    for (int gy = 0; gy < SIZE - 1; gy++)
-    {
-        for (int gx = 0; gx < SIZE - 1; gx++)
-        {
-            size_t idx = static_cast<size_t>(gy * SIZE + gx);
-            uint8_t tileIndex = odmData.heightmap[idx].tileIndex;
-            tileQuads[tileIndex].push_back(gy * SIZE + gx);
-        }
-    }
-
-    std::vector<GPUVertex> vertices;
-    std::vector<uint32_t> indices;
-    vertices.reserve(SIZE * SIZE);
-
-    // Precompute all vertices
-    for (int gy = 0; gy < SIZE; gy++)
-    {
-        for (int gx = 0; gx < SIZE; gx++)
-        {
-            float wx = (static_cast<float>(gx) - HALF) * CELL_SIZE;
-            float wz = (static_cast<float>(gy) - HALF) * CELL_SIZE;
-            float wy = 0.0f;
-
-            size_t idx = static_cast<size_t>(gy * SIZE + gx);
-            if (idx < odmData.heightmap.size())
-            {
-                wy = static_cast<float>(odmData.heightmap[idx].height);
-            }
-
-            GPUVertex v;
-            v.x = wx;
-            v.y = wy;
-            v.z = wz;
-
-            float t = std::clamp(wy / 8000.0f, 0.0f, 1.0f);
-            v.r = 0.30f + t * 0.35f;
-            v.g = 0.45f - t * 0.15f;
-            v.b = 0.20f + t * 0.05f;
-            v.a = 1.0f;
-
-            v.u = static_cast<float>(gx % 2); // Map 0..1..0 over grid points
-            v.v = static_cast<float>(gy % 2); // Map 0..1..0 over grid points
-            vertices.push_back(v);
-        }
-    }
-
-    // Build indices per texture
-    for (const auto& [tileIndex, quadList] : tileQuads)
-    {
-        std::string textureName;
-        if (tileIndex < odmData.tileTextures.size())
-        {
-            textureName = odmData.tileTextures[tileIndex];
-        }
-
-        uint32_t indexStart = static_cast<uint32_t>(indices.size());
-
-        for (uint32_t quadIdx : quadList)
-        {
-            int gy = quadIdx / SIZE;
-            int gx = quadIdx % SIZE;
-
-            uint32_t i00 = gy * SIZE + gx;
-            uint32_t i10 = gy * SIZE + (gx + 1);
-            uint32_t i01 = (gy + 1) * SIZE + gx;
-            uint32_t i11 = (gy + 1) * SIZE + (gx + 1);
-
-            indices.push_back(i00);
-            indices.push_back(i01);
-            indices.push_back(i10);
-
-            indices.push_back(i10);
-            indices.push_back(i01);
-            indices.push_back(i11);
-        }
-
-        uint32_t indexCount = static_cast<uint32_t>(indices.size()) - indexStart;
-        if (indexCount > 0)
-        {
-            terrainDrawCalls.push_back({textureName, indexStart, indexCount});
-        }
-    }
-
-    terrainIndexCount = static_cast<uint32_t>(indices.size());
-
-    if (terrainVertexBuffer)
-        SDL_ReleaseGPUBuffer(gpuDevice, terrainVertexBuffer);
-    if (terrainIndexBuffer)
-        SDL_ReleaseGPUBuffer(gpuDevice, terrainIndexBuffer);
-
-    SDL_GPUBufferCreateInfo vboInfo = {};
-    vboInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-    vboInfo.size = vertices.size() * sizeof(GPUVertex);
-    terrainVertexBuffer = SDL_CreateGPUBuffer(gpuDevice, &vboInfo);
-
-    SDL_GPUBufferCreateInfo iboInfo = {};
-    iboInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
-    iboInfo.size = indices.size() * sizeof(uint32_t);
-    terrainIndexBuffer = SDL_CreateGPUBuffer(gpuDevice, &iboInfo);
-
-    SDL_GPUTransferBufferCreateInfo transferInfo = {};
-    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    transferInfo.size = vboInfo.size + iboInfo.size;
-    SDL_GPUTransferBuffer* transferBuffer = SDL_CreateGPUTransferBuffer(gpuDevice, &transferInfo);
-
-    void* mapData = SDL_MapGPUTransferBuffer(gpuDevice, transferBuffer, false);
-    memcpy(mapData, vertices.data(), vboInfo.size);
-    memcpy(static_cast<uint8_t*>(mapData) + vboInfo.size, indices.data(), iboInfo.size);
-    SDL_UnmapGPUTransferBuffer(gpuDevice, transferBuffer);
-
-    SDL_GPUCommandBuffer* cmdBuf = SDL_AcquireGPUCommandBuffer(gpuDevice);
-    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmdBuf);
-
-    SDL_GPUTransferBufferLocation srcVbo = {transferBuffer, 0};
-    SDL_GPUBufferRegion dstVbo = {terrainVertexBuffer, 0, vboInfo.size};
-    SDL_UploadToGPUBuffer(copyPass, &srcVbo, &dstVbo, false);
-
-    SDL_GPUTransferBufferLocation srcIbo = {transferBuffer, static_cast<Uint32>(vboInfo.size)};
-    SDL_GPUBufferRegion dstIbo = {terrainIndexBuffer, 0, iboInfo.size};
-    SDL_UploadToGPUBuffer(copyPass, &srcIbo, &dstIbo, false);
-
-    SDL_EndGPUCopyPass(copyPass);
-    SDL_SubmitGPUCommandBuffer(cmdBuf);
-    SDL_ReleaseGPUTransferBuffer(gpuDevice, transferBuffer);
-}
-
-void OutdoorRenderer::renderTerrainGPU(const formats::ODMMapData& odmData, const Camera& camera,
-                                       const game::RuntimeConfig* runtimeConfig, float nightBlend,
-                                       const Frustum* frustumOverride, SDL_GPUCommandBuffer* cmdBuf,
-                                       SDL_GPURenderPass* renderPass)
-{
-    (void)odmData;
-    (void)runtimeConfig;
-    (void)frustumOverride;
-
-    if (!gpuInitialized || !terrainVertexBuffer || !terrainIndexBuffer || !terrainPipeline ||
-        !cmdBuf || !renderPass)
-    {
-        return;
-    }
-
-    // Set Viewport
-    SDL_GPUViewport viewport = {};
-    viewport.x = 0;
-    viewport.y = 0;
-    viewport.w = static_cast<float>(renderer.getViewportWidth());
-    viewport.h = static_cast<float>(renderer.getViewportHeight());
-    viewport.min_depth = 0.0f;
-    viewport.max_depth = 1.0f;
-    SDL_SetGPUViewport(renderPass, &viewport);
-
-    // Bind Pipeline
-    SDL_BindGPUGraphicsPipeline(renderPass, terrainPipeline);
-
-    // Bind Buffers
-    SDL_GPUBufferBinding vboBinding = {terrainVertexBuffer, 0};
-    SDL_BindGPUVertexBuffers(renderPass, 0, &vboBinding, 1);
-
-    SDL_GPUBufferBinding iboBinding = {terrainIndexBuffer, 0};
-    SDL_BindGPUIndexBuffer(renderPass, &iboBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-
-    // Upload Uniforms (View/Projection Matrix)
-    Mat4 vp = camera.getViewProjectionMatrix();
-    // SDL_GPU expects data to be pushed to a uniform buffer slot.
-    SDL_PushGPUVertexUniformData(cmdBuf, 0, vp.m.data(), sizeof(float) * 16);
-
-    // Push fragment uniform (night blend)
-    float fragUniforms[4] = {nightBlend, 0.0f, 0.0f, 0.0f}; // padded to 16 bytes for alignment
-    SDL_PushGPUFragmentUniformData(cmdBuf, 0, fragUniforms, sizeof(fragUniforms));
-
-    for (const auto& drawCall : terrainDrawCalls)
-    {
-        SDL_GPUTexture* gpuTex = nullptr;
-        if (textureLookup)
-        {
-            std::string queryName = drawCall.textureName;
-            if (queryName.empty())
-            {
-                // Fallback texture name if none specified (like grass)
-                queryName = "grs1";
-            }
-
-            if (SDL_Texture* tex = textureLookup(queryName))
-            {
-                SDL_PropertiesID texProps = SDL_GetTextureProperties(tex);
-                gpuTex = (SDL_GPUTexture*)SDL_GetPointerProperty(
-                    texProps, SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, nullptr);
-                if (!gpuTex)
-                {
-                    logger.warning("No GPU texture for " + queryName);
-                }
-            }
-            else
-            {
-                logger.warning("Texture lookup failed for " + queryName);
-            }
-        }
-
-        if (gpuTex)
-        {
-            SDL_GPUTextureSamplerBinding samplerBinding = {gpuTex, defaultSampler};
-            SDL_BindGPUFragmentSamplers(renderPass, 0, &samplerBinding, 1);
-            SDL_DrawGPUIndexedPrimitives(renderPass, drawCall.indexCount, 1, drawCall.indexStart, 0,
-                                         0);
-        }
-        else
-        {
-            // If we still don't have a texture, we must skip because the shader requires a sampler
-            logger.warning("Skipping draw call due to missing GPU texture!");
-        }
-    }
 }
 
 } // namespace runeharbor::graphics
