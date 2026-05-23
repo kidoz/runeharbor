@@ -195,16 +195,25 @@ constexpr ClassSkills kClassStartingSkills[] = {
     {"Dagger", "Earth Magic"},  // Druid
 };
 
-void groundPartyToOutdoorTerrain(game::Party& party, const MapScene* scene)
+void groundPartyToOutdoorTerrain(game::Party& party, const MapScene* scene,
+                                 util::ILogger* /*logger*/ = nullptr, const char* tag = "ground")
 {
     if (!scene || scene->getODMData().heightmap.empty())
     {
+        fprintf(stderr, "[GROUND/%s] skipped (no heightmap), pos=(%.1f,%.1f,%.1f) yaw=%.1f\n", tag,
+                party.worldX(), party.worldY(), party.worldZ(), party.yaw());
         return;
     }
 
-    party.setWorldPosition(
-        party.worldX(), party.worldY(),
-        clampOutdoorPartyZ(scene->getODMData(), party.worldX(), party.worldY(), party.worldZ()));
+    const float beforeZ = party.worldZ();
+    const float floor =
+        sampleOutdoorTerrainHeight(scene->getODMData(), party.worldX(), party.worldY());
+    const float newZ =
+        clampOutdoorPartyZ(scene->getODMData(), party.worldX(), party.worldY(), party.worldZ());
+    party.setWorldPosition(party.worldX(), party.worldY(), newZ);
+
+    fprintf(stderr, "[GROUND/%s] pos=(%.1f,%.1f) z: %.1f -> %.1f (terrain floor=%.1f) yaw=%.1f\n",
+            tag, party.worldX(), party.worldY(), beforeZ, newZ, floor, party.yaw());
 }
 } // namespace
 
@@ -433,15 +442,16 @@ bool Application::loadGameData(const std::filesystem::path& dataPath)
         "BITMAPS.LOD",
         "ICONS.LOD",
     };
+    std::vector<std::string> spriteArchives;
     if (preferLowResSprites_)
     {
-        imageArchives.push_back("SPRITELO.LOD");
-        imageArchives.push_back("SPRITES.LOD");
+        spriteArchives.push_back("SPRITELO.LOD");
+        spriteArchives.push_back("SPRITES.LOD");
         logger.info("Low-resolution sprite mode enabled (preferring SPRITELO.LOD)");
     }
     else
     {
-        imageArchives.push_back("SPRITES.LOD");
+        spriteArchives.push_back("SPRITES.LOD");
     }
 
     const std::vector<std::string> gameArchives = {
@@ -501,6 +511,32 @@ bool Application::loadGameData(const std::filesystem::path& dataPath)
         else
         {
             logger.debug(std::format("Image archive not found (skipping): {}", archiveName));
+        }
+    }
+
+    // Mount sprite archives
+    for (const auto& archiveName : spriteArchives)
+    {
+        auto archivePath = dataPath / archiveName;
+
+        if (!std::filesystem::exists(archivePath))
+        {
+            std::string lowerName = archiveName;
+            std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
+            archivePath = dataPath / lowerName;
+        }
+
+        if (std::filesystem::exists(archivePath))
+        {
+            if (vfs->mountSpriteArchive(archivePath))
+            {
+                mountedCount++;
+            }
+        }
+        else
+        {
+            logger.debug(std::format("Sprite archive not found (skipping): {}", archiveName));
         }
     }
 
@@ -779,7 +815,7 @@ bool Application::loadMap(const std::string& mapName)
     wireUpMapTextures();
 
     logger.info(std::format("Loaded BLV map: {}", resolvedName));
-    logger.info("Camera controls: Arrow keys orbit, Q/E zoom, Shift to speed up");
+    logger.info("Controls: Arrow keys move/turn, PageUp/PageDown look, Insert/Delete strafe");
     return true;
 }
 
@@ -879,9 +915,10 @@ bool Application::loadOutdoorMap(const std::string& mapName)
 
     mapLoaded = true;
     configureCameraForMap();
+    wireUpMapTextures();
 
     logger.info(std::format("Loaded ODM map: {}", resolvedName));
-    logger.info("Camera controls: Arrow keys orbit, Q/E zoom, WASD pan, Shift to speed up");
+    logger.info("Controls: Arrow keys move/turn, PageUp/PageDown look, Insert/Delete strafe");
     return true;
 }
 
@@ -1079,6 +1116,8 @@ void Application::wireUpMapTextures()
     }
 
     clearMapTextureCache();
+
+    worldRenderer->setSpriteFrameTable(&spriteFrameTable_);
 
     worldRenderer->setMonsterSpriteLookup(
         [this](uint16_t objectType) -> std::string
@@ -2531,6 +2570,7 @@ void Application::updateSkillsForClass(Character& ch)
     ch.skills.clear();
     ch.skills.push_back(kClassStartingSkills[classIdx].skill1);
     ch.skills.push_back(kClassStartingSkills[classIdx].skill2);
+    game::syncSkillLevelsFromDisplaySkills(ch);
 }
 
 void Application::commitPartyToGameWorld()
@@ -2542,7 +2582,13 @@ void Application::commitPartyToGameWorld()
     auto& gp = gameWorld_->party();
     for (int i = 0; i < game::kPartySize && i < static_cast<int>(party.size()); i++)
     {
-        gp.member(i) = party[static_cast<size_t>(i)];
+        Character ch = party[static_cast<size_t>(i)];
+        ch.baseStats = ch.stats;
+        ch.recalculateDerived();
+        ch.hitPoints = ch.maxHitPoints;
+        ch.spellPoints = ch.maxSpellPoints;
+        game::syncSkillLevelsFromDisplaySkills(ch);
+        gp.member(i) = ch;
     }
     logger.info("Committed party data to GameWorld");
 }
@@ -2691,7 +2737,8 @@ void Application::configureGameplayCallbacks()
             if (gameWorld_)
             {
                 gameWorld_->party().setWorldPosition(x, y, z);
-                groundPartyToOutdoorTerrain(gameWorld_->party(), mapScene.get());
+                groundPartyToOutdoorTerrain(gameWorld_->party(), mapScene.get(), &logger,
+                                            "teleport");
                 gameWorld_->party().setOrientation(yaw, gameWorld_->party().pitch());
             }
 
@@ -3738,21 +3785,43 @@ void Application::restoreCurrentMapState(const std::string& mapName)
 
 void Application::applyMapEntryPoint()
 {
+    fprintf(stderr,
+            "[APPLY-ENTRY] pendingOverride=%d sharedOverride=%d entryDir=%d "
+            "partyPos=(%.1f,%.1f,%.1f) yaw=%.1f indoorSpawns=%zu outdoorSpawns=%zu\n",
+            pendingArrivalOverride_.active ? 1 : 0,
+            (sharedData && sharedData->arrivalOverrideActive) ? 1 : 0, pendingEntryDirection_,
+            gameWorld_ ? gameWorld_->party().worldX() : 0.0f,
+            gameWorld_ ? gameWorld_->party().worldY() : 0.0f,
+            gameWorld_ ? gameWorld_->party().worldZ() : 0.0f,
+            gameWorld_ ? gameWorld_->party().yaw() : 0.0f,
+            (mapScene && mapScene->isLoaded()) ? mapScene->getBLVData().spawns.size() : 0u,
+            (mapScene && mapScene->isLoaded()) ? mapScene->getODMData().spawns.size() : 0u);
+
     if (!gameWorld_ || !mapScene || !mapScene->isLoaded())
     {
         pendingArrivalOverride_.active = false;
         pendingEntryDirection_ = 0;
+        if (sharedData)
+            sharedData->arrivalOverrideActive = false;
         return;
     }
 
-    if (pendingArrivalOverride_.active)
+    if (pendingArrivalOverride_.active || (sharedData && sharedData->arrivalOverrideActive))
     {
-        gameWorld_->party().setWorldPosition(pendingArrivalOverride_.x, pendingArrivalOverride_.y,
-                                             pendingArrivalOverride_.z);
-        groundPartyToOutdoorTerrain(gameWorld_->party(), mapScene.get());
-        gameWorld_->party().setOrientation(pendingArrivalOverride_.yaw,
-                                           gameWorld_->party().pitch());
+        float x = pendingArrivalOverride_.active ? pendingArrivalOverride_.x : sharedData->arrivalX;
+        float y = pendingArrivalOverride_.active ? pendingArrivalOverride_.y : sharedData->arrivalY;
+        float z = pendingArrivalOverride_.active ? pendingArrivalOverride_.z : sharedData->arrivalZ;
+        float yaw =
+            pendingArrivalOverride_.active ? pendingArrivalOverride_.yaw : sharedData->arrivalYaw;
+
+        gameWorld_->party().setWorldPosition(x, y, z);
+        groundPartyToOutdoorTerrain(gameWorld_->party(), mapScene.get(), &logger,
+                                    "arrival-override");
+        gameWorld_->party().setOrientation(yaw, gameWorld_->party().pitch());
+
         pendingArrivalOverride_.active = false;
+        if (sharedData)
+            sharedData->arrivalOverrideActive = false;
         pendingEntryDirection_ = 0;
         return;
     }
@@ -3836,7 +3905,7 @@ void Application::applyMapEntryPoint()
         const auto& spawn = outdoorSpawns[selected];
         gameWorld_->party().setWorldPosition(
             static_cast<float>(spawn.x), static_cast<float>(spawn.y), static_cast<float>(spawn.z));
-        groundPartyToOutdoorTerrain(gameWorld_->party(), mapScene.get());
+        groundPartyToOutdoorTerrain(gameWorld_->party(), mapScene.get(), &logger, "outdoor-spawn");
         applyEntryOrientation();
     }
 }
@@ -4328,6 +4397,11 @@ void Application::shutdown()
 
     clearMapTextureCache();
     unloadUiAssets();
+    if (videoPlayer)
+    {
+        videoPlayer->stop();
+        videoPlayer.reset();
+    }
     if (audioSystem_)
     {
         audioSystem_->shutdown();
@@ -4338,6 +4412,8 @@ void Application::shutdown()
     }
     loadedSounds_.clear();
     vfs->unmountAll();
+    worldRenderer.reset();
+    lineRenderer.reset();
     renderer.reset();
     window.shutdown();
     initialized = false;

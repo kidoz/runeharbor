@@ -44,7 +44,8 @@ void TitleState::exit() {}
 std::optional<GameStateId> TitleState::update()
 {
     // Lazy button layout (needs viewport size)
-    if (buttons.empty() || ctx.viewportWidth != lastViewportWidth || ctx.viewportHeight != lastViewportHeight)
+    if (buttons.empty() || ctx.viewportWidth != lastViewportWidth ||
+        ctx.viewportHeight != lastViewportHeight)
     {
         layoutButtons();
         lastViewportWidth = ctx.viewportWidth;

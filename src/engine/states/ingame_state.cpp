@@ -529,21 +529,26 @@ std::optional<GameStateId> InGameState::update()
         statusLine_ = "Load failed (slot 1)";
     }
 
-    if (ctx.shared && ctx.shared->combatSystem &&
-        ctx.window.wasMousePressed(platform::MouseButton::Left))
+    const bool primaryActionPressed = ctx.window.wasMousePressed(platform::MouseButton::Left) ||
+                                      ctx.isKeyPressed(SDL_SCANCODE_SPACE) ||
+                                      ctx.isKeyPressed(SDL_SCANCODE_A);
+    if (ctx.shared && primaryActionPressed)
     {
         bool handled = false;
-        selectedMonsterIndex_ = pickMonsterUnderCursor();
-        if (selectedMonsterIndex_ >= 0)
+        if (ctx.shared->combatSystem)
         {
-            const int attacker = findActivePartyMember();
-            if (attacker >= 0)
+            selectedMonsterIndex_ = pickMonsterUnderCursor();
+            if (selectedMonsterIndex_ >= 0)
             {
-                ctx.shared->combatSystem->setInCombat(true);
-                auto result =
-                    ctx.shared->combatSystem->playerAttack(attacker, selectedMonsterIndex_);
-                statusLine_ = result.description;
-                handled = true;
+                const int attacker = findActivePartyMember();
+                if (attacker >= 0)
+                {
+                    ctx.shared->combatSystem->setInCombat(true);
+                    auto result =
+                        ctx.shared->combatSystem->playerAttack(attacker, selectedMonsterIndex_);
+                    statusLine_ = result.description;
+                    handled = true;
+                }
             }
         }
 
@@ -771,76 +776,99 @@ void InGameState::updateCameraInput(float deltaMs)
     auto& party = ctx.shared->gameWorld->party();
     const auto& config = ctx.shared->gameWorld->runtimeConfig();
 
-    float orbitSpeed = 16.0f; // MM7 rotation units per frame
-    float panSpeed = std::max(1.0f, config.walkSpeed / 2.0f) * (deltaMs / 16.0f); // Normalize speed
+    const float frameScale = std::max(0.0f, deltaMs) / 16.0f;
+    float turnStep = 16.0f * frameScale; // MM7 angle units per 16 ms tick.
+    float moveSpeed = std::max(1.0f, static_cast<float>(config.walkSpeed));
 
     if (ctx.isKeyDown(SDL_SCANCODE_LSHIFT) || ctx.isKeyDown(SDL_SCANCODE_RSHIFT))
     {
-        orbitSpeed *= 2.0f;
-        panSpeed *= 2.0f;
+        turnStep *= 2.0f;
+        moveSpeed *= 2.0f;
     }
 
     // Party Orientation (Yaw/Pitch in MM7 0-2047 units)
     float yaw = party.yaw();
     float pitch = party.pitch();
 
-    if (ctx.isKeyDown(SDL_SCANCODE_LEFT))
+    const auto keyDown = [this](SDL_Scancode primary, SDL_Scancode alternate)
+    { return ctx.isKeyDown(primary) || ctx.isKeyDown(alternate); };
+
+    if (keyDown(SDL_SCANCODE_LEFT, SDL_SCANCODE_KP_4))
     {
-        yaw += orbitSpeed;
-        if (yaw >= 2048.0f)
-            yaw -= 2048.0f;
+        yaw += turnStep;
     }
-    if (ctx.isKeyDown(SDL_SCANCODE_RIGHT))
+    if (keyDown(SDL_SCANCODE_RIGHT, SDL_SCANCODE_KP_6))
     {
-        yaw -= orbitSpeed;
-        if (yaw < 0)
-            yaw += 2048.0f;
+        yaw -= turnStep;
     }
-    if (ctx.isKeyDown(SDL_SCANCODE_UP))
+    if (ctx.isKeyDown(SDL_SCANCODE_PAGEUP))
     {
-        pitch += orbitSpeed;
-        pitch = std::min(pitch, 512.0f); // Limit looking up
+        pitch += turnStep;
     }
-    if (ctx.isKeyDown(SDL_SCANCODE_DOWN))
+    if (ctx.isKeyDown(SDL_SCANCODE_PAGEDOWN))
     {
-        pitch -= orbitSpeed;
-        pitch = std::max(pitch, -512.0f); // Limit looking down
+        pitch -= turnStep;
     }
+    if (ctx.isKeyPressed(SDL_SCANCODE_HOME))
+    {
+        pitch = 0.0f;
+    }
+
+    while (yaw >= 2048.0f)
+    {
+        yaw -= 2048.0f;
+    }
+    while (yaw < 0.0f)
+    {
+        yaw += 2048.0f;
+    }
+    pitch = std::clamp(pitch, -512.0f, 512.0f);
 
     party.setOrientation(yaw, pitch);
 
     // Party Movement
+    const float yawRad = yaw * M_PI / 1024.0f;
+    const float dx = std::cos(yawRad);
+    const float dy = std::sin(yawRad);
+
+    float forward = 0.0f;
+    float strafe = 0.0f;
+    float vx = 0.0f;
+    float vy = 0.0f;
+
+    if (keyDown(SDL_SCANCODE_UP, SDL_SCANCODE_KP_8))
+    {
+        forward += 1.0f;
+    }
+    if (keyDown(SDL_SCANCODE_DOWN, SDL_SCANCODE_KP_2))
+    {
+        forward -= 0.5f;
+    }
+    if (ctx.isKeyDown(SDL_SCANCODE_INSERT))
+    {
+        strafe -= 0.75f;
+    }
+    if (ctx.isKeyDown(SDL_SCANCODE_DELETE))
+    {
+        strafe += 0.75f;
+    }
+
+    const float inputLength = std::hypot(forward, strafe);
+    if (inputLength > 1.0f)
+    {
+        forward /= inputLength;
+        strafe /= inputLength;
+    }
+
+    vx = (dx * forward + dy * strafe) * moveSpeed;
+    vy = (dy * forward - dx * strafe) * moveSpeed;
+
+    party.setVelocityX(vx);
+    party.setVelocityY(vy);
+
     float px = party.worldX();
     float py = party.worldY();
     float pz = party.worldZ();
-
-    float yawRad = yaw * M_PI / 1024.0f;
-    float dx = std::cos(yawRad);
-    float dy = std::sin(yawRad);
-
-    // Simple forward/back and strafe
-    if (ctx.isKeyDown(SDL_SCANCODE_W))
-    {
-        px += dx * panSpeed;
-        py += dy * panSpeed;
-    }
-    if (ctx.isKeyDown(SDL_SCANCODE_S))
-    {
-        px -= dx * panSpeed;
-        py -= dy * panSpeed;
-    }
-    if (ctx.isKeyDown(SDL_SCANCODE_A))
-    {
-        px -= dy * panSpeed;
-        py += dx * panSpeed;
-    }
-    if (ctx.isKeyDown(SDL_SCANCODE_D))
-    {
-        px += dy * panSpeed;
-        py -= dx * panSpeed;
-    }
-
-    party.setWorldPosition(px, py, pz);
 
     if (ctx.shared->mapScene)
     {
@@ -1186,7 +1214,8 @@ void InGameState::renderOverlay()
         lines.push_back("MAP: (NONE)");
     }
 
-    lines.push_back("ARROWS ORBIT  Q/E ZOOM  WASD PAN  R RESET");
+    lines.push_back("ARROWS MOVE/TURN  PGUP/PGDN LOOK  INS/DEL STRAFE  SHIFT RUN");
+    lines.push_back("SPACE/A ACTION  I INV  C CHARS  S SPELLS  R REST  M MAP");
     lines.push_back(std::format("F FLOORS:{}  V WALLS:{}  C CEIL:{}  P PORTAL:{}",
                                 onOff(renderOptions.showFloors), onOff(renderOptions.showWalls),
                                 onOff(renderOptions.showCeilings),

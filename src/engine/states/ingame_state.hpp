@@ -60,7 +60,7 @@ class InGameState : public IGameState
     MapRenderOptions renderOptions;
     bool showGrid = false;
     bool showAxes = true;
-    bool showHelpOverlay = true;
+    bool showHelpOverlay = false;
     ui::DialogueWindow dialogue_;
     ui::HUD hud_;
     ui::InventoryWidget inventory_;
