@@ -64,6 +64,8 @@ test_sources = files(
     'graphics/light_stack_test.cpp',
     'graphics/sprite_decoder_test.cpp',
     'graphics/outdoor_renderer_math_test.cpp',
+    'graphics/billboard_test.cpp',
+    'graphics/sprite_facing_test.cpp',
 )
 
 # Reuse source files from main build (without main.cpp)
