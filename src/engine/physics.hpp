@@ -2,6 +2,7 @@
 #pragma once
 
 #include <optional>
+
 #include "../formats/blv_map.hpp"
 #include "../formats/odm_map.hpp"
 #include "../game/party.hpp"
