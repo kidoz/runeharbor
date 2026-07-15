@@ -311,6 +311,8 @@ class Application
         int w = 0, h = 0;
     };
     TexRef ccFaceMask_;
+    TexRef ccSkyHeader_;
+    TexRef ccTitleHeader_;
     TexRef ccOkButton_;
     TexRef ccClearButton_;
     TexRef ccMinusButton_;

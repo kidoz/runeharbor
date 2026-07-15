@@ -161,7 +161,7 @@ constexpr int kFaceBaseStats[4][7] = {
     {11, 11, 11, 9, 11, 11, 9}, // Faces 0-7
     {7, 14, 11, 7, 11, 14, 9},  // Faces 8-11
     {14, 11, 11, 14, 7, 7, 9},  // Faces 12-15
-    {14, 7, 7, 11, 14, 11, 9},  // Faces 16-19
+    {14, 7, 7, 11, 11, 14, 9},  // Faces 16-19
 };
 
 // Face group index from faceId
@@ -184,15 +184,15 @@ struct ClassSkills
 };
 
 constexpr ClassSkills kClassStartingSkills[] = {
-    {"Sword", "Leather Armor"}, // Knight
-    {"Mace", "Spirit Magic"},   // Paladin
-    {"Bow", "Air Magic"},       // Archer
-    {"Mace", "Body Magic"},     // Cleric
-    {"Staff", "Fire Magic"},    // Sorcerer
-    {"Dagger", "Stealing"},     // Thief
-    {"Dodging", "Unarmed"},     // Monk
-    {"Axe", "Perception"},      // Ranger
-    {"Dagger", "Earth Magic"},  // Druid
+    {"Sword", "Leather Armor"}, // Knight (base 0)
+    {"Dagger", "Stealing"},     // Thief (base 1)
+    {"Dodging", "Unarmed"},     // Monk (base 2)
+    {"Mace", "Spirit Magic"},   // Paladin (base 3)
+    {"Bow", "Air Magic"},       // Archer (base 4)
+    {"Axe", "Perception"},      // Ranger (base 5)
+    {"Mace", "Body Magic"},     // Cleric (base 6)
+    {"Dagger", "Earth Magic"},  // Druid (base 7)
+    {"Staff", "Fire Magic"},    // Sorcerer (base 8)
 };
 
 void groundPartyToOutdoorTerrain(game::Party& party, const MapScene* scene,
@@ -1509,7 +1509,14 @@ bool Application::loadUiAssets()
 
     // Load bitmap fonts (FONTPAL + .fnt files from ICONS.LOD)
     {
-        auto fontPalData = vfs->readFile("FONTPAL");
+        // FONTPAL is stored as a 1x1 image whose trailing 768 bytes are the
+        // actual font palette, not as a standalone 768-byte file.
+        auto fontPalData = vfs->getImagePalette("FONTPAL");
+        if (!fontPalData.has_value())
+            fontPalData = vfs->getImagePalette("fontpal");
+        // Keep compatibility with archives that expose FONTPAL as raw bytes.
+        if (!fontPalData.has_value())
+            fontPalData = vfs->readFile("FONTPAL");
         if (!fontPalData.has_value())
             fontPalData = vfs->readFile("fontpal");
         if (fontPalData.has_value() && fontPalData->size() >= 768)
@@ -1617,6 +1624,10 @@ bool Application::loadUiAssets()
     }
 
     // Load character creation overlay textures from ICONS.LOD
+    loadPcxTexture({"MAKESKY", "makesky"}, "CreateSkyHeader", ccSkyHeader_.tex, ccSkyHeader_.w,
+                   ccSkyHeader_.h);
+    loadPcxTexture({"MAKETOP", "maketop"}, "CreateTitleHeader", ccTitleHeader_.tex,
+                   ccTitleHeader_.w, ccTitleHeader_.h);
     loadPcxTexture({"FACEMASK", "facemask"}, "FaceMask", ccFaceMask_.tex, ccFaceMask_.w,
                    ccFaceMask_.h);
     loadPcxTexture({"BUTTMAKE", "buttmake"}, "OkBtn", ccOkButton_.tex, ccOkButton_.w,
@@ -1680,6 +1691,8 @@ bool Application::loadUiAssets()
             charCreationState->setPortraitTexture(i, portraitTextures[i], portraitWidths[i],
                                                   portraitHeights[i]);
         }
+        charCreationState->setSkyHeader(ccSkyHeader_.tex, ccSkyHeader_.w, ccSkyHeader_.h);
+        charCreationState->setTitleHeader(ccTitleHeader_.tex, ccTitleHeader_.w, ccTitleHeader_.h);
         charCreationState->setFaceMask(ccFaceMask_.tex, ccFaceMask_.w, ccFaceMask_.h);
         charCreationState->setOkButton(ccOkButton_.tex, ccOkButton_.w, ccOkButton_.h);
         charCreationState->setClearButton(ccClearButton_.tex, ccClearButton_.w, ccClearButton_.h);
@@ -1756,6 +1769,8 @@ void Application::unloadUiAssets()
             renderer->destroyTexture(tex);
         }
         renderer->destroyTexture(ccFaceMask_.tex);
+        renderer->destroyTexture(ccSkyHeader_.tex);
+        renderer->destroyTexture(ccTitleHeader_.tex);
         renderer->destroyTexture(ccOkButton_.tex);
         renderer->destroyTexture(ccClearButton_.tex);
         renderer->destroyTexture(ccMinusButton_.tex);
@@ -1794,6 +1809,8 @@ void Application::unloadUiAssets()
     loadingFrameHeights.clear();
     loadingFrameNumbers.clear();
     ccFaceMask_ = {};
+    ccSkyHeader_ = {};
+    ccTitleHeader_ = {};
     ccOkButton_ = {};
     ccClearButton_ = {};
     ccMinusButton_ = {};
@@ -2533,10 +2550,12 @@ void Application::initDefaultParty()
     party[0].charClass = CharacterClass::Knight;
     updateCharacterForFace(party[0]);
     updateSkillsForClass(party[0]);
+    party[0].skills.push_back("Mace");
+    game::syncSkillLevelsFromDisplaySkills(party[0]);
 
     party[1].name = "Roderick";
     party[1].faceId = 3;
-    party[1].charClass = CharacterClass::Thief;
+    party[1].charClass = CharacterClass::Monk;
     updateCharacterForFace(party[1]);
     updateSkillsForClass(party[1]);
 

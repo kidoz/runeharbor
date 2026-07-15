@@ -20,6 +20,8 @@ class CharacterCreationState : public IGameState
     void setBackground(void* tex, int w, int h);
     void setFallbackBackground(void* tex, int w, int h);
     void setPortraitTexture(int index, void* tex, int w, int h);
+    void setSkyHeader(void* tex, int w, int h);
+    void setTitleHeader(void* tex, int w, int h);
 
     // Overlay texture setters
     void setFaceMask(void* tex, int w, int h);
@@ -78,6 +80,8 @@ class CharacterCreationState : public IGameState
         int w = 0, h = 0;
     };
     TexRef faceMask;
+    TexRef skyHeader;
+    TexRef titleHeader;
     TexRef okButton;
     TexRef clearButton;
     TexRef minusButton;

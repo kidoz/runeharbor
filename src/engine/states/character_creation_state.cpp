@@ -56,7 +56,7 @@ constexpr int kFaceBaseStats[4][7] = {
     {11, 11, 11, 9, 11, 11, 9}, // Faces 0-7 (Human)
     {7, 14, 11, 7, 11, 14, 9},  // Faces 8-11 (Elf)
     {14, 11, 11, 14, 7, 7, 9},  // Faces 12-15 (Dwarf)
-    {14, 7, 7, 11, 14, 11, 9},  // Faces 16-19 (Goblin)
+    {14, 7, 7, 11, 11, 14, 9},  // Faces 16-19 (Goblin)
 };
 
 constexpr int kFaceStatMax[4][7] = {
@@ -113,19 +113,19 @@ constexpr ClassSkills kClassStartingSkills[] = {
 
 // Skill display names (indexed by SkillId-like order)
 const char* kSkillNames[] = {
-    "Staff",    "Sword",    "Dagger",  "Axe",      "Spear",      "Bow",        "Mace",
-    "Blaster",  "Shield",   "Leather", "Chain",    "Plate",      "Fire",       "Air",
-    "Water",    "Earth",    "Spirit",  "Mind",     "Body",       "Light",      "Dark",
-    "Identify", "Merchant", "Repair",  "Body Bld", "Meditation", "Perception", "Diplomacy",
-    "Thievery", "Disarm",   "Dodging", "Unarmed",  "Mon. Lore",  "Armsmaster", "Stealing",
+    "Staff",    "Sword",    "Dagger",  "Axe",     "Spear",      "Bow",        "Mace",
+    "Blaster",  "Shield",   "Leather", "Chain",   "Plate",      "Fire",       "Air",
+    "Water",    "Earth",    "Spirit",  "Mind",    "Body",       "Light",      "Dark",
+    "Identify", "Merchant", "Repair",  "Body",    "Meditation", "Perception", "Diplomacy",
+    "Thievery", "Disarm",   "Dodging", "Unarmed", "Mon. Lore",  "Armsmaster", "Stealing",
     "Alchemy",  "Learning",
 };
 
 // Available additional skills per base class (indices into kSkillNames)
 // These are the skills each class CAN learn, minus their 2 starting skills.
 const std::vector<std::vector<int>> kClassAvailableSkills = {
-    // Knight(0): Axe, Mace, Bow, Shield, Chain, Plate, BodyBld, Repair, Armsmaster, Perception
-    {3, 6, 5, 8, 10, 11, 24, 23, 33, 26},
+    // Knight(0): Axe, Spear, Bow, Mace, Shield, Chain, Body, Perception, Armsmaster
+    {3, 4, 5, 6, 8, 10, 24, 26, 33},
     // Thief(1): Sword, Bow, Mace, Leather, Shield, DisarmTrap, Perception, Merchant, Dodging
     {1, 5, 6, 9, 8, 29, 26, 22, 30},
     // Monk(2): Staff, Mace, Leather, BodyBld, Meditation, Spirit, Mind, Body, Perception, Learning
@@ -237,6 +237,16 @@ void CharacterCreationState::setPortraitTexture(int index, void* tex, int w, int
     }
 }
 
+void CharacterCreationState::setSkyHeader(void* tex, int w, int h)
+{
+    skyHeader = {tex, w, h};
+}
+
+void CharacterCreationState::setTitleHeader(void* tex, int w, int h)
+{
+    titleHeader = {tex, w, h};
+}
+
 void CharacterCreationState::setFaceMask(void* tex, int w, int h)
 {
     faceMask = {tex, w, h};
@@ -276,7 +286,7 @@ void CharacterCreationState::setClassIcon(int index, void* tex, int w, int h)
 void CharacterCreationState::enter()
 {
     activeCharacterIndex = 0;
-    menuRowIndex = 0;
+    menuRowIndex = 3;
     isNaming = false;
     rebuildAvailableSkills();
 }
@@ -446,20 +456,6 @@ std::optional<GameStateId> CharacterCreationState::update()
             }
 
             menuRowIndex = 3 + s;
-            const int minusW = minusButton.w > 0 ? minusButton.w : 12;
-            const int minusH = minusButton.h > 0 ? minusButton.h : 12;
-            const int plusW = plusButton.w > 0 ? plusButton.w : 12;
-            const int plusH = plusButton.h > 0 ? plusButton.h : 12;
-            const int minusX = panelX + colWidth - 30 - minusW;
-            const int plusX = panelX + colWidth - 14;
-            if (inRect(gameX, gameY, minusX, statY, minusW, minusH))
-            {
-                adjustStat(ch, s, -1);
-            }
-            else if (inRect(gameX, gameY, plusX, statY, plusW, plusH))
-            {
-                adjustStat(ch, s, 1);
-            }
             break;
         }
 
@@ -692,19 +688,14 @@ void CharacterCreationState::render()
     }
     auto& party = *ctx.shared->party;
 
-    // 1. Background — dim to approximate VGA 6-bit DAC (original rendered through
-    //    256-color palette with 6-bit output, producing ~63% brightness vs true-color)
+    // 1. Background
     if (background)
     {
-        SDL_SetTextureColorMod(static_cast<SDL_Texture*>(background), 160, 160, 160);
         ctx.renderFullscreenTexture(background, backgroundWidth, backgroundHeight);
-        SDL_SetTextureColorMod(static_cast<SDL_Texture*>(background), 255, 255, 255);
     }
     else if (fallbackBackground)
     {
-        SDL_SetTextureColorMod(static_cast<SDL_Texture*>(fallbackBackground), 160, 160, 160);
         ctx.renderFullscreenTexture(fallbackBackground, fallbackWidth, fallbackHeight);
-        SDL_SetTextureColorMod(static_cast<SDL_Texture*>(fallbackBackground), 255, 255, 255);
     }
 
     SDL_Renderer* sdlRenderer = ctx.renderer->getSDLRenderer();
@@ -714,12 +705,11 @@ void CharacterCreationState::render()
     }
     SDL_SetRenderDrawBlendMode(sdlRenderer, SDL_BLENDMODE_BLEND);
 
-    // Font pointers (may be null if .fnt files weren't found)
-    // Use arrus (h=19) for character names — cchar (h=29) is too tall and overlaps
-    // the race/gender line below. The original game uses a compact name display.
-    auto* nameFont = ctx.arrusFont;
-    auto* labelFont = ctx.arrusFont;
-    auto* numFont = ctx.smallnumFont ? ctx.smallnumFont : ctx.arrusFont;
+    // create.fnt is the compact body font designed for this screen. cchar.fnt is
+    // reserved for the large, widely spaced title.
+    auto* nameFont = ctx.createFont;
+    auto* labelFont = ctx.createFont;
+    auto* numFont = ctx.createFont;
 
     // Scale factor for debug text fallback
     float gameScale =
@@ -764,13 +754,15 @@ void CharacterCreationState::render()
         }
     };
 
-    // 1b. "CREATE PARTY" header at top center
+    // 1b. Original top overlays replace the cyan color-key areas in makeme.pcx.
+    drawOverlay(skyHeader, 0, 0);
+    drawOverlay(titleHeader, 0, 0);
+
     {
-        auto* headerFont = ctx.createFont;
-        std::string_view headerText = "CREATE PARTY";
-        int headerW = measureGameText(headerText, headerFont);
-        int headerX = (kGameWidth - headerW) / 2;
-        drawText(headerX, 4, headerText, headerFont, 255, 255, 255);
+        auto* headerFont = ctx.ccharFont;
+        constexpr std::string_view headerText = "C R E A T E   P A R T Y";
+        const int headerWidth = measureGameText(headerText, headerFont);
+        drawText((kGameWidth - headerWidth) / 2, -3, headerText, headerFont, 255, 255, 255);
     }
 
     // Layout constants from Ghidra reverse-engineering of original MM7-Rel.exe
@@ -866,12 +858,7 @@ void CharacterCreationState::render()
             std::string nameStr = ch.name;
             if (isActive && isNaming)
                 nameStr += "_";
-            // Center the name within the panel
-            int nameW = measureGameText(nameStr, nameFont);
-            int nameX = panelCenterX - nameW / 2;
-            if (nameX < panelX)
-                nameX = panelX;
-            drawText(nameX, nameY, nameStr, nameFont, nr, ng, nb);
+            drawText(panelX + 10, nameY, nameStr, nameFont, nr, ng, nb);
         }
 
         // 6a. Class icon in portrait area (Ghidra: local_13c + 0x4D, Y=0x32)
@@ -922,16 +909,23 @@ void CharacterCreationState::render()
             int valX = panelX + colWidth - valW - 10;
             drawText(valX, statY, valStr, numFont, sr, sg, sb);
 
-            // +/- buttons for active stat row
+            // The selected stat is bracketed by inward-pointing gold arrows.
+            // Bonus changes are made with the +/- controls in the bottom panel.
             if (isActive && menuRowIndex == 3 + s)
             {
-                if (minusButton.tex)
+                if (rightArrow.tex)
                 {
-                    drawOverlay(minusButton, panelX + colWidth - 30 - minusButton.w, statY);
+                    auto* arrow = static_cast<SDL_Texture*>(rightArrow.tex);
+                    SDL_SetTextureColorMod(arrow, 232, 176, 72);
+                    drawOverlay(rightArrow, panelX + 2, statY + 2);
+                    SDL_SetTextureColorMod(arrow, 255, 255, 255);
                 }
-                if (plusButton.tex)
+                if (leftArrow.tex)
                 {
-                    drawOverlay(plusButton, panelX + colWidth - 14, statY);
+                    auto* arrow = static_cast<SDL_Texture*>(leftArrow.tex);
+                    SDL_SetTextureColorMod(arrow, 232, 176, 72);
+                    drawOverlay(leftArrow, panelX + colWidth - leftArrow.w - 2, statY + 2);
+                    SDL_SetTextureColorMod(arrow, 255, 255, 255);
                 }
             }
         }
