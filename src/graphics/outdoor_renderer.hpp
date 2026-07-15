@@ -51,8 +51,6 @@ class OutdoorRenderer
                                const game::RuntimeConfig* runtimeConfig, float nightBlend,
                                const Frustum* frustumOverride);
 
-
-
     SDLRenderer& renderer;
     util::ILogger& logger;
     TextureLookup textureLookup;
@@ -60,38 +58,40 @@ class OutdoorRenderer
     const formats::SpriteFrameTable* spriteFrameTable = nullptr;
 };
 
-namespace detail {
-    struct OutdoorLightingParams
-    {
-        float shadeStart = 2048.0f;
-        float shadeMistStart = 4096.0f;
-        float mistFull = 8192.0f;
-        bool noMist = false;
-        float gammaScale = 1.0f;
-        float ambientScale = 1.0f;
-        SDL_FColor mistColor = {153.0f / 255.0f, 193.0f / 255.0f, 237.0f / 255.0f, 1.0f};
-    };
+namespace detail
+{
+struct OutdoorLightingParams
+{
+    float shadeStart = 2048.0f;
+    float shadeMistStart = 4096.0f;
+    float mistFull = 8192.0f;
+    bool noMist = false;
+    float gammaScale = 1.0f;
+    float ambientScale = 1.0f;
+    SDL_FColor mistColor = {153.0f / 255.0f, 193.0f / 255.0f, 237.0f / 255.0f, 1.0f};
+};
 
-    SDL_FColor applyOutdoorLighting(SDL_FColor color, float distance, const OutdoorLightingParams& params);
+SDL_FColor applyOutdoorLighting(SDL_FColor color, float distance,
+                                const OutdoorLightingParams& params);
 
-    struct SpawnBillboard
-    {
-        Vec3 basePos;
-        float halfWidth = 24.0f;
-        float height = 56.0f;
-        float distanceSq = 0.0f;
-        SDL_FColor color = {1.0f, 1.0f, 1.0f, 0.75f};
-        std::string textureName;
-        uint32_t attributes = 0;
-    };
+struct SpawnBillboard
+{
+    Vec3 basePos;
+    float halfWidth = 24.0f;
+    float height = 56.0f;
+    float distanceSq = 0.0f;
+    SDL_FColor color = {1.0f, 1.0f, 1.0f, 0.75f};
+    std::string textureName;
+    uint32_t attributes = 0;
+};
 
-    SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, const Vec3& cameraPos,
-                                             const game::RuntimeConfig* config,
-                                             const OutdoorRenderer::MonsterSpriteLookup& monsterLookup,
-                                             const formats::SpriteFrameTable* spriteFrameTable,
-                                             uint32_t ticks = 0);
-                                             
-    float calcHorizonY(float viewportHeight, float fovY, float cameraPitch);
+SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, const Vec3& cameraPos,
+                                         const game::RuntimeConfig* config,
+                                         const OutdoorRenderer::MonsterSpriteLookup& monsterLookup,
+                                         const formats::SpriteFrameTable* spriteFrameTable,
+                                         uint32_t ticks = 0);
+
+float calcHorizonY(float viewportHeight, float fovY, float cameraPitch);
 } // namespace detail
 
 } // namespace runeharbor::graphics

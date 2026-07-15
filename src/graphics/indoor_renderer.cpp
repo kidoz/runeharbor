@@ -12,8 +12,10 @@
 #include <cmath>
 
 #include "../game/game_world.hpp"
+#include "billboard.hpp"
 #include "clip_utils.hpp"
 #include "shaders_compiled.hpp"
+#include "sprite_facing.hpp"
 #include "visibility.hpp"
 
 namespace runeharbor::graphics
@@ -201,6 +203,7 @@ struct BillboardSprite
     SDL_FColor color = {1.0f, 1.0f, 1.0f, 1.0f};
     std::string textureName;
     uint32_t attributes = 0;
+    bool flipU = false;
 };
 
 BillboardSprite makeIndoorDecorationBillboard(const formats::ParsedDecoration& decoration,
@@ -275,27 +278,16 @@ BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, co
         std::string baseName = monsterLookup(spawn.objectType);
         if (!baseName.empty())
         {
-            // Implement 8-directional facing index based on time and camera angle
-            uint32_t ticks = SDL_GetTicks();
-            // Slowly spin stationary spawns for idle animation effect
-            int facing = (ticks / 10) % 2048;
-
-            // Camera relative angle
-            float dx = cameraPos.x - sprite.basePos.x;
-            float dz = cameraPos.z - sprite.basePos.z;
-            float camAngle = std::atan2(dx, dz);
-
-            // Convert to MM7 angle (0 to 2047)
-            int camFacing = static_cast<int>((camAngle + M_PI) * 1024.0f / M_PI) % 2048;
-            if (camFacing < 0)
-                camFacing += 2048;
-
-            // Difference mapped to 8 directions
-            int directionIndex = ((facing - camFacing + 2048 + 128) >> 8) & 7;
+            // The sprite's own heading is stable per spawn (no per-frame spin); the
+            // octant we draw depends on where the camera stands relative to it.
+            const int spriteHeading = (static_cast<int>(spawn.objectIndex) * 137) % kMM7FullTurn;
+            const int octant = cameraRelativeOctant(spriteHeading, cameraPos, sprite.basePos);
+            const SpriteFacing facing = resolveSpriteFacing(octant);
+            sprite.flipU = facing.flipU;
 
             std::string frameName =
                 std::format("{}{:02d}", baseName.substr(0, std::min<size_t>(baseName.length(), 6)),
-                            directionIndex + 1);
+                            facing.frameDirection);
 
             sprite.textureName = frameName;
             if (spriteFrameTable)
@@ -317,28 +309,6 @@ BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, co
                     sprite.attributes = entry->attributes;
                 }
             }
-        }
-    }
-
-    if (monsterLookup)
-    {
-        std::string baseName = monsterLookup(spawn.objectType);
-        if (!baseName.empty())
-        {
-            // Calculate 8-directional facing index based on time and angle
-            // facing is probably 0-2047, but for now we'll just use a time offset for random
-            // rotation
-            uint32_t ticks = SDL_GetTicks();
-            uint32_t animOffset = (ticks / 100) % 8; // Change frame every 100ms
-
-            // Assuming static spawns just face forward for now if we don't have their rotation
-            int directionIndex = animOffset; // fallback random rotation
-
-            // Limit to max 11 chars + 2 digit suffix if needed, but std::format handles it
-            sprite.textureName =
-                std::format("{}{:02d}", baseName.substr(0, std::min<size_t>(baseName.length(), 6)),
-                            directionIndex + 1); // frames are often 1-indexed? Wait, MM7 uses 00-07
-                                                 // for directions maybe? Let's try 01
         }
     }
 
@@ -788,21 +758,6 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
 
             SDL_SetRenderDrawBlendMode(renderer.getSDLRenderer(), SDL_BLENDMODE_BLEND);
 
-            Vec3 toCamera = cameraPos - sprite.basePos;
-            toCamera.y = 0.0f;
-            if (toCamera.lengthSquared() < 0.001f)
-            {
-                toCamera = Vec3::forward();
-            }
-            const Vec3 forward = toCamera.normalized();
-            const Vec3 worldUp = Vec3::up();
-            Vec3 right = worldUp.cross(forward);
-            if (right.lengthSquared() < 0.001f)
-            {
-                right = Vec3::right();
-            }
-            right.normalize();
-
             SDL_Texture* texture = nullptr;
             float actualHalfWidth = sprite.halfWidth;
             float actualHeight = sprite.height;
@@ -843,15 +798,13 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                 drawColor.b = std::clamp(drawColor.b + shimmer * 0.2f, 0.0f, 1.0f);
             }
 
-            const Vec3 bottomLeft = drawPos - right * actualHalfWidth;
-            const Vec3 bottomRight = drawPos + right * actualHalfWidth;
-            const Vec3 topLeft = bottomLeft + worldUp * actualHeight;
-            const Vec3 topRight = bottomRight + worldUp * actualHeight;
+            const BillboardQuad quad = computeBillboardQuad(drawPos, cameraPos, actualHalfWidth,
+                                                            actualHeight, sprite.flipU);
 
-            const Vec4 clipBL = viewProjection * Vec4(bottomLeft, 1.0f);
-            const Vec4 clipBR = viewProjection * Vec4(bottomRight, 1.0f);
-            const Vec4 clipTL = viewProjection * Vec4(topLeft, 1.0f);
-            const Vec4 clipTR = viewProjection * Vec4(topRight, 1.0f);
+            const Vec4 clipBL = viewProjection * Vec4(quad.bottomLeft, 1.0f);
+            const Vec4 clipBR = viewProjection * Vec4(quad.bottomRight, 1.0f);
+            const Vec4 clipTL = viewProjection * Vec4(quad.topLeft, 1.0f);
+            const Vec4 clipTR = viewProjection * Vec4(quad.topRight, 1.0f);
             if (clipBL.w < CLIP_NEAR_EPSILON || clipBR.w < CLIP_NEAR_EPSILON ||
                 clipTL.w < CLIP_NEAR_EPSILON || clipTR.w < CLIP_NEAR_EPSILON)
             {
@@ -876,10 +829,10 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
             {
                 vertex.color = drawColor;
             }
-            vertices[0].tex_coord = {0.0f, 1.0f};
-            vertices[1].tex_coord = {1.0f, 1.0f};
-            vertices[2].tex_coord = {0.0f, 0.0f};
-            vertices[3].tex_coord = {1.0f, 0.0f};
+            vertices[0].tex_coord = {quad.uvBottomLeft.u, quad.uvBottomLeft.v};
+            vertices[1].tex_coord = {quad.uvBottomRight.u, quad.uvBottomRight.v};
+            vertices[2].tex_coord = {quad.uvTopLeft.u, quad.uvTopLeft.v};
+            vertices[3].tex_coord = {quad.uvTopRight.u, quad.uvTopRight.v};
 
             constexpr int indices[6] = {0, 1, 2, 2, 1, 3};
             SDL_RenderGeometry(renderer.getSDLRenderer(), texture, vertices, 4, indices, 6);

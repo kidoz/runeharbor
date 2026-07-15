@@ -5,11 +5,11 @@
 
 #include <algorithm>
 #include <format>
+#include <numbers>
 #include <unordered_map>
 
 #include <SDL3_shadercross/SDL_shadercross.h>
 #include <cmath>
-#include <numbers>
 
 #include "../game/game_world.hpp"
 #include "clip_utils.hpp"
@@ -28,8 +28,6 @@ float waterWavePhase(float worldX, float worldZ, float timeSeconds)
 {
     return timeSeconds * 2.4f + worldX * 0.0025f + worldZ * 0.0020f;
 }
-
-
 
 float gammaToScale(int gamma)
 {
@@ -59,7 +57,8 @@ std::array<uint8_t, 3> blendRgb(const std::array<uint8_t, 3>& day,
 
 } // namespace
 
-namespace detail {
+namespace detail
+{
 OutdoorLightingParams makeOutdoorLightingParams(const game::RuntimeConfig* runtimeConfig,
                                                 float nightBlend, bool terrainPass)
 {
@@ -138,8 +137,6 @@ SDL_FColor applyOutdoorLighting(SDL_FColor color, float distance,
     return color;
 }
 
-
-
 float calcHorizonY(float viewportHeight, float fovY, float cameraPitch)
 {
     const float viewPlaneDist = (viewportHeight / 2.0f) / std::tan(fovY / 2.0f);
@@ -208,7 +205,6 @@ SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, co
         }
     }
 
-
     const int group = std::max(0, static_cast<int>(spawn.group));
     const int seed = (static_cast<int>(spawn.objectType) * 163) ^
                      (static_cast<int>(spawn.objectIndex) * 97) ^ (group * 19);
@@ -234,13 +230,14 @@ SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, co
 
 } // namespace detail
 
-namespace {
+namespace
+{
 
 std::string toLowerCopy(std::string_view value)
 {
     std::string result(value);
     std::transform(result.begin(), result.end(), result.begin(),
-                   [](unsigned char c){ return std::tolower(c); });
+                   [](unsigned char c) { return std::tolower(c); });
     return result;
 }
 
@@ -252,9 +249,7 @@ OutdoorRenderer::OutdoorRenderer(SDLRenderer& renderer, util::ILogger& logger)
     (void)this->logger;
 }
 
-OutdoorRenderer::~OutdoorRenderer()
-{
-}
+OutdoorRenderer::~OutdoorRenderer() {}
 
 void OutdoorRenderer::setTextureLookup(TextureLookup lookup)
 {
@@ -920,10 +915,12 @@ void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
         }
 
         sprites.push_back(detail::makeOutdoorSpawnBillboard(spawn, cameraPos, runtimeConfig,
-                                                            monsterSpriteLookup, spriteFrameTable, SDL_GetTicks()));
+                                                            monsterSpriteLookup, spriteFrameTable,
+                                                            SDL_GetTicks()));
     }
 
-    std::sort(sprites.begin(), sprites.end(), [](const detail::SpawnBillboard& a, const detail::SpawnBillboard& b)
+    std::sort(sprites.begin(), sprites.end(),
+              [](const detail::SpawnBillboard& a, const detail::SpawnBillboard& b)
               { return a.distanceSq > b.distanceSq; });
 
     if (!sprites.empty())
@@ -949,7 +946,8 @@ void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
         right.normalize();
 
         const float distance = std::sqrt(sprite.distanceSq);
-        SDL_FColor drawColor = detail::applyOutdoorLighting(sprite.color, distance, billboardLighting);
+        SDL_FColor drawColor =
+            detail::applyOutdoorLighting(sprite.color, distance, billboardLighting);
         SDL_Texture* texture = nullptr;
         float actualHalfWidth = sprite.halfWidth;
         float actualHeight = sprite.height;
@@ -1033,9 +1031,6 @@ void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
     }
 }
 
-
-void OutdoorRenderer::invalidateGPUCache()
-{
-}
+void OutdoorRenderer::invalidateGPUCache() {}
 
 } // namespace runeharbor::graphics
