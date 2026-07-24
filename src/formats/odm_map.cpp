@@ -56,74 +56,33 @@ const char* tilesetGroupName(uint8_t tilesetId)
     }
 }
 
-// Build the tile table: for each possible tileIndex (0-255), resolve which tileset
-// group it belongs to and produce the texture name.
-// MM7 tile layout: each of the 4 tilesets owns a contiguous range of ~22 tile IDs.
-// Tile 0 = first tileset base, tiles 1-21 = first tileset variants, etc.
-// Special: tile IDs >= 90 are "road", "water overlay", etc.
+// Build the tile table: for each possible tile byte (0-255), resolve which of the
+// map's four tilesets it belongs to and produce the base texture name.
+//
+// MM7 terrain tile bytes select a tileset in 36-wide sections above a shared base
+// range: tile bytes < 90 are global/shared tiles, and tile bytes >= 90 map to
+//   section = (tile - 90) / 36  -> tileset index 0..3
+//   variant = (tile - 90) % 36  -> variant within that tileset (transition tiles)
+// The four tileset IDs come from the ODM header (e.g. out01.odm = [0,5,7,10] =
+// grass/dirt/water/…). Every tile is mapped to its tileset's base texture, which
+// reproduces the correct grass/dirt/water biomes. Per-variant transition textures
+// (grass↔dirt edges, shorelines) are a future refinement.
 std::vector<std::string> buildTileTextureTable(const std::array<uint8_t, 4>& tilesetIds)
 {
-    // Tiles per tileset group (MM7 standard)
-    constexpr int kTilesPerGroup = 22;
-    constexpr int kNumGroups = 4;
-    constexpr int kGroupedTiles = kNumGroups * kTilesPerGroup; // 88
+    constexpr int kFirstMapTile = 90; // tile bytes below this are shared base tiles
+    constexpr int kSectionWidth = 36; // tile bytes per map tileset
 
     std::vector<std::string> table(256);
-
-    for (int group = 0; group < kNumGroups; group++)
+    for (int t = 0; t < 256; t++)
     {
-        const char* baseName = tilesetGroupName(tilesetIds[static_cast<size_t>(group)]);
-        int startId = group * kTilesPerGroup;
-
-        for (int t = 0; t < kTilesPerGroup; t++)
+        int tilesetIdx = 0;
+        if (t >= kFirstMapTile)
         {
-            int tileId = startId + t;
-            if (t == 0)
-            {
-                // Base tile: use the full "tyl" name (e.g. "dirttyl")
-                table[static_cast<size_t>(tileId)] = baseName;
-            }
-            else
-            {
-                // Variant tiles: strip "tyl" suffix to get prefix, then:
-                //   t=1: prefix only (e.g. "dirt")
-                //   t=2: prefix + "1" (e.g. "dirt1")
-                //   t=3: prefix + "2" (e.g. "dirt2")
-                // This matches the LOD naming: DIRTtyl, DIRT, DIRT1, DIRT2, ...
-                std::string prefix(baseName);
-                if (prefix.size() >= 3 && prefix.substr(prefix.size() - 3) == "tyl")
-                {
-                    prefix = prefix.substr(0, prefix.size() - 3);
-                }
-
-                if (t == 1)
-                {
-                    table[static_cast<size_t>(tileId)] = prefix;
-                }
-                else
-                {
-                    table[static_cast<size_t>(tileId)] = prefix + std::to_string(t - 1);
-                }
-            }
+            tilesetIdx = std::clamp((t - kFirstMapTile) / kSectionWidth, 0, 3);
         }
+        table[static_cast<size_t>(t)] =
+            tilesetGroupName(tilesetIds[static_cast<size_t>(tilesetIdx)]);
     }
-
-    // Tiles 88-89: transition tiles (use first tileset base as fallback)
-    for (int t = kGroupedTiles; t < kGroupedTiles + 2 && t < 256; t++)
-    {
-        table[static_cast<size_t>(t)] = tilesetGroupName(tilesetIds[0]);
-    }
-
-    // Tiles 90+: road tiles. Use "pending" texture for road overlays.
-    // 90-107 = road group 1, 108-125 = road group 2, etc.
-    for (int t = 90; t < 256; t++)
-    {
-        if (table[static_cast<size_t>(t)].empty())
-        {
-            table[static_cast<size_t>(t)] = tilesetGroupName(tilesetIds[0]);
-        }
-    }
-
     return table;
 }
 
