@@ -228,6 +228,51 @@ SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, co
     return sprite;
 }
 
+SpawnBillboard makeOutdoorDecorationBillboard(const formats::ParsedDecoration& decoration,
+                                              const Vec3& cameraPos,
+                                              const formats::SpriteFrameTable* spriteFrameTable)
+{
+    SpawnBillboard sprite;
+    sprite.basePos =
+        gameplayToRenderPosition(static_cast<float>(decoration.x), static_cast<float>(decoration.y),
+                                 static_cast<float>(decoration.z));
+    sprite.textureName = decoration.name;
+
+    if (spriteFrameTable)
+    {
+        if (const auto* entry = spriteFrameTable->findEntryByIcon(decoration.name))
+        {
+            std::string tn = entry->textureName;
+            while (!tn.empty() && std::isspace(static_cast<unsigned char>(tn.back())))
+                tn.pop_back();
+            size_t start = 0;
+            while (start < tn.length() && std::isspace(static_cast<unsigned char>(tn[start])))
+                start++;
+            sprite.textureName = tn.substr(start);
+            sprite.attributes = entry->attributes;
+        }
+    }
+
+    // Tint emissive/liquid decorations to match the indoor treatment.
+    std::string lower = sprite.textureName;
+    for (char& c : lower)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    sprite.color = {1.0f, 1.0f, 1.0f, 1.0f};
+    if (lower.find("torch") != std::string::npos || lower.find("fire") != std::string::npos)
+        sprite.color = {1.0f, 0.82f, 0.50f, 0.92f};
+    else if (lower.find("water") != std::string::npos || lower.find("mist") != std::string::npos)
+        sprite.color = {0.66f, 0.82f, 1.0f, 0.80f};
+
+    // Fallback size when the texture cannot be measured; the draw pass overrides
+    // this from the actual sprite dimensions.
+    sprite.halfWidth = 32.0f;
+    sprite.height = 96.0f;
+
+    const Vec3 delta = sprite.basePos - cameraPos;
+    sprite.distanceSq = delta.lengthSquared();
+    return sprite;
+}
+
 } // namespace detail
 
 namespace
@@ -292,7 +337,7 @@ void OutdoorRenderer::render(const engine::MapScene& scene, const Camera& camera
     renderTerrain(odmData, camera, runtimeConfig, blend, finalFrustum);
     // These draw on top of the terrain/sky using SDL_Renderer
     renderBuildings(odmData, camera, runtimeConfig, blend, finalFrustum);
-    renderSpawnBillboards(odmData, camera, runtimeConfig, blend, finalFrustum);
+    renderBillboards(odmData, camera, runtimeConfig, blend, finalFrustum);
 }
 
 void OutdoorRenderer::renderSky(const game::RuntimeConfig* runtimeConfig, float nightBlend)
@@ -866,21 +911,10 @@ void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const 
     }
 }
 
-void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
-                                            const Camera& camera,
-                                            const game::RuntimeConfig* runtimeConfig,
-                                            float nightBlend, const Frustum* frustumOverride)
+void OutdoorRenderer::renderBillboards(const formats::ODMMapData& odmData, const Camera& camera,
+                                       const game::RuntimeConfig* runtimeConfig, float nightBlend,
+                                       const Frustum* frustumOverride)
 {
-    if (odmData.spawns.empty())
-    {
-        return;
-    }
-
-    if (runtimeConfig && runtimeConfig->noMonsters)
-    {
-        return;
-    }
-
     const auto& viewProjection = camera.getViewProjectionMatrix();
     const Vec3 cameraPos = camera.getPosition();
     const float vpW = static_cast<float>(renderer.getViewportWidth());
@@ -898,25 +932,62 @@ void OutdoorRenderer::renderSpawnBillboards(const formats::ODMMapData& odmData,
         detail::makeOutdoorLightingParams(runtimeConfig, nightBlend, false);
 
     std::vector<detail::SpawnBillboard> sprites;
-    sprites.reserve(odmData.spawns.size());
-    for (const auto& spawn : odmData.spawns)
+
+    // Monster spawns.
+    if (!(runtimeConfig && runtimeConfig->noMonsters))
     {
-        if (spawn.objectType == 0)
+        sprites.reserve(odmData.spawns.size() + odmData.decorations.size());
+        for (const auto& spawn : odmData.spawns)
         {
-            continue;
-        }
+            if (spawn.objectType == 0)
+            {
+                continue;
+            }
 
-        const float cullRadius = std::max(64.0f, static_cast<float>(spawn.radius) * 2.0f);
-        const Vec3 renderPos = gameplayToRenderPosition(
-            static_cast<float>(spawn.x), static_cast<float>(spawn.y), static_cast<float>(spawn.z));
-        if (!frustum->testSphere(renderPos.x, renderPos.y, renderPos.z, cullRadius))
+            const float cullRadius = std::max(64.0f, static_cast<float>(spawn.radius) * 2.0f);
+            const Vec3 renderPos =
+                gameplayToRenderPosition(static_cast<float>(spawn.x), static_cast<float>(spawn.y),
+                                         static_cast<float>(spawn.z));
+            if (!frustum->testSphere(renderPos.x, renderPos.y, renderPos.z, cullRadius))
+            {
+                continue;
+            }
+
+            sprites.push_back(detail::makeOutdoorSpawnBillboard(spawn, cameraPos, runtimeConfig,
+                                                                monsterSpriteLookup,
+                                                                spriteFrameTable, SDL_GetTicks()));
+        }
+    }
+
+    // Static decorations (trees, rocks, signs, campfires). Sound/event markers carry
+    // no sprite and are skipped when their texture does not resolve.
+    if (!(runtimeConfig && runtimeConfig->noDecorations))
+    {
+        for (const auto& deco : odmData.decorations)
         {
-            continue;
+            if (deco.hidden)
+            {
+                continue;
+            }
+            const Vec3 renderPos = gameplayToRenderPosition(
+                static_cast<float>(deco.x), static_cast<float>(deco.y), static_cast<float>(deco.z));
+            if (!frustum->testSphere(renderPos.x, renderPos.y, renderPos.z, 512.0f))
+            {
+                continue;
+            }
+            detail::SpawnBillboard sprite =
+                detail::makeOutdoorDecorationBillboard(deco, cameraPos, spriteFrameTable);
+            if (sprite.textureName.empty() || (textureLookup && !textureLookup(sprite.textureName)))
+            {
+                continue;
+            }
+            sprites.push_back(std::move(sprite));
         }
+    }
 
-        sprites.push_back(detail::makeOutdoorSpawnBillboard(spawn, cameraPos, runtimeConfig,
-                                                            monsterSpriteLookup, spriteFrameTable,
-                                                            SDL_GetTicks()));
+    if (sprites.empty())
+    {
+        return;
     }
 
     std::sort(sprites.begin(), sprites.end(),

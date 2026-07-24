@@ -47,9 +47,9 @@ class OutdoorRenderer
     void renderBuildings(const formats::ODMMapData& odmData, const Camera& camera,
                          const game::RuntimeConfig* runtimeConfig, float nightBlend,
                          const Frustum* frustumOverride);
-    void renderSpawnBillboards(const formats::ODMMapData& odmData, const Camera& camera,
-                               const game::RuntimeConfig* runtimeConfig, float nightBlend,
-                               const Frustum* frustumOverride);
+    void renderBillboards(const formats::ODMMapData& odmData, const Camera& camera,
+                          const game::RuntimeConfig* runtimeConfig, float nightBlend,
+                          const Frustum* frustumOverride);
 
     SDLRenderer& renderer;
     util::ILogger& logger;
