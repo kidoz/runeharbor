@@ -4403,6 +4403,12 @@ void Application::setBootConfig(const BootConfig& config)
         logger.info("Boot config: skipping intro videos");
         transitionTo(GameStateId::TitleScreen);
     }
+
+    if (config.bootCharCreate)
+    {
+        logger.info("Boot config: jumping to Create Party screen");
+        transitionTo(GameStateId::CharacterCreation);
+    }
 }
 
 void Application::shutdown()

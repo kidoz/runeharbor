@@ -32,6 +32,7 @@ int main(int argc, char* argv[])
     bool forceIndoor = false;
     bool forceOutdoor = false;
     engine::StartupSettings cliSettings;
+    bool bootCharCreate = false;
 
     for (int i = 1; i < argc; i++)
     {
@@ -100,6 +101,10 @@ int main(int argc, char* argv[])
         {
             useDefs = true;
         }
+        else if (arg == "--charcreate")
+        {
+            bootCharCreate = true;
+        }
         else if (dataPathArg.empty())
         {
             dataPathArg = arg;
@@ -129,6 +134,7 @@ int main(int argc, char* argv[])
         logger->info("  -noanim            Disable animations");
         logger->info("  -window            Run in windowed mode");
         logger->info("  -usedefs           Prefer text definition tables (dev mode)");
+        logger->info("  --charcreate       Boot directly to the Create Party screen (dev)");
         logger->info("  -h, --help         Show this help");
         return 0;
     }
@@ -189,6 +195,7 @@ int main(int argc, char* argv[])
     bootConfig.noAnim = startupSettings.noAnim;
     bootConfig.mixerChannels = startupSettings.mixerChannels;
     bootConfig.windowed = startupSettings.windowed;
+    bootConfig.bootCharCreate = bootCharCreate;
     bootConfig.showFr = startupSettings.showFr;
     bootConfig.noMonster = startupSettings.noMonster;
     bootConfig.noDamage = startupSettings.noDamage;

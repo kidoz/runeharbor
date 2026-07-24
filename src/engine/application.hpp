@@ -103,6 +103,8 @@ struct BootConfig
     int mixerChannels = 16;
     bool windowed = false;
     bool showFr = false;
+    // Dev convenience: jump straight to the Create Party screen at boot.
+    bool bootCharCreate = false;
     bool noMonster = false;
     bool noDamage = false;
     bool noDecoration = false;
