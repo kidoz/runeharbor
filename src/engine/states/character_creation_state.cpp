@@ -51,6 +51,19 @@ int baseClassDisplayIndex(CharacterClass c)
 const std::vector<std::string> kStatNames = {"Might",    "Intellect", "Personality", "Endurance",
                                              "Accuracy", "Speed",     "Luck"};
 
+// Bonus-panel geometry, measured from the baked layout in makeme.pcx.
+// Value panel spans game-x ~541-613; the -/+ buttons are baked at ~524-540 and ~614-630.
+constexpr int kBonusPanelCenterX = 577; // center of the value panel
+constexpr int kBonusMinusX = 524;       // left edge of the baked "-" box
+constexpr int kBonusPlusX = 614;        // left edge of the baked "+" box
+constexpr int kBonusButtonY = 402;      // top of the -/+ button row
+constexpr int kBonusButtonW = 16;       // baked button box width
+constexpr int kBonusButtonH = 22;       // baked button box height
+// The value box spans game-y ~393-427 (Clear/OK start at 428). create.fnt is 18px
+// tall, so the label and count stack tight near the top to avoid the buttons.
+constexpr int kBonusLabelY = 393; // "Bonus" label row (below the panel top border)
+constexpr int kBonusValueY = 410; // remaining-points count row
+
 // Face group base stats
 constexpr int kFaceBaseStats[4][7] = {
     {11, 11, 11, 9, 11, 11, 9}, // Faces 0-7 (Human)
@@ -100,15 +113,15 @@ struct ClassSkills
 };
 
 constexpr ClassSkills kClassStartingSkills[] = {
-    {"Sword", "Leather Armor"}, // Knight (base 0)
-    {"Dagger", "Stealing"},     // Thief (base 1)
-    {"Dodging", "Unarmed"},     // Monk (base 2)
-    {"Mace", "Spirit Magic"},   // Paladin (base 3)
-    {"Bow", "Air Magic"},       // Archer (base 4)
-    {"Axe", "Perception"},      // Ranger (base 5)
-    {"Mace", "Body Magic"},     // Cleric (base 6)
-    {"Dagger", "Earth Magic"},  // Druid (base 7)
-    {"Staff", "Fire Magic"},    // Sorcerer (base 8)
+    {"Sword", "Leather"},      // Knight (base 0)
+    {"Dagger", "Stealing"},    // Thief (base 1)
+    {"Dodging", "Unarmed"},    // Monk (base 2)
+    {"Mace", "Spirit Magic"},  // Paladin (base 3)
+    {"Bow", "Air Magic"},      // Archer (base 4)
+    {"Axe", "Perception"},     // Ranger (base 5)
+    {"Mace", "Body Magic"},    // Cleric (base 6)
+    {"Dagger", "Earth Magic"}, // Druid (base 7)
+    {"Staff", "Fire Magic"},   // Sorcerer (base 8)
 };
 
 // Skill display names (indexed by SkillId-like order)
@@ -491,15 +504,11 @@ std::optional<GameStateId> CharacterCreationState::update()
         if (menuRowIndex >= 3 && menuRowIndex <= 9)
         {
             const int statIdx = menuRowIndex - 3;
-            const int minusW = minusButton.w > 0 ? minusButton.w : 12;
-            const int minusH = minusButton.h > 0 ? minusButton.h : 12;
-            const int plusW = plusButton.w > 0 ? plusButton.w : 12;
-            const int plusH = plusButton.h > 0 ? plusButton.h : 12;
-            if (inRect(gameX, gameY, 489, 402, minusW, minusH))
+            if (inRect(gameX, gameY, kBonusMinusX, kBonusButtonY, kBonusButtonW, kBonusButtonH))
             {
                 adjustStat(ch, statIdx, -1);
             }
-            else if (inRect(gameX, gameY, 619, 402, plusW, plusH))
+            else if (inRect(gameX, gameY, kBonusPlusX, kBonusButtonY, kBonusButtonW, kBonusButtonH))
             {
                 adjustStat(ch, statIdx, 1);
             }
@@ -781,8 +790,10 @@ void CharacterCreationState::render()
     constexpr int nameClassX[] = {18, 177, 336, 495}; // local_13c stride 0x9F
     constexpr int classOverlayY = 100;                // class name on portrait (Ghidra line 98)
     constexpr int classIconY = 50; // 0x32 — class icon on portrait (Ghidra line 99)
-    constexpr int faceMaskY = 29;  // 0x1D — FACEMASK for selected char
-    constexpr int faceMaskX[] = {12, 171, 329, 488}; // local_120 values
+    // FACEMASK is the active-character selection ring; it must sit concentric with
+    // the oval frame baked into makeme.pcx, i.e. aligned to the portrait position.
+    constexpr int faceMaskY = 35;                    // match portraitY
+    constexpr int faceMaskX[] = {17, 176, 335, 494}; // match portraitX
 
     for (int c = 0; c < 4; c++)
     {
@@ -984,16 +995,22 @@ void CharacterCreationState::render()
         uint8_t bonusR = bonusPoints > 0 ? 255 : 200;
         uint8_t bonusG = bonusPoints > 0 ? 230 : 200;
         uint8_t bonusB = 150;
-        drawText(529, 395, "Bonus", labelFont, bonusR, bonusG, bonusB);
-        drawText(536, 417, std::to_string(bonusPoints), numFont, bonusR, bonusG, bonusB);
+        // The "Bonus" label and remaining-points count are centered in the value
+        // panel of makeme.pcx — the dark box between the baked -/+ buttons (~x541-613).
+        std::string_view bonusLabel = "Bonus";
+        drawText(kBonusPanelCenterX - measureGameText(bonusLabel, labelFont) / 2, kBonusLabelY,
+                 bonusLabel, labelFont, bonusR, bonusG, bonusB);
+        std::string bonusStr = std::to_string(bonusPoints);
+        drawText(kBonusPanelCenterX - measureGameText(bonusStr, numFont) / 2, kBonusValueY,
+                 bonusStr, numFont, bonusR, bonusG, bonusB);
 
         if (minusButton.tex)
         {
-            drawOverlay(minusButton, 489, 402);
+            drawOverlay(minusButton, kBonusMinusX, kBonusButtonY);
         }
         if (plusButton.tex)
         {
-            drawOverlay(plusButton, 619, 402);
+            drawOverlay(plusButton, kBonusPlusX, kBonusButtonY);
         }
     }
 
