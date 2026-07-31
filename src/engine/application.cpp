@@ -710,18 +710,44 @@ bool Application::loadGameData(const std::filesystem::path& dataPath)
         }
     }
 
-    buildIntroPlaylist();
-    if (introState)
+    if (auto dtileData = vfs->readFile("dtile.bin"); dtileData.has_value())
     {
-        introState->setPlaylist(introPlaylist);
+        if (tileTable_.parse(*dtileData))
+        {
+            logger.info(std::format("Parsed {} terrain tile entries", tileTable_.entries().size()));
+        }
+        else
+        {
+            logger.warning("Failed to parse dtile.bin (terrain tile table)");
+        }
     }
+    else
+    {
+        logger.warning("dtile.bin not found; outdoor terrain will use fallback tile textures");
+    }
+
+    refreshIntroPlaylist();
     loadUiAssets();
-    if (gameState == GameState::IntroVideo && videoPlayer && !introPlaylist.empty())
-    {
-        videoPlayer->setPlaylist(introPlaylist);
-        videoPlayer->start(SDL_GetTicks());
-    }
     return true;
+}
+
+void Application::refreshIntroPlaylist()
+{
+    buildIntroPlaylist();
+    if (!introState)
+    {
+        return;
+    }
+
+    introState->setPlaylist(introPlaylist);
+
+    // initialize() enters the intro state before any game data is available, so that
+    // first enter() always saw an empty playlist and never started playback. Re-enter
+    // now that the clips are known, keeping IntroState the single owner of startup.
+    if (activeStateId == GameStateId::IntroVideo)
+    {
+        introState->enter();
+    }
 }
 
 void Application::configureBootFlow(const std::string& mapName, bool preferOutdoor, bool autoLoad)
@@ -1365,6 +1391,7 @@ void Application::buildIntroPlaylist()
 
     if (gameRoot.empty())
     {
+        logger.warning("Intro playlist: game root is empty, no intro videos will play");
         return;
     }
 
@@ -1388,14 +1415,23 @@ void Application::buildIntroPlaylist()
 
     if (!loaded)
     {
+        logger.warning(std::format("Intro playlist: no VID manifest under {}, using placeholder",
+                                   animsPath.string()));
         introPlaylist.push_back({"Intro", 2500});
         return;
     }
 
+    logger.info(std::format("Intro playlist: loaded {} with {} clips", vidPath.string(),
+                            manifest.clips().size()));
+
     // Load the VID archive into the video player
     if (videoPlayer && !vidPath.empty())
     {
-        videoPlayer->loadArchive(vidPath);
+        if (!videoPlayer->loadArchive(vidPath))
+        {
+            logger.warning(
+                std::format("Intro playlist: failed to open VID archive {}", vidPath.string()));
+        }
     }
 
     auto clipMatches = [](const std::string& name, const std::string& target)
@@ -1457,6 +1493,17 @@ void Application::buildIntroPlaylist()
             }
         }
     }
+
+    std::string names;
+    for (const auto& clip : introPlaylist)
+    {
+        if (!names.empty())
+        {
+            names += ", ";
+        }
+        names += clip.name;
+    }
+    logger.info(std::format("Intro playlist: {} clips [{}]", introPlaylist.size(), names));
 }
 
 bool Application::loadUiAssets()
@@ -4389,16 +4436,7 @@ void Application::setBootConfig(const BootConfig& config)
 
     if (noLogoChanged && config.noLogo && !config.noIntro && !gameRoot.empty())
     {
-        buildIntroPlaylist();
-        if (introState)
-        {
-            introState->setPlaylist(introPlaylist);
-        }
-        if (gameState == GameState::IntroVideo && videoPlayer && !introPlaylist.empty())
-        {
-            videoPlayer->setPlaylist(introPlaylist);
-            videoPlayer->start(SDL_GetTicks());
-        }
+        refreshIntroPlaylist();
         logger.info("Boot config: logo videos disabled");
     }
 

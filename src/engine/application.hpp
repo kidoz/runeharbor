@@ -361,6 +361,9 @@ class Application
     void renderFrame();
 
     void buildIntroPlaylist();
+    /// Rebuild the intro playlist and hand it to IntroState, re-entering that state
+    /// if it is already active so playback actually starts.
+    void refreshIntroPlaylist();
 
     // Map handling
     bool loadMap(const std::string& mapName);

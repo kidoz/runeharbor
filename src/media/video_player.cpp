@@ -231,9 +231,11 @@ bool VideoPlayer::loadCurrentClip()
     smackerDecoder_.reset();
     binkDecoder_.reset();
     closeAudioStream();
+    lastError_.clear();
 
     if (currentIndex_ >= playlist_.size())
     {
+        lastError_ = "playlist index out of range";
         return false;
     }
 
@@ -244,18 +246,21 @@ bool VideoPlayer::loadCurrentClip()
     if (!archive)
     {
         // Clip not found - treat as placeholder
+        lastError_ = "no loaded archive contains '" + name + "'";
         return false;
     }
 
     auto entryIdx = archive->findEntry(name);
     if (!entryIdx)
     {
+        lastError_ = "archive has no entry for '" + name + "'";
         return false;
     }
 
     const VidEntry* entry = archive->getEntry(*entryIdx);
     if (!entry)
     {
+        lastError_ = "entry lookup failed for '" + name + "'";
         return false;
     }
 
@@ -265,6 +270,7 @@ bool VideoPlayer::loadCurrentClip()
         std::vector<uint8_t> videoData = archive->readVideoData(*entryIdx);
         if (videoData.empty())
         {
+            lastError_ = "empty Smacker data for '" + name + "'";
             return false;
         }
 
@@ -272,6 +278,7 @@ bool VideoPlayer::loadCurrentClip()
         if (!smackerDecoder_->load(videoData))
         {
             smackerDecoder_.reset();
+            lastError_ = "Smacker decoder rejected '" + name + "'";
             return false;
         }
 
@@ -295,6 +302,7 @@ bool VideoPlayer::loadCurrentClip()
         std::vector<uint8_t> videoData = archive->readVideoData(*entryIdx);
         if (videoData.empty())
         {
+            lastError_ = "empty Bink data for '" + name + "'";
             return false;
         }
 
@@ -302,6 +310,7 @@ bool VideoPlayer::loadCurrentClip()
         if (!binkDecoder_->load(videoData))
         {
             binkDecoder_.reset();
+            lastError_ = "Bink decoder rejected '" + name + "'";
             return false;
         }
 

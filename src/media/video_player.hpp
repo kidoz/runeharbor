@@ -70,6 +70,11 @@ class VideoPlayer
     bool isPaused() const { return paused_; }
     bool isFinished() const { return finished_; }
     const std::string& currentClipName() const { return currentName_; }
+    /// True once a decoder is attached for the current clip. Without one the player
+    /// stays active but never produces frames, so callers can detect a silent failure.
+    bool hasDecoder() const { return smackerDecoder_ != nullptr || binkDecoder_ != nullptr; }
+    /// Reason the last clip load failed, empty when it succeeded.
+    const std::string& lastError() const { return lastError_; }
     uint32_t currentFrame() const { return currentFrame_; }
     uint32_t totalFrames() const;
 
@@ -95,6 +100,7 @@ class VideoPlayer
     std::vector<VideoClip> playlist_;
     size_t currentIndex_ = 0;
     std::string currentName_;
+    std::string lastError_;
 
     // Playback state
     uint64_t playStartTicks_ = 0;
