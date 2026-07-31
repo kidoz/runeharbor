@@ -8,6 +8,7 @@
 #include "../../ui/dialogue.hpp"
 #include "../../ui/hud.hpp"
 #include "../../ui/inventory_widget.hpp"
+#include "../../ui/journal_widget.hpp"
 #include "../../ui/map_widget.hpp"
 #include "../../ui/rest_widget.hpp"
 #include "../../ui/shop_window.hpp"
@@ -40,6 +41,7 @@ class InGameState : public IGameState
         spellbook_.setTextureLookup(lookup);
         restWidget_.setTextureLookup(lookup);
         mapWidget_.setTextureLookup(lookup);
+        journalWidget_.setTextureLookup(lookup);
         hud_.setTextureLookup(lookup);
     }
 
@@ -71,6 +73,7 @@ class InGameState : public IGameState
     ui::RestWidget restWidget_;
     ui::ShopWindow shopWindow_;
     ui::MapWidget mapWidget_;
+    ui::JournalWidget journalWidget_;
     uint64_t lastUpdateTicks_ = 0;
     float fpsAccumulatorMs_ = 0.0f;
     int fpsFrameCounter_ = 0;

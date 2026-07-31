@@ -123,6 +123,7 @@ void InGameState::enter()
     spellbook_.setVisible(false);
     restWidget_.setVisible(false);
     mapWidget_.setVisible(false);
+    journalWidget_.setVisible(false);
 
     if (ctx.shared && ctx.shared->gameWorld)
     {
@@ -555,6 +556,34 @@ std::optional<GameStateId> InGameState::update()
             characterStats_.setVisible(false);
             spellbook_.setVisible(false);
             restWidget_.setVisible(false);
+            journalWidget_.setVisible(false);
+        }
+    }
+
+    // Toggle quest journal
+    if (ctx.isKeyPressed(SDL_SCANCODE_Q))
+    {
+        journalWidget_.setVisible(!journalWidget_.visible());
+        if (journalWidget_.visible())
+        {
+            inventory_.setVisible(false);
+            characterStats_.setVisible(false);
+            spellbook_.setVisible(false);
+            restWidget_.setVisible(false);
+            mapWidget_.setVisible(false);
+        }
+    }
+
+    // Journal keyboard navigation (Up/Down/Esc) when open.
+    if (journalWidget_.visible())
+    {
+        for (const SDL_Scancode key : {SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_ESCAPE})
+        {
+            if (ctx.isKeyPressed(key))
+            {
+                ui::UIEvent ev{ui::UIEventType::KeyDown, 0, 0, platform::MouseButton::Left, key};
+                (void)journalWidget_.handleEvent(ev);
+            }
         }
     }
 
@@ -638,7 +667,8 @@ std::optional<GameStateId> InGameState::update()
     // open and we are not awaiting a spell target.
     const bool noPanelOpen = !inventory_.visible() && !spellbook_.visible() &&
                              !characterStats_.visible() && !restWidget_.visible() &&
-                             !mapWidget_.visible() && !dialogue_.isOpen() && !shopWindow_.isOpen();
+                             !mapWidget_.visible() && !journalWidget_.visible() &&
+                             !dialogue_.isOpen() && !shopWindow_.isOpen();
     if (noPanelOpen && !targetingActive_ &&
         ctx.window.wasMousePressed(platform::MouseButton::Left) && ctx.shared &&
         ctx.shared->gameWorld)
@@ -977,6 +1007,13 @@ void InGameState::render()
                              static_cast<int>(kGameWidth * scale),
                              static_cast<int>(kGameHeight * scale));
         mapWidget_.render(*ctx.renderer, *ctx.debugText);
+
+        journalWidget_.setGameWorld(ctx.shared->gameWorld);
+        journalWidget_.setQuestLog(ctx.shared->questLog);
+        journalWidget_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
+                                 static_cast<int>(kGameWidth * scale),
+                                 static_cast<int>(kGameHeight * scale));
+        journalWidget_.render(*ctx.renderer, *ctx.debugText);
     }
 
     renderOverlay();
@@ -1452,7 +1489,7 @@ void InGameState::renderOverlay()
     }
 
     lines.push_back("ARROWS MOVE/TURN  PGUP/PGDN LOOK  INS/DEL STRAFE  SHIFT RUN");
-    lines.push_back("SPACE/A ACTION  I INV  C CHARS  S SPELLS  R REST  M MAP");
+    lines.push_back("SPACE/A ACTION  I INV  C CHARS  S SPELLS  R REST  M MAP  Q QUESTS");
     lines.push_back("CLICK PORTRAIT: SELECT MEMBER  S: SPELLBOOK -> CLICK SPELL -> CLICK TARGET");
     lines.push_back("RMB: QUICK DAMAGE SPELL  (TARGETING: ESC CANCELS)");
     lines.push_back(std::format("F FLOORS:{}  V WALLS:{}  C CEIL:{}  P PORTAL:{}",

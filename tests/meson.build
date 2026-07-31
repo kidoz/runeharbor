@@ -184,6 +184,7 @@ test_ui_sources = files(
     '../src/ui/rest_widget.cpp',
     '../src/ui/map_widget.cpp',
     '../src/ui/shop_window.cpp',
+    '../src/ui/journal_widget.cpp',
 )
 
 test_engine_sources = files(
