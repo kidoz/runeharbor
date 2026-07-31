@@ -38,7 +38,10 @@ struct BitWriter
     {
         for (int i = 0; i < count; i++)
         {
-            writeBit(((value >> i) & 1u) != 0);
+            // Shifting a uint32_t by 32 or more is undefined behaviour; bits past the
+            // width of the value are simply zero.
+            const bool bit = i < 32 && ((value >> i) & 1u) != 0;
+            writeBit(bit);
         }
     }
 };
@@ -276,7 +279,9 @@ TEST_CASE("SmackerDecoder decodes FILL block", "[smacker][video]")
     treeWriter.writeBit(false);         // terminator
 
     // Cache values (3 * 16 bits)
-    treeWriter.writeBits(0, 48);
+    treeWriter.writeBits(0, 16);
+    treeWriter.writeBits(0, 16);
+    treeWriter.writeBits(0, 16);
 
     // Big tree structure: a single leaf.
     treeWriter.writeBit(false); // is a leaf
