@@ -51,6 +51,7 @@ bool MapScene::loadODM(const std::string& name, const std::vector<uint8_t>& data
     clear();
 
     formats::ODMMap parser(logger);
+    parser.setTileTable(tileTable);
     if (!parser.parse(data, progress))
     {
         logger.error("Failed to parse ODM map data");

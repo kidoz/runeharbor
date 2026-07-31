@@ -2,6 +2,7 @@
 
 #include <numbers>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cmath>
@@ -82,46 +83,75 @@ TEST_CASE("OutdoorRendererMath - applyOutdoorLighting", "[outdoor_renderer]")
 
 TEST_CASE("OutdoorRendererMath - makeOutdoorSpawnBillboard octant", "[outdoor_renderer]")
 {
-    formats::ODMSpawnPoint spawn;
+    formats::ODMSpawnPoint spawn = {};
     spawn.x = 0;
     spawn.y = 0;
     spawn.z = 100;
     spawn.objectType = 1;
+    spawn.objectIndex = 0; // heading 0 in MM7 turn units
 
-    // Sprite is at (0, 0, 100) (using x, y, z in MM7 coords)
-    // Actually our gameplayToRenderPosition maps x->x, y->z, z->y.
-    // So sprite render pos = (0, 100, 0)
-
-    // Create a mock lookup that returns "Goblin"
+    // gameplayToRenderPosition maps x->x, y->z, z->y, so the sprite's render
+    // position is (0, 100, 0).
     OutdoorRenderer::MonsterSpriteLookup lookup = [](uint16_t) { return "Goblin"; };
 
-    SECTION("Camera directly south of sprite")
+    SECTION("Camera directly south of sprite uses the first frame")
     {
-        // Sprite is at Z=0. Camera at Z=-100.
-        // Camera looks at sprite.
-        Vec3 camPos = {0.0f, 0.0f, -100.0f};
+        const Vec3 camPos = {0.0f, 0.0f, -100.0f};
 
         detail::SpawnBillboard b =
             detail::makeOutdoorSpawnBillboard(spawn, camPos, nullptr, lookup, nullptr);
-        // dz = spriteZ - camZ = 0 - (-100) = 100
-        // dx = 0
-        // angleToCam = atan2(0, 100) = 0
-        // octant = ((pi + pi/8 + 0 - 0) / (pi/4)) = 4.5 -> int(4) & 7 = 4
-        // Index 4 -> +1 -> 5
-        REQUIRE(b.textureName == "Goblinw05");
+        CHECK(b.textureName == "Goblin01");
+        CHECK_FALSE(b.flipU);
     }
 
-    SECTION("Camera directly east of sprite")
+    SECTION("Camera directly east of sprite rotates two octants around")
     {
-        // Sprite at X=0, Z=0. Camera at X=100, Z=0.
-        Vec3 camPos = {100.0f, 0.0f, 0.0f};
+        const Vec3 camPos = {100.0f, 0.0f, 0.0f};
 
         detail::SpawnBillboard b =
             detail::makeOutdoorSpawnBillboard(spawn, camPos, nullptr, lookup, nullptr);
-        // dz = 0, dx = -100
-        // angle = atan2(-100, 0) = -pi/2
-        // octant = ((pi + pi/8 + pi/2) / (pi/4)) = (1.625 pi) / 0.25 pi = 6.5 -> 6
-        // Index 6 -> 7
-        REQUIRE(b.textureName == "Goblinw07");
+        CHECK(b.textureName == "Goblin03");
+        CHECK_FALSE(b.flipU);
+    }
+
+    SECTION("Camera on the mirrored side reuses a flipped frame")
+    {
+        const Vec3 camPos = {-100.0f, 0.0f, 0.0f};
+
+        detail::SpawnBillboard b =
+            detail::makeOutdoorSpawnBillboard(spawn, camPos, nullptr, lookup, nullptr);
+        // MM7 only stores five of the eight directions; the far side mirrors one.
+        CHECK(b.textureName == "Goblin03");
+        CHECK(b.flipU);
+    }
+
+    SECTION("Facing does not drift with the frame clock")
+    {
+        const Vec3 camPos = {0.0f, 0.0f, -100.0f};
+
+        const detail::SpawnBillboard early =
+            detail::makeOutdoorSpawnBillboard(spawn, camPos, nullptr, lookup, nullptr, 0);
+        const detail::SpawnBillboard late =
+            detail::makeOutdoorSpawnBillboard(spawn, camPos, nullptr, lookup, nullptr, 900000);
+        CHECK(early.textureName == late.textureName);
+    }
+}
+
+TEST_CASE("Outdoor terrain grid mirrors the Y axis against world space", "[outdoor_renderer]")
+{
+    // Grid Y grows south while gameplay Y grows north, so the two run opposite.
+    CHECK(formats::outdoorGridToWorldX(64.0f) == Catch::Approx(0.0f));
+    CHECK(formats::outdoorGridToWorldX(65.0f) == Catch::Approx(512.0f));
+    CHECK(formats::outdoorGridToWorldY(64.0f) == Catch::Approx(0.0f));
+    CHECK(formats::outdoorGridToWorldY(65.0f) == Catch::Approx(-512.0f));
+    CHECK(formats::outdoorGridToWorldY(63.0f) == Catch::Approx(512.0f));
+
+    // World -> grid is the exact inverse.
+    for (float grid : {0.0f, 17.5f, 64.0f, 127.0f})
+    {
+        CHECK(formats::outdoorWorldToGridX(formats::outdoorGridToWorldX(grid)) ==
+              Catch::Approx(grid));
+        CHECK(formats::outdoorWorldToGridY(formats::outdoorGridToWorldY(grid)) ==
+              Catch::Approx(grid));
     }
 }

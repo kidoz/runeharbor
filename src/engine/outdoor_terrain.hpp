@@ -3,6 +3,8 @@
 
 #include <algorithm>
 
+#include <cmath>
+
 #include "../formats/odm_map.hpp"
 
 namespace runeharbor::engine
@@ -16,14 +18,13 @@ inline float sampleOutdoorTerrainHeight(const formats::ODMMapData& odmData, floa
         return 0.0f;
     }
 
-    constexpr float kCellSize = 512.0f;
-    constexpr float kHalfTerrain = formats::ODMMapData::TERRAIN_SIZE / 2.0f;
+    const float gridX = formats::outdoorWorldToGridX(worldX);
+    const float gridY = formats::outdoorWorldToGridY(worldY);
 
-    const float gridX = (worldX / kCellSize) + kHalfTerrain;
-    const float gridY = (worldY / kCellSize) + kHalfTerrain;
-
-    const int x0 = std::clamp(static_cast<int>(gridX), 0, formats::ODMMapData::TERRAIN_SIZE - 1);
-    const int y0 = std::clamp(static_cast<int>(gridY), 0, formats::ODMMapData::TERRAIN_SIZE - 1);
+    const int x0 =
+        std::clamp(static_cast<int>(std::floor(gridX)), 0, formats::ODMMapData::TERRAIN_SIZE - 1);
+    const int y0 =
+        std::clamp(static_cast<int>(std::floor(gridY)), 0, formats::ODMMapData::TERRAIN_SIZE - 1);
     const int x1 = std::clamp(x0 + 1, 0, formats::ODMMapData::TERRAIN_SIZE - 1);
     const int y1 = std::clamp(y0 + 1, 0, formats::ODMMapData::TERRAIN_SIZE - 1);
 

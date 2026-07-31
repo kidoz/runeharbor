@@ -55,6 +55,9 @@ class MapScene
     bool loadODM(const std::string& name, const std::vector<uint8_t>& data,
                  ProgressCallback progress = {});
 
+    /// Global terrain tile table (dtile.bin), used to texture outdoor terrain.
+    void setTileTable(const formats::TileTable* table) { tileTable = table; }
+
     bool isLoaded() const { return loaded; }
     const std::string& getName() const { return mapName; }
     const MapBounds& getBounds() const { return bounds; }
@@ -77,6 +80,7 @@ class MapScene
     std::vector<graphics::Vec3> worldVertices;
     MapBounds bounds;
     bool loaded = false;
+    const formats::TileTable* tileTable = nullptr;
 };
 
 } // namespace runeharbor::engine

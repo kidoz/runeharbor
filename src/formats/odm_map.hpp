@@ -9,6 +9,7 @@
 
 #include "../util/ilogger.hpp"
 #include "blv_map.hpp" // For ParsedFace (shared structure)
+#include "tile_table.hpp"
 
 namespace runeharbor::formats
 {
@@ -230,12 +231,47 @@ struct ODMMapData
     uint32_t buildingCount = 0;
 };
 
+// Outdoor terrain grid ↔ world conversions.
+//
+// The heightmap is stored row-major with grid X growing east and grid Y growing
+// *south*, while gameplay coordinates have Y growing north. Grid coordinate
+// (gx, gy) is therefore the map's north-west-anchored cell corner, and the Y axis
+// has to be mirrored on the way in and out. Getting this wrong mirrors the whole
+// terrain relative to buildings, decorations and the party.
+inline constexpr float kOutdoorCellSize = 512.0f;
+inline constexpr float kOutdoorGridHalf = ODMMapData::TERRAIN_SIZE / 2.0f;
+
+inline float outdoorGridToWorldX(float gridX)
+{
+    return (gridX - kOutdoorGridHalf) * kOutdoorCellSize;
+}
+
+inline float outdoorGridToWorldY(float gridY)
+{
+    return (kOutdoorGridHalf - gridY) * kOutdoorCellSize;
+}
+
+inline float outdoorWorldToGridX(float worldX)
+{
+    return worldX / kOutdoorCellSize + kOutdoorGridHalf;
+}
+
+inline float outdoorWorldToGridY(float worldY)
+{
+    return kOutdoorGridHalf - worldY / kOutdoorCellSize;
+}
+
 class ODMMap
 {
   public:
     using ProgressCallback = std::function<void(float)>;
 
     explicit ODMMap(util::ILogger& logger);
+
+    // Global terrain tile table (dtile.bin). Without it the parser can only fall
+    // back to one base texture per tileset, which flattens the whole map to a
+    // single ground texture.
+    void setTileTable(const TileTable* table) { tileTable = table; }
 
     // Parse from raw decompressed ODM data
     bool parse(const std::vector<uint8_t>& data, ProgressCallback progress = {});
@@ -269,6 +305,7 @@ class ODMMap
     util::ILogger& logger;
     ODMMapData mapData;
     ProgressCallback progressCallback;
+    const TileTable* tileTable = nullptr;
 
     void reportProgress(float value);
 };

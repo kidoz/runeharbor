@@ -22,6 +22,12 @@ struct RuntimeConfig;
 namespace runeharbor::graphics
 {
 
+namespace detail
+{
+struct OutdoorLightingParams;
+struct SpawnBillboard;
+} // namespace detail
+
 class OutdoorRenderer
 {
   public:
@@ -44,12 +50,12 @@ class OutdoorRenderer
     void renderTerrain(const formats::ODMMapData& odmData, const Camera& camera,
                        const game::RuntimeConfig* runtimeConfig, float nightBlend,
                        const Frustum* frustumOverride);
-    void renderBuildings(const formats::ODMMapData& odmData, const Camera& camera,
-                         const game::RuntimeConfig* runtimeConfig, float nightBlend,
-                         const Frustum* frustumOverride);
-    void renderBillboards(const formats::ODMMapData& odmData, const Camera& camera,
-                          const game::RuntimeConfig* runtimeConfig, float nightBlend,
-                          const Frustum* frustumOverride);
+    /// Draw building faces and sprite billboards in a single back-to-front pass.
+    void renderObjects(const formats::ODMMapData& odmData, const Camera& camera,
+                       const game::RuntimeConfig* runtimeConfig, float nightBlend,
+                       const Frustum* frustumOverride);
+    void drawBillboard(const detail::SpawnBillboard& sprite, const Camera& camera,
+                       const detail::OutdoorLightingParams& lighting, uint32_t ticks);
 
     SDLRenderer& renderer;
     util::ILogger& logger;
@@ -83,13 +89,22 @@ struct SpawnBillboard
     SDL_FColor color = {1.0f, 1.0f, 1.0f, 0.75f};
     std::string textureName;
     uint32_t attributes = 0;
+    float scale = 1.0f;
+    bool flipU = false;
 };
+
+void applyFrameTableEntry(SpawnBillboard& sprite, const formats::SpriteFrameTable* spriteFrameTable,
+                          int octant);
 
 SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, const Vec3& cameraPos,
                                          const game::RuntimeConfig* config,
                                          const OutdoorRenderer::MonsterSpriteLookup& monsterLookup,
                                          const formats::SpriteFrameTable* spriteFrameTable,
                                          uint32_t ticks = 0);
+
+SpawnBillboard makeOutdoorDecorationBillboard(const formats::ParsedDecoration& decoration,
+                                              const Vec3& cameraPos,
+                                              const formats::SpriteFrameTable* spriteFrameTable);
 
 float calcHorizonY(float viewportHeight, float fovY, float cameraPitch);
 } // namespace detail

@@ -56,18 +56,19 @@ const char* tilesetGroupName(uint8_t tilesetId)
     }
 }
 
-// Build the tile table: for each possible tile byte (0-255), resolve which of the
-// map's four tilesets it belongs to and produce the base texture name.
+// Build the per-map tile lookup: for each possible tile byte (0-255), resolve the
+// texture the terrain renderer should use.
 //
 // MM7 terrain tile bytes select a tileset in 36-wide sections above a shared base
-// range: tile bytes < 90 are global/shared tiles, and tile bytes >= 90 map to
+// range: tile bytes < 90 are global tile ids, and tile bytes >= 90 map to
 //   section = (tile - 90) / 36  -> tileset index 0..3
-//   variant = (tile - 90) % 36  -> variant within that tileset (transition tiles)
-// The four tileset IDs come from the ODM header (e.g. out01.odm = [0,5,7,10] =
-// grass/dirt/water/…). Every tile is mapped to its tileset's base texture, which
-// reproduces the correct grass/dirt/water biomes. Per-variant transition textures
-// (grass↔dirt edges, shorelines) are a future refinement.
-std::vector<std::string> buildTileTextureTable(const std::array<uint8_t, 4>& tilesetIds)
+//   variant = (tile - 90) % 36  -> variant within that tileset
+// With the global tile table (dtile.bin) loaded, the variant resolves to a real
+// texture — shorelines, road pieces and grass↔dirt transitions all come out
+// distinct. Without it we can only fall back to one base texture per tileset,
+// which flattens the entire map to a single ground texture.
+std::vector<std::string> buildTileTextureTable(const std::array<uint8_t, 4>& tilesetIds,
+                                               const TileTable* tileTable)
 {
     constexpr int kFirstMapTile = 90; // tile bytes below this are shared base tiles
     constexpr int kSectionWidth = 36; // tile bytes per map tileset
@@ -75,6 +76,17 @@ std::vector<std::string> buildTileTextureTable(const std::array<uint8_t, 4>& til
     std::vector<std::string> table(256);
     for (int t = 0; t < 256; t++)
     {
+        if (tileTable && !tileTable->empty())
+        {
+            const int tileId = tileTable->resolveLocalTileId(tilesetIds, static_cast<uint8_t>(t));
+            const TileEntry& entry = tileTable->tile(tileId);
+            if (tileId >= 0 && !entry.textureName.empty() && (entry.flags & kTileFlagDontDraw) == 0)
+            {
+                table[static_cast<size_t>(t)] = entry.textureName;
+                continue;
+            }
+        }
+
         int tilesetIdx = 0;
         if (t >= kFirstMapTile)
         {
@@ -300,7 +312,7 @@ bool ODMMap::parseHeader(const std::vector<uint8_t>& data)
     }
 
     // Build the full tile texture lookup table from the 4 tileset IDs
-    mapData.tileTextures = buildTileTextureTable(mapData.tilesetIds);
+    mapData.tileTextures = buildTileTextureTable(mapData.tilesetIds, tileTable);
 
     logger.debug(std::format("ODM header: name='{}', tilesets=[{},{},{},{}]",
                              mapData.levelName.empty() ? "(none)" : mapData.levelName,

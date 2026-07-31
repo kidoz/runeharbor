@@ -259,6 +259,7 @@ bool Application::initialize(const platform::WindowConfig& windowConfig)
     lineRenderer = std::make_unique<graphics::LineRenderer>(renderer->getSDLRenderer(), logger);
     debugText = std::make_unique<graphics::DebugText>();
     mapScene = std::make_unique<MapScene>(logger);
+    mapScene->setTileTable(&tileTable_);
     videoPlayer = std::make_unique<media::VideoPlayer>();
     if (audioSystem_ && !audioSystem_->initialize())
     {
@@ -802,6 +803,7 @@ bool Application::loadMap(const std::string& mapName)
     {
         mapScene = std::make_unique<MapScene>(logger);
     }
+    mapScene->setTileTable(&tileTable_);
 
     auto progress = [this](float value) { updateLoadProgress(0.1f + value * 0.85f); };
     if (!mapScene->loadBLV(resolvedName, *data, progress))
@@ -905,6 +907,7 @@ bool Application::loadOutdoorMap(const std::string& mapName)
     {
         mapScene = std::make_unique<MapScene>(logger);
     }
+    mapScene->setTileTable(&tileTable_);
 
     auto progress = [this](float value) { updateLoadProgress(0.1f + value * 0.85f); };
     if (!mapScene->loadODM(resolvedName, *data, progress))
@@ -2453,6 +2456,7 @@ bool Application::loadMapIntoScene(const std::string& mapName, bool outdoor,
     updateLoadProgress(0.1f);
 
     auto scene = std::make_unique<MapScene>(logger);
+    scene->setTileTable(&tileTable_);
     auto progress = [this](float value) { updateLoadProgress(0.1f + value * 0.85f); };
     bool ok = false;
     if (outdoor)

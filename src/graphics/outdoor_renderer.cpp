@@ -5,15 +5,13 @@
 
 #include <algorithm>
 #include <format>
-#include <numbers>
-#include <unordered_map>
 
-#include <SDL3_shadercross/SDL_shadercross.h>
 #include <cmath>
 
 #include "../game/game_world.hpp"
+#include "billboard.hpp"
 #include "clip_utils.hpp"
-#include "shaders_compiled.hpp"
+#include "sprite_facing.hpp"
 #include "visibility.hpp"
 #include "world_coordinates.hpp"
 
@@ -55,10 +53,54 @@ std::array<uint8_t, 3> blendRgb(const std::array<uint8_t, 3>& day,
     return out;
 }
 
+std::string trimmed(std::string_view value)
+{
+    size_t start = 0;
+    size_t end = value.size();
+    while (start < end && std::isspace(static_cast<unsigned char>(value[start])))
+    {
+        start++;
+    }
+    while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1])))
+    {
+        end--;
+    }
+    return std::string(value.substr(start, end - start));
+}
+
 } // namespace
 
 namespace detail
 {
+
+// Pull the sprite's real texture name, animation attributes and world scale out of
+// the sprite frame table, and let the table override the per-octant mirroring.
+void applyFrameTableEntry(SpawnBillboard& sprite, const formats::SpriteFrameTable* spriteFrameTable,
+                          int octant)
+{
+    if (!spriteFrameTable)
+    {
+        return;
+    }
+
+    const auto* entry = spriteFrameTable->findEntryByIcon(sprite.textureName);
+    if (!entry)
+    {
+        return;
+    }
+
+    if (!entry->textureName.empty())
+    {
+        sprite.textureName = trimmed(entry->textureName);
+    }
+    sprite.attributes = entry->attributes;
+    sprite.scale = entry->scale;
+    if (formats::spriteFrameMirrorsOctant(entry->attributes, octant))
+    {
+        sprite.flipU = !sprite.flipU;
+    }
+}
+
 OutdoorLightingParams makeOutdoorLightingParams(const game::RuntimeConfig* runtimeConfig,
                                                 float nightBlend, bool terrainPass)
 {
@@ -164,46 +206,21 @@ SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, co
         std::string baseName = monsterLookup(spawn.objectType);
         if (!baseName.empty())
         {
-            // Implement the 8-directional facing system.
-            // In MM7, circle is 2048 units. Slowly spin in place to simulate idle rotation if
-            // stationary.
-            int facing = (ticks / 10) % 2048;
+            // A spawn point has no AI yet, so its heading is fixed per spawn rather
+            // than spun by the frame clock — what changes as the party walks around
+            // is which octant of the sprite faces the camera.
+            const int spriteHeading = (static_cast<int>(spawn.objectIndex) * 137) % kMM7FullTurn;
+            const int octant = cameraRelativeOctant(spriteHeading, cameraPos, sprite.basePos);
+            const SpriteFacing facing = resolveSpriteFacing(octant);
+            sprite.flipU = facing.flipU;
 
-            // Calculate angle from camera to sprite
-            float dx = sprite.basePos.x - cameraPos.x;
-            float dz = sprite.basePos.z - cameraPos.z;
-            float camAngle = std::atan2(dx, dz);
-
-            // Convert to MM7 angle (0 to 2047)
-            int camFacing = static_cast<int>((camAngle + M_PI) * 1024.0f / M_PI) % 2048;
-            if (camFacing < 0)
-                camFacing += 2048;
-
-            // Difference between monster facing and camera angle, mapped to 8 directions
-            int directionIndex = ((facing - camFacing + 2048 + 128) >> 8) & 7;
-
-            // e.g. "Goblina" -> "Goblin01"
-            std::string prefix = baseName.substr(0, std::min<size_t>(baseName.length(), 6));
-
-            // To be precise we need to know the animation set.
-            // MM7 uses "w" for walk, "s" for stand, "a" for attack, etc.
-            // Let's assume stand (s) or walk (w).
-            std::string frameName =
-                std::format("{}w{:02d}", prefix, directionIndex + 1); // Walk animation, frame 1-8
-
-            sprite.textureName = frameName;
-            if (spriteFrameTable)
-            {
-                auto entry = spriteFrameTable->findEntryByIcon(frameName);
-                if (entry)
-                {
-                    if (!entry->textureName.empty())
-                        sprite.textureName = entry->textureName;
-                    sprite.attributes = entry->attributes;
-                }
-            }
+            sprite.textureName =
+                std::format("{}{:02d}", baseName.substr(0, std::min<size_t>(baseName.length(), 6)),
+                            facing.frameDirection);
+            applyFrameTableEntry(sprite, spriteFrameTable, octant);
         }
     }
+    (void)ticks;
 
     const int group = std::max(0, static_cast<int>(spawn.group));
     const int seed = (static_cast<int>(spawn.objectType) * 163) ^
@@ -237,21 +254,7 @@ SpawnBillboard makeOutdoorDecorationBillboard(const formats::ParsedDecoration& d
         gameplayToRenderPosition(static_cast<float>(decoration.x), static_cast<float>(decoration.y),
                                  static_cast<float>(decoration.z));
     sprite.textureName = decoration.name;
-
-    if (spriteFrameTable)
-    {
-        if (const auto* entry = spriteFrameTable->findEntryByIcon(decoration.name))
-        {
-            std::string tn = entry->textureName;
-            while (!tn.empty() && std::isspace(static_cast<unsigned char>(tn.back())))
-                tn.pop_back();
-            size_t start = 0;
-            while (start < tn.length() && std::isspace(static_cast<unsigned char>(tn[start])))
-                start++;
-            sprite.textureName = tn.substr(start);
-            sprite.attributes = entry->attributes;
-        }
-    }
+    applyFrameTableEntry(sprite, spriteFrameTable, 0);
 
     // Tint emissive/liquid decorations to match the indoor treatment.
     std::string lower = sprite.textureName;
@@ -274,19 +277,6 @@ SpawnBillboard makeOutdoorDecorationBillboard(const formats::ParsedDecoration& d
 }
 
 } // namespace detail
-
-namespace
-{
-
-std::string toLowerCopy(std::string_view value)
-{
-    std::string result(value);
-    std::transform(result.begin(), result.end(), result.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-    return result;
-}
-
-} // namespace
 
 OutdoorRenderer::OutdoorRenderer(SDLRenderer& renderer, util::ILogger& logger)
     : renderer(renderer), logger(logger)
@@ -335,9 +325,9 @@ void OutdoorRenderer::render(const engine::MapScene& scene, const Camera& camera
     renderSky(runtimeConfig, blend);
 
     renderTerrain(odmData, camera, runtimeConfig, blend, finalFrustum);
-    // These draw on top of the terrain/sky using SDL_Renderer
-    renderBuildings(odmData, camera, runtimeConfig, blend, finalFrustum);
-    renderBillboards(odmData, camera, runtimeConfig, blend, finalFrustum);
+    // Buildings and sprites share one back-to-front pass so that billboards are
+    // occluded by the structures in front of them.
+    renderObjects(odmData, camera, runtimeConfig, blend, finalFrustum);
 }
 
 void OutdoorRenderer::renderSky(const game::RuntimeConfig* runtimeConfig, float nightBlend)
@@ -383,7 +373,6 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
 
     constexpr int SIZE = formats::ODMMapData::TERRAIN_SIZE;
     constexpr float CELL_SIZE = 512.0f;
-    constexpr float HALF = SIZE / 2.0f;
     Frustum localFrustum;
     const Frustum* frustum = frustumOverride;
     if (!frustum)
@@ -392,27 +381,29 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
         frustum = &localFrustum;
     }
 
-    // Helper: get world position for grid cell
-    // Coordinate system: X = east/west, Y = up (height), Z = north/south
+    // Helper: get render-space position for a grid corner.
+    // Render coordinates are Y-up; gameplay X/Y map to render X/Z. Grid Y grows
+    // south, so it has to be mirrored (see formats::outdoorGridToWorldY).
     auto worldPos = [&](int gx, int gy) -> Vec3
     {
-        float wx = (static_cast<float>(gx) - HALF) * CELL_SIZE;
-        float wz = (static_cast<float>(gy) - HALF) * CELL_SIZE;
-        float wy = 0.0f;
-
+        float height = 0.0f;
         size_t idx = static_cast<size_t>(gy * SIZE + gx);
         if (idx < odmData.heightmap.size())
         {
-            wy = static_cast<float>(odmData.heightmap[idx].height);
+            height = static_cast<float>(odmData.heightmap[idx].height);
         }
 
-        return {wx, wy, wz};
+        return gameplayToRenderPosition(formats::outdoorGridToWorldX(static_cast<float>(gx)),
+                                        formats::outdoorGridToWorldY(static_cast<float>(gy)),
+                                        height);
     };
 
     // Transform world point to clip space (no perspective divide yet)
     auto toClip = [&](Vec3 wp) -> Vec4 { return viewProjection * Vec4(wp, 1.0f); };
 
-    // Height-based vertex coloring
+    // Height-based vertex coloring, used only where no tile texture resolved. A
+    // textured quad keeps a white base so the tile art shows through unmodulated;
+    // distance shading and mist are applied on top of whichever base is used.
     auto heightColor = [](float height) -> SDL_FColor
     {
         float t = std::clamp(height / 8000.0f, 0.0f, 1.0f);
@@ -421,23 +412,31 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
         float b = 0.20f + t * 0.05f;
         return {r, g, b, 1.0f};
     };
-    auto litTerrainColor = [&](const Vec3& worldPos) -> SDL_FColor
+    auto litTerrainColor = [&](const Vec3& worldPos, bool textured) -> SDL_FColor
     {
         const float dx = worldPos.x - cameraPos.x;
         const float dy = worldPos.y - cameraPos.y;
         const float dz = worldPos.z - cameraPos.z;
         const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-        return detail::applyOutdoorLighting(heightColor(worldPos.y), dist, terrainLighting);
+        const SDL_FColor base =
+            textured ? SDL_FColor{1.0f, 1.0f, 1.0f, 1.0f} : heightColor(worldPos.y);
+        return detail::applyOutdoorLighting(base, dist, terrainLighting);
     };
 
-    // Batch terrain triangles grouped by tile texture for textured rendering.
-    // Key = SDL_Texture* (nullptr for untextured fallback).
-    struct TexBatch
+    // Terrain quads are collected with their depth so the whole field can be drawn
+    // back-to-front. SDL_Renderer has no depth buffer, so grouping purely by texture
+    // (as an unordered batch) lets far hills paint over near ones.
+    struct TerrainQuad
     {
-        std::vector<SDL_Vertex> verts;
-        std::vector<int> indices;
+        SDL_Texture* texture;
+        float distanceSq;
+        uint32_t firstVertex;
+        uint32_t vertexCount;
     };
-    std::unordered_map<SDL_Texture*, TexBatch> texBatches;
+    std::vector<TerrainQuad> quads;
+    std::vector<SDL_Vertex> quadVerts;
+    quads.reserve(1024);
+    quadVerts.reserve(8192);
 
     // Resolve tile texture for a grid cell
     auto getTileTexture = [&](int gx, int gy) -> SDL_Texture*
@@ -464,10 +463,11 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
         {
             Vec3 p00 = worldPos(gx, gy);
 
-            // Center of quad for distance check
+            // Center of quad for distance check. Grid Y runs south, so the next
+            // row sits at a *lower* render Z.
             float cx = p00.x + CELL_SIZE * 0.5f;
             float cy = p00.y;
-            float cz = p00.z + CELL_SIZE * 0.5f;
+            float cz = p00.z - CELL_SIZE * 0.5f;
             float dx = cx - cameraPos.x;
             float dy = cy - cameraPos.y;
             float dz = cz - cameraPos.z;
@@ -510,7 +510,8 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
 
             // Resolve tile texture for this quad
             SDL_Texture* tileTex = getTileTexture(gx, gy);
-            auto& batch = texBatches[tileTex];
+            const bool textured = (tileTex != nullptr);
+            const uint32_t quadFirstVertex = static_cast<uint32_t>(quadVerts.size());
 
             // Clip-space vertices for the 4 corners
             Vec4 c00 = toClip(p00);
@@ -518,10 +519,10 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
             Vec4 c01 = toClip(p01);
             Vec4 c11 = toClip(p11);
 
-            SDL_FColor col00 = litTerrainColor(p00);
-            SDL_FColor col10 = litTerrainColor(p10);
-            SDL_FColor col01 = litTerrainColor(p01);
-            SDL_FColor col11 = litTerrainColor(p11);
+            SDL_FColor col00 = litTerrainColor(p00, textured);
+            SDL_FColor col10 = litTerrainColor(p10, textured);
+            SDL_FColor col01 = litTerrainColor(p01, textured);
+            SDL_FColor col11 = litTerrainColor(p11, textured);
 
             // Process two triangles per quad
             ClipVertex tris[2][3] = {
@@ -559,7 +560,7 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
                     tessellateTriangle(clipped[0], clipped[i], clipped[i + 1], tessellatedVerts);
                 }
 
-                int baseIdx = static_cast<int>(batch.verts.size());
+                const size_t triangleStart = quadVerts.size();
                 bool anyFailed = false;
 
                 for (const auto& tv : tessellatedVerts)
@@ -574,76 +575,83 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
                     sv.position = {sx, sy};
                     sv.color = tv.color;
                     sv.tex_coord = {tv.u, tv.v};
-                    batch.verts.push_back(sv);
+                    quadVerts.push_back(sv);
                 }
 
                 if (anyFailed)
                 {
-                    batch.verts.resize(static_cast<size_t>(baseIdx));
-                    continue;
+                    quadVerts.resize(triangleStart);
                 }
+            }
 
-                for (size_t i = 0; i < tessellatedVerts.size(); i++)
-                {
-                    batch.indices.push_back(baseIdx + static_cast<int>(i));
-                }
+            const uint32_t quadVertexCount =
+                static_cast<uint32_t>(quadVerts.size()) - quadFirstVertex;
+            if (quadVertexCount >= 3)
+            {
+                quads.push_back({tileTex, distSq, quadFirstVertex, quadVertexCount});
+            }
+            else
+            {
+                quadVerts.resize(quadFirstVertex);
             }
 
             gx += step;
         }
     }
 
-    // Draw each texture batch
-    for (auto& [tex, batch] : texBatches)
+    // Painter's algorithm: farthest quad first. Consecutive quads that share a
+    // texture are merged into a single draw so the common case (large runs of the
+    // same tile) still issues few calls.
+    std::sort(quads.begin(), quads.end(), [](const TerrainQuad& a, const TerrainQuad& b)
+              { return a.distanceSq > b.distanceSq; });
+
+    std::vector<SDL_Vertex> runVerts;
+    auto flushRun = [&](SDL_Texture* texture)
     {
-        if (!batch.verts.empty() && !batch.indices.empty())
+        if (runVerts.size() < 3)
         {
-            SDL_RenderGeometry(renderer.getSDLRenderer(), tex, batch.verts.data(),
-                               static_cast<int>(batch.verts.size()), batch.indices.data(),
-                               static_cast<int>(batch.indices.size()));
+            runVerts.clear();
+            return;
         }
+        SDL_RenderGeometry(renderer.getSDLRenderer(), texture, runVerts.data(),
+                           static_cast<int>(runVerts.size()), nullptr, 0);
+        runVerts.clear();
+    };
+
+    SDL_Texture* runTexture = nullptr;
+    bool runOpen = false;
+    for (const auto& quad : quads)
+    {
+        if (runOpen && quad.texture != runTexture)
+        {
+            flushRun(runTexture);
+            runOpen = false;
+        }
+        runTexture = quad.texture;
+        runOpen = true;
+        runVerts.insert(runVerts.end(), quadVerts.begin() + quad.firstVertex,
+                        quadVerts.begin() + quad.firstVertex + quad.vertexCount);
+    }
+    if (runOpen)
+    {
+        flushRun(runTexture);
     }
 }
 
-void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const Camera& camera,
-                                      const game::RuntimeConfig* runtimeConfig, float nightBlend,
-                                      const Frustum* frustumOverride)
+void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Camera& camera,
+                                    const game::RuntimeConfig* runtimeConfig, float nightBlend,
+                                    const Frustum* frustumOverride)
 {
-    if (odmData.buildings.empty())
-    {
-        return;
-    }
-
-    static bool bldgDebug = false;
-    if (!bldgDebug)
-    {
-        bldgDebug = true;
-        int totalFaces = 0, invisFaces = 0, emptyFaces = 0;
-        for (const auto& b : odmData.buildings)
-        {
-            totalFaces += static_cast<int>(b.faces.size());
-            for (const auto& f : b.faces)
-            {
-                if (f.numVertices < 3 || f.vertexIndices.empty())
-                    emptyFaces++;
-                else if (f.isInvisible())
-                    invisFaces++;
-            }
-        }
-        fprintf(stderr,
-                "[BLDG] buildings=%zu totalFaces=%d empty=%d invisible=%d verts_in_first=%zu\n",
-                odmData.buildings.size(), totalFaces, emptyFaces, invisFaces,
-                odmData.buildings.empty() ? 0 : odmData.buildings[0].vertices.size());
-    }
-
     const auto& viewProjection = camera.getViewProjectionMatrix();
     const Vec3 cameraPos = camera.getPosition();
     const float vpW = static_cast<float>(renderer.getViewportWidth());
     const float vpH = static_cast<float>(renderer.getViewportHeight());
-    const detail::OutdoorLightingParams buildingLighting =
+    const detail::OutdoorLightingParams objectLighting =
         detail::makeOutdoorLightingParams(runtimeConfig, nightBlend, false);
     const bool animateWater = (runtimeConfig == nullptr) || !runtimeConfig->noWavyWater;
-    const float waterTimeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    const uint32_t ticks = SDL_GetTicks();
+    const float waterTimeSeconds = static_cast<float>(ticks) * 0.001f;
+
     Frustum localFrustum;
     const Frustum* frustum = frustumOverride;
     if (!frustum)
@@ -652,16 +660,18 @@ void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const 
         frustum = &localFrustum;
     }
 
-    // Collect all building faces with their world-space info for painter's algorithm
-    struct FaceRef
+    // One draw list for building faces and billboards. SDL_Renderer has no depth
+    // buffer, so sprites can only be occluded by walls if both go through the same
+    // back-to-front ordering.
+    struct RenderOp
     {
-        const formats::ParsedBuilding* building;
-        uint32_t faceIndex;
-        float distance;
+        const formats::ParsedBuilding* building = nullptr; // null for billboards
+        uint32_t faceIndex = 0;
+        float distanceSq = 0.0f;
+        detail::SpawnBillboard billboard;
     };
 
-    std::vector<FaceRef> sortedFaces;
-    int dbgFrustumSkip = 0, dbgBackfaceSkip = 0, dbgKept = 0;
+    std::vector<RenderOp> ops;
 
     for (const auto& building : odmData.buildings)
     {
@@ -676,23 +686,18 @@ void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const 
 
         if (!frustum->testAABB(minX, minY, minZ, maxX, maxY, maxZ))
         {
-            dbgFrustumSkip++;
             continue;
         }
 
         for (uint32_t fi = 0; fi < building.faces.size(); fi++)
         {
             const auto& face = building.faces[fi];
-            if (face.numVertices < 3 || face.vertexIndices.empty())
-            {
-                continue;
-            }
-            if (face.isInvisible())
+            if (face.numVertices < 3 || face.vertexIndices.empty() || face.isInvisible())
             {
                 continue;
             }
 
-            // Compute face centroid in world space
+            // Face centroid, used for backface culling and depth sorting.
             float cx = 0, cy = 0, cz = 0;
             uint32_t valid = 0;
             for (uint8_t j = 0; j < face.numVertices && j < face.vertexIndices.size(); j++)
@@ -711,64 +716,132 @@ void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const 
             {
                 continue;
             }
-            float inv = 1.0f / static_cast<float>(valid);
+            const float inv = 1.0f / static_cast<float>(valid);
             cx *= inv;
             cy *= inv;
             cz *= inv;
 
-            // Backface culling
-            float viewX = cx - cameraPos.x;
-            float viewY = cy - cameraPos.y;
-            float viewZ = cz - cameraPos.z;
+            const float viewX = cx - cameraPos.x;
+            const float viewY = cy - cameraPos.y;
+            const float viewZ = cz - cameraPos.z;
             const Vec3 faceNormal =
                 gameplayToRenderDirection(face.normalFX, face.normalFY, face.normalFZ);
-            float dot = faceNormal.x * viewX + faceNormal.y * viewY + faceNormal.z * viewZ;
-            if (dot > 0.0f)
+            if (faceNormal.x * viewX + faceNormal.y * viewY + faceNormal.z * viewZ > 0.0f)
             {
-                dbgBackfaceSkip++;
                 continue;
             }
 
-            dbgKept++;
-            float dist = viewX * viewX + viewY * viewY + viewZ * viewZ;
-            sortedFaces.push_back({&building, fi, dist});
+            RenderOp op;
+            op.building = &building;
+            op.faceIndex = fi;
+            op.distanceSq = viewX * viewX + viewY * viewY + viewZ * viewZ;
+            ops.push_back(std::move(op));
         }
     }
 
-    static bool sortDebug = false;
-    if (!sortDebug)
+    // Monster spawns.
+    if (!(runtimeConfig && runtimeConfig->noMonsters))
     {
-        sortDebug = true;
-        fprintf(stderr, "[BLDG] frustumSkip=%d backfaceSkip=%d kept=%d sortedFaces=%zu\n",
-                dbgFrustumSkip, dbgBackfaceSkip, dbgKept, sortedFaces.size());
-        // Print first building's AABB and camera pos
-        if (!odmData.buildings.empty())
+        for (const auto& spawn : odmData.spawns)
         {
-            const auto& b = odmData.buildings[0];
-            fprintf(stderr, "[BLDG] bldg0: world=(%d,%d,%d) min=(%d,%d,%d) max=(%d,%d,%d)\n",
-                    b.worldX, b.worldY, b.worldZ, b.minX, b.minY, b.minZ, b.maxX, b.maxY, b.maxZ);
-            fprintf(stderr, "[BLDG] AABB render: X=[%d..%d] Y=[%d..%d] Z=[%d..%d]\n", b.minX,
-                    b.maxX, b.minZ, b.maxZ, // gameplay Z → render Y
-                    b.worldY + b.minY, b.worldY + b.maxY);
+            if (spawn.objectType == 0)
+            {
+                continue;
+            }
+
+            const float cullRadius = std::max(64.0f, static_cast<float>(spawn.radius) * 2.0f);
+            const Vec3 renderPos =
+                gameplayToRenderPosition(static_cast<float>(spawn.x), static_cast<float>(spawn.y),
+                                         static_cast<float>(spawn.z));
+            if (!frustum->testSphere(renderPos.x, renderPos.y, renderPos.z, cullRadius))
+            {
+                continue;
+            }
+
+            RenderOp op;
+            op.billboard = detail::makeOutdoorSpawnBillboard(
+                spawn, cameraPos, runtimeConfig, monsterSpriteLookup, spriteFrameTable, ticks);
+            op.distanceSq = op.billboard.distanceSq;
+            ops.push_back(std::move(op));
         }
-        fprintf(stderr, "[BLDG] camera: (%.0f, %.0f, %.0f)\n", cameraPos.x, cameraPos.y,
-                cameraPos.z);
     }
 
-    // Sort back-to-front
-    std::sort(sortedFaces.begin(), sortedFaces.end(),
-              [](const FaceRef& a, const FaceRef& b) { return a.distance > b.distance; });
+    // Static decorations (trees, rocks, signs, campfires). Sound and party-start
+    // markers carry no sprite and drop out when their texture does not resolve.
+    if (!(runtimeConfig && runtimeConfig->noDecorations))
+    {
+        for (const auto& deco : odmData.decorations)
+        {
+            if (deco.hidden)
+            {
+                continue;
+            }
+            const Vec3 renderPos = gameplayToRenderPosition(
+                static_cast<float>(deco.x), static_cast<float>(deco.y), static_cast<float>(deco.z));
+            if (!frustum->testSphere(renderPos.x, renderPos.y, renderPos.z, 512.0f))
+            {
+                continue;
+            }
+
+            RenderOp op;
+            op.billboard =
+                detail::makeOutdoorDecorationBillboard(deco, cameraPos, spriteFrameTable);
+            if (op.billboard.textureName.empty() ||
+                (textureLookup && !textureLookup(op.billboard.textureName)))
+            {
+                continue;
+            }
+            op.distanceSq = op.billboard.distanceSq;
+            ops.push_back(std::move(op));
+        }
+    }
+
+    if (ops.empty())
+    {
+        return;
+    }
+
+    std::sort(ops.begin(), ops.end(),
+              [](const RenderOp& a, const RenderOp& b) { return a.distanceSq > b.distanceSq; });
+
+    SDL_SetRenderDrawBlendMode(renderer.getSDLRenderer(), SDL_BLENDMODE_BLEND);
 
     ClipVertex polyIn[MAX_CLIP_VERTS];
     ClipVertex polyOut[MAX_CLIP_VERTS];
+    std::vector<ClipVertex> tessellatedVerts;
+    std::vector<SDL_Vertex> verts;
 
-    // Render each face
-    for (const auto& fr : sortedFaces)
+    for (const auto& op : ops)
     {
-        const auto& building = *fr.building;
-        const auto& face = building.faces[fr.faceIndex];
+        if (!op.building)
+        {
+            drawBillboard(op.billboard, camera, objectLighting, ticks);
+            continue;
+        }
 
-        // Build clip-space polygon
+        const auto& building = *op.building;
+        const auto& face = building.faces[op.faceIndex];
+
+        // Resolve the texture first: it decides both the vertex base colour and the
+        // UV scale, since MM7 stores face UVs in texels rather than normalised.
+        SDL_Texture* texture = nullptr;
+        float texWidth = 256.0f;
+        float texHeight = 256.0f;
+        if (textureLookup && !face.textureName.empty())
+        {
+            texture = textureLookup(face.textureName);
+            if (texture)
+            {
+                float w = 0.0f;
+                float h = 0.0f;
+                if (SDL_GetTextureSize(texture, &w, &h) && w > 0.0f && h > 0.0f)
+                {
+                    texWidth = w;
+                    texHeight = h;
+                }
+            }
+        }
+
         int polyCount = 0;
         bool allBehind = true;
 
@@ -799,9 +872,15 @@ void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const 
                 allBehind = false;
             }
 
-            // Surface-type coloring
+            // Textured faces keep a white base so the art comes through at full
+            // brightness; the surface-type palette is only a stand-in for faces
+            // whose texture could not be resolved.
             SDL_FColor color;
-            if (face.isFloor())
+            if (texture)
+            {
+                color = {1.0f, 1.0f, 1.0f, face.isWater() ? 0.85f : 1.0f};
+            }
+            else if (face.isFloor())
             {
                 color = {0.45f, 0.42f, 0.38f, 1.0f};
             }
@@ -817,11 +896,12 @@ void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const 
             {
                 color = {0.55f, 0.50f, 0.42f, 1.0f};
             }
+
             const float dx = wp.x - cameraPos.x;
             const float dy = wp.y - cameraPos.y;
             const float dz = wp.z - cameraPos.z;
             const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-            color = detail::applyOutdoorLighting(color, dist, buildingLighting);
+            color = detail::applyOutdoorLighting(color, dist, objectLighting);
             if (face.isWater() && animateWater)
             {
                 const float wave = std::sin(waterWavePhase(wp.x, wp.z, waterTimeSeconds));
@@ -831,11 +911,12 @@ void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const 
                 color.a = std::clamp(color.a + 0.06f + wave * 0.03f, 0.0f, 1.0f);
             }
 
+            // Face UVs are texel offsets into the face's own texture.
             float u = 0.0f, uv = 0.0f;
             if (i < face.uCoords.size() && i < face.vCoords.size())
             {
-                u = static_cast<float>(face.uCoords[i]) / 256.0f;
-                uv = static_cast<float>(face.vCoords[i]) / 256.0f;
+                u = static_cast<float>(face.uCoords[i]) / texWidth;
+                uv = static_cast<float>(face.vCoords[i]) / texHeight;
                 if (face.isWater() && animateWater)
                 {
                     const float flow = waterTimeSeconds * 0.08f;
@@ -852,22 +933,20 @@ void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const 
             continue;
         }
 
-        // Near-plane clip
-        int clippedCount = clipPolygonNearPlane(polyIn, polyCount, polyOut);
+        const int clippedCount = clipPolygonNearPlane(polyIn, polyCount, polyOut);
         if (clippedCount < 3)
         {
             continue;
         }
 
         // Tessellate clip-space polygons to minimize affine texture warping
-        std::vector<ClipVertex> tessellatedVerts;
+        tessellatedVerts.clear();
         for (int i = 1; i + 1 < clippedCount; i++)
         {
             tessellateTriangle(polyOut[0], polyOut[i], polyOut[i + 1], tessellatedVerts);
         }
 
-        // Project to screen
-        std::vector<SDL_Vertex> verts;
+        verts.clear();
         verts.reserve(tessellatedVerts.size());
         bool anyFailed = false;
 
@@ -891,215 +970,101 @@ void OutdoorRenderer::renderBuildings(const formats::ODMMapData& odmData, const 
             continue;
         }
 
-        std::vector<int> indices;
-        indices.reserve(verts.size());
-        for (size_t i = 0; i < verts.size(); i++)
-        {
-            indices.push_back(static_cast<int>(i));
-        }
-
-        // Texture lookup
-        SDL_Texture* texture = nullptr;
-        if (textureLookup && !face.textureName.empty())
-        {
-            texture = textureLookup(face.textureName);
-        }
-
         SDL_RenderGeometry(renderer.getSDLRenderer(), texture, verts.data(),
-                           static_cast<int>(verts.size()), indices.data(),
-                           static_cast<int>(indices.size()));
+                           static_cast<int>(verts.size()), nullptr, 0);
     }
 }
 
-void OutdoorRenderer::renderBillboards(const formats::ODMMapData& odmData, const Camera& camera,
-                                       const game::RuntimeConfig* runtimeConfig, float nightBlend,
-                                       const Frustum* frustumOverride)
+void OutdoorRenderer::drawBillboard(const detail::SpawnBillboard& sprite, const Camera& camera,
+                                    const detail::OutdoorLightingParams& lighting, uint32_t ticks)
 {
     const auto& viewProjection = camera.getViewProjectionMatrix();
     const Vec3 cameraPos = camera.getPosition();
     const float vpW = static_cast<float>(renderer.getViewportWidth());
     const float vpH = static_cast<float>(renderer.getViewportHeight());
 
-    Frustum localFrustum;
-    const Frustum* frustum = frustumOverride;
-    if (!frustum)
+    SDL_Texture* texture = nullptr;
+    float halfWidth = sprite.halfWidth;
+    float height = sprite.height;
+
+    if (textureLookup && !sprite.textureName.empty())
     {
-        localFrustum.extractFromMatrix(viewProjection);
-        frustum = &localFrustum;
-    }
-
-    const detail::OutdoorLightingParams billboardLighting =
-        detail::makeOutdoorLightingParams(runtimeConfig, nightBlend, false);
-
-    std::vector<detail::SpawnBillboard> sprites;
-
-    // Monster spawns.
-    if (!(runtimeConfig && runtimeConfig->noMonsters))
-    {
-        sprites.reserve(odmData.spawns.size() + odmData.decorations.size());
-        for (const auto& spawn : odmData.spawns)
+        texture = textureLookup(sprite.textureName);
+        if (texture)
         {
-            if (spawn.objectType == 0)
+            float texW = 0.0f;
+            float texH = 0.0f;
+            if (SDL_GetTextureSize(texture, &texW, &texH) && texW > 0.0f && texH > 0.0f)
             {
-                continue;
+                // MM7 sprites are authored at one texel per world unit; the frame
+                // table's scale is the only per-sprite adjustment.
+                halfWidth = texW * sprite.scale * 0.5f;
+                height = texH * sprite.scale;
             }
-
-            const float cullRadius = std::max(64.0f, static_cast<float>(spawn.radius) * 2.0f);
-            const Vec3 renderPos =
-                gameplayToRenderPosition(static_cast<float>(spawn.x), static_cast<float>(spawn.y),
-                                         static_cast<float>(spawn.z));
-            if (!frustum->testSphere(renderPos.x, renderPos.y, renderPos.z, cullRadius))
-            {
-                continue;
-            }
-
-            sprites.push_back(detail::makeOutdoorSpawnBillboard(spawn, cameraPos, runtimeConfig,
-                                                                monsterSpriteLookup,
-                                                                spriteFrameTable, SDL_GetTicks()));
         }
     }
 
-    // Static decorations (trees, rocks, signs, campfires). Sound/event markers carry
-    // no sprite and are skipped when their texture does not resolve.
-    if (!(runtimeConfig && runtimeConfig->noDecorations))
+    const float distance = std::sqrt(sprite.distanceSq);
+    SDL_FColor drawColor = (sprite.attributes & formats::kSpriteFrameLit)
+                               ? sprite.color
+                               : detail::applyOutdoorLighting(sprite.color, distance, lighting);
+
+    Vec3 drawPos = sprite.basePos;
+    if (sprite.attributes & formats::kSpriteFrameCenter)
     {
-        for (const auto& deco : odmData.decorations)
-        {
-            if (deco.hidden)
-            {
-                continue;
-            }
-            const Vec3 renderPos = gameplayToRenderPosition(
-                static_cast<float>(deco.x), static_cast<float>(deco.y), static_cast<float>(deco.z));
-            if (!frustum->testSphere(renderPos.x, renderPos.y, renderPos.z, 512.0f))
-            {
-                continue;
-            }
-            detail::SpawnBillboard sprite =
-                detail::makeOutdoorDecorationBillboard(deco, cameraPos, spriteFrameTable);
-            if (sprite.textureName.empty() || (textureLookup && !textureLookup(sprite.textureName)))
-            {
-                continue;
-            }
-            sprites.push_back(std::move(sprite));
-        }
+        // The anchor is the sprite's centre rather than its base.
+        drawPos.y -= height * 0.5f;
+    }
+    if (sprite.attributes & formats::kSpriteFrameTransparent)
+    {
+        drawColor.a *= 0.5f;
+    }
+    if (sprite.attributes & formats::kSpriteFrameGlowing)
+    {
+        const float glow = (std::sin(static_cast<float>(ticks) * 0.005f) + 1.0f) * 0.5f;
+        drawColor.r = std::clamp(drawColor.r + glow * 0.2f, 0.0f, 1.0f);
+        drawColor.g = std::clamp(drawColor.g + glow * 0.2f, 0.0f, 1.0f);
+        drawColor.b = std::clamp(drawColor.b + glow * 0.2f, 0.0f, 1.0f);
     }
 
-    if (sprites.empty())
+    const BillboardQuad quad =
+        computeBillboardQuad(drawPos, cameraPos, halfWidth, height, sprite.flipU);
+
+    const Vec4 clipBL = viewProjection * Vec4(quad.bottomLeft, 1.0f);
+    const Vec4 clipBR = viewProjection * Vec4(quad.bottomRight, 1.0f);
+    const Vec4 clipTL = viewProjection * Vec4(quad.topLeft, 1.0f);
+    const Vec4 clipTR = viewProjection * Vec4(quad.topRight, 1.0f);
+    if (clipBL.w < CLIP_NEAR_EPSILON || clipBR.w < CLIP_NEAR_EPSILON ||
+        clipTL.w < CLIP_NEAR_EPSILON || clipTR.w < CLIP_NEAR_EPSILON)
     {
         return;
     }
 
-    std::sort(sprites.begin(), sprites.end(),
-              [](const detail::SpawnBillboard& a, const detail::SpawnBillboard& b)
-              { return a.distanceSq > b.distanceSq; });
-
-    if (!sprites.empty())
+    float sxBL, syBL, sxBR, syBR, sxTL, syTL, sxTR, syTR;
+    if (!projectClipToScreen(clipBL, vpW, vpH, sxBL, syBL) ||
+        !projectClipToScreen(clipBR, vpW, vpH, sxBR, syBR) ||
+        !projectClipToScreen(clipTL, vpW, vpH, sxTL, syTL) ||
+        !projectClipToScreen(clipTR, vpW, vpH, sxTR, syTR))
     {
-        SDL_SetRenderDrawBlendMode(renderer.getSDLRenderer(), SDL_BLENDMODE_BLEND);
+        return;
     }
 
-    const Vec3 worldUp = Vec3::up();
-    for (auto sprite : sprites)
+    SDL_Vertex vertices[4];
+    vertices[0].position = {sxBL, syBL};
+    vertices[1].position = {sxBR, syBR};
+    vertices[2].position = {sxTL, syTL};
+    vertices[3].position = {sxTR, syTR};
+    for (auto& vertex : vertices)
     {
-        Vec3 toCamera = cameraPos - sprite.basePos;
-        toCamera.y = 0.0f;
-        if (toCamera.lengthSquared() < 0.001f)
-        {
-            toCamera = Vec3::forward();
-        }
-        const Vec3 forward = toCamera.normalized();
-        Vec3 right = worldUp.cross(forward);
-        if (right.lengthSquared() < 0.001f)
-        {
-            right = Vec3::right();
-        }
-        right.normalize();
-
-        const float distance = std::sqrt(sprite.distanceSq);
-        SDL_FColor drawColor =
-            detail::applyOutdoorLighting(sprite.color, distance, billboardLighting);
-        SDL_Texture* texture = nullptr;
-        float actualHalfWidth = sprite.halfWidth;
-        float actualHeight = sprite.height;
-
-        if (textureLookup && !sprite.textureName.empty())
-        {
-            texture = textureLookup(sprite.textureName);
-            if (texture)
-            {
-                float width = 0.0f;
-                float height = 0.0f;
-                if (SDL_GetTextureSize(texture, &width, &height))
-                {
-                    const float scale = 0.6f;
-                    actualHalfWidth = (width * scale) * 0.5f;
-                    actualHeight = height * scale;
-                }
-            }
-        }
-
-        Vec3 drawPos = sprite.basePos;
-        uint32_t ticks = SDL_GetTicks();
-
-        if (sprite.attributes & 0x80) // Oscillate
-        {
-            float offset = std::sin(ticks * 0.01f) * 4.0f;
-            drawPos.y += offset;
-        }
-        if (sprite.attributes & 0x02) // Translucent
-        {
-            drawColor.a *= 0.5f;
-        }
-        if (sprite.attributes & 0x40) // Mirror / Shimmer
-        {
-            float shimmer = (std::sin(ticks * 0.005f) + 1.0f) * 0.5f;
-            drawColor.r = std::clamp(drawColor.r + shimmer * 0.2f, 0.0f, 1.0f);
-            drawColor.g = std::clamp(drawColor.g + shimmer * 0.2f, 0.0f, 1.0f);
-            drawColor.b = std::clamp(drawColor.b + shimmer * 0.2f, 0.0f, 1.0f);
-        }
-
-        const Vec3 bottomLeft = drawPos - right * actualHalfWidth;
-        const Vec3 bottomRight = drawPos + right * actualHalfWidth;
-        const Vec3 topLeft = bottomLeft + worldUp * actualHeight;
-        const Vec3 topRight = bottomRight + worldUp * actualHeight;
-
-        const Vec4 clipBL = viewProjection * Vec4(bottomLeft, 1.0f);
-        const Vec4 clipBR = viewProjection * Vec4(bottomRight, 1.0f);
-        const Vec4 clipTL = viewProjection * Vec4(topLeft, 1.0f);
-        const Vec4 clipTR = viewProjection * Vec4(topRight, 1.0f);
-        if (clipBL.w < CLIP_NEAR_EPSILON || clipBR.w < CLIP_NEAR_EPSILON ||
-            clipTL.w < CLIP_NEAR_EPSILON || clipTR.w < CLIP_NEAR_EPSILON)
-        {
-            continue;
-        }
-
-        float sxBL, syBL, sxBR, syBR, sxTL, syTL, sxTR, syTR;
-        if (!projectClipToScreen(clipBL, vpW, vpH, sxBL, syBL) ||
-            !projectClipToScreen(clipBR, vpW, vpH, sxBR, syBR) ||
-            !projectClipToScreen(clipTL, vpW, vpH, sxTL, syTL) ||
-            !projectClipToScreen(clipTR, vpW, vpH, sxTR, syTR))
-        {
-            continue;
-        }
-
-        SDL_Vertex vertices[4];
-        vertices[0].position = {sxBL, syBL};
-        vertices[1].position = {sxBR, syBR};
-        vertices[2].position = {sxTL, syTL};
-        vertices[3].position = {sxTR, syTR};
-        for (auto& vertex : vertices)
-        {
-            vertex.color = drawColor;
-        }
-        vertices[0].tex_coord = {0.0f, 1.0f};
-        vertices[1].tex_coord = {1.0f, 1.0f};
-        vertices[2].tex_coord = {0.0f, 0.0f};
-        vertices[3].tex_coord = {1.0f, 0.0f};
-
-        constexpr int indices[6] = {0, 1, 2, 2, 1, 3};
-        SDL_RenderGeometry(renderer.getSDLRenderer(), texture, vertices, 4, indices, 6);
+        vertex.color = drawColor;
     }
+    vertices[0].tex_coord = {quad.uvBottomLeft.u, quad.uvBottomLeft.v};
+    vertices[1].tex_coord = {quad.uvBottomRight.u, quad.uvBottomRight.v};
+    vertices[2].tex_coord = {quad.uvTopLeft.u, quad.uvTopLeft.v};
+    vertices[3].tex_coord = {quad.uvTopRight.u, quad.uvTopRight.v};
+
+    constexpr int indices[6] = {0, 1, 2, 2, 1, 3};
+    SDL_RenderGeometry(renderer.getSDLRenderer(), texture, vertices, 4, indices, 6);
 }
 
 void OutdoorRenderer::invalidateGPUCache() {}

@@ -23,6 +23,7 @@
 #include "../formats/npcprof_parser.hpp"
 #include "../formats/snd_archive.hpp"
 #include "../formats/sound_list.hpp"
+#include "../formats/tile_table.hpp"
 #include "../game/character.hpp"
 #include "../game/combat.hpp"
 #include "../game/event_engine.hpp"
@@ -182,6 +183,7 @@ class Application
     // Frame tables
     formats::SpriteFrameTable spriteFrameTable_;
     formats::TextureFrameTable textureFrameTable_;
+    formats::TileTable tileTable_;
 
     // Game state management
     GameState gameState = GameState::IntroVideo;
