@@ -6,11 +6,17 @@
 # 2. If not found, automatically download and build from subprojects/catch2.wrap
 # 3. This makes the build work on any system without manual installation
 
+# Catch2 builds its own SelfTest suite by default, which does not compile under
+# current Clang (TEMPLATE_PRODUCT_TEST_CASE). We only consume the library, so turn
+# the subproject's tests and install rules off wherever it may be configured.
+catch2_subproject_options = ['tests=false', 'install=false']
+
 catch2_dep = dependency(
     'catch2-with-main',
     version: '>=3.0.0',
     required: false,
     fallback: ['catch2', 'catch2_with_main_dep'],
+    default_options: catch2_subproject_options,
 )
 
 if not catch2_dep.found()
@@ -20,12 +26,13 @@ if not catch2_dep.found()
         version: '>=3.0.0',
         required: false,
         fallback: ['catch2', 'catch2_dep'],
+        default_options: catch2_subproject_options,
     )
 endif
 
 if not catch2_dep.found()
     # Last resort: explicitly require the subproject
-    catch2_proj = subproject('catch2')
+    catch2_proj = subproject('catch2', default_options: catch2_subproject_options)
     catch2_dep = catch2_proj.get_variable('catch2_with_main_dep')
 endif
 
