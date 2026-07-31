@@ -702,7 +702,13 @@ bool ImageLODArchive::resolveEntryNames()
 
         std::transform(name.begin(), name.end(), name.begin(),
                        [](unsigned char c) { return std::tolower(c); });
-        nameToIndex[name] = i;
+        // Some archives (notably Events.lod) carry duplicate directory entries
+        // where a later entry re-uses a name with a garbage offset (0). Keep the
+        // first occurrence so lookups resolve to the real record.
+        if (nameToIndex.find(name) == nameToIndex.end())
+        {
+            nameToIndex[name] = i;
+        }
     }
 
     return true;
