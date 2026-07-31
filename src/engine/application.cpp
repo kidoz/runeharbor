@@ -3990,6 +3990,25 @@ void Application::applyMapEntryPoint()
         return;
     }
 
+    // Outdoor maps mark the default arrival point with a "Party Start" decoration.
+    // ODM spawn points are monster generators, so falling through to them drops the
+    // party wherever the first generator happens to sit (usually far offshore).
+    const auto& outdoorDecorations = mapScene->getODMData().decorations;
+    for (const auto& decoration : outdoorDecorations)
+    {
+        if (toLower(decoration.name) != "party start")
+        {
+            continue;
+        }
+
+        gameWorld_->party().setWorldPosition(static_cast<float>(decoration.x),
+                                             static_cast<float>(decoration.y),
+                                             static_cast<float>(decoration.z));
+        groundPartyToOutdoorTerrain(gameWorld_->party(), mapScene.get(), &logger, "party-start");
+        applyEntryOrientation();
+        return;
+    }
+
     const auto& outdoorSpawns = mapScene->getODMData().spawns;
     if (!outdoorSpawns.empty())
     {
