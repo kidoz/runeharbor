@@ -800,6 +800,7 @@ void InGameState::render()
 
         inventory_.setGameWorld(ctx.shared->gameWorld);
         inventory_.setInventory(ctx.shared->inventory);
+        inventory_.setSpellSystem(ctx.shared->spellSystem);
         inventory_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
                              static_cast<int>(kGameWidth * scale),
                              static_cast<int>(kGameHeight * scale));

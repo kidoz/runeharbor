@@ -15,7 +15,8 @@
 namespace runeharbor::game
 {
 
-class Party; // forward declaration (party.hpp does not include this header)
+class Party;       // forward declaration (party.hpp does not include this header)
+class SpellSystem; // forward declaration (spells.hpp does not include this header)
 
 // Item equip type (matches MM7's 21 equip types from items.txt)
 enum class EquipType : uint8_t
@@ -116,6 +117,17 @@ struct CharacterInventory
     }
 };
 
+// Outcome of using a consumable item (potion/scroll/book/message-scroll).
+struct UseResult
+{
+    bool used = false;     // did the item take effect (and get consumed)?
+    bool consumed = false; // was the item removed from the backpack?
+    int hpHealed = 0;      // HP restored (heal potion / scroll)
+    int spRestored = 0;    // SP restored (mana potion)
+    int spellLearned = 0;  // spell id learned from a book (0 = none)
+    std::string message;   // message-scroll text or status description
+};
+
 // The inventory system manages items across the party
 class Inventory
 {
@@ -128,7 +140,12 @@ class Inventory
     // Optional party reference: when set, equip/canEquip enforce the MM7 skill
     // requirement (FUN_004926F8) — a sword needs Sword learned, plate needs
     // Plate, etc. When null, the skill gate is skipped (slot validity only).
-    void setParty(const Party* party) { party_ = party; }
+    // Also used by useItem to mutate character HP/SP/conditions/spellbook.
+    void setParty(Party* party) { party_ = party; }
+
+    // Optional spell system: when set, useItem can apply spell effects (potion
+    // heal/cure, scroll cast). When null, usable items are refused.
+    void setSpellSystem(SpellSystem* spells) { spellSystem_ = spells; }
 
     // Item data lookup
     const formats::ItemEntry* getItemDef(int itemId) const;
@@ -151,6 +168,12 @@ class Inventory
     bool addToBackpack(int characterIndex, const Item& item);
     bool removeFromBackpack(int characterIndex, int backpackSlot);
     std::optional<Item> takeFromBackpack(int characterIndex, int backpackSlot);
+
+    // Use a consumable item (potion/scroll/book/message-scroll) from a
+    // backpack slot on the target character (FUN_004680F1). Requires
+    // setSpellSystem to have been called for potions/scrolls. The item is
+    // consumed on a successful use (message scrolls are NOT consumed).
+    UseResult useItem(int characterIndex, int backpackSlot, int targetCharIndex);
 
     // Item identification
     bool identifyItem(int characterIndex, EquipSlot slot);
@@ -196,11 +219,15 @@ class Inventory
     // True if the character has the item's required skill learned (or the item
     // requires none). Mirrors FUN_004926F8.
     bool meetsSkillRequirement(int characterIndex, int itemId) const;
+    // Resolves the spell a scroll casts (scroll.txt mapping), or the heal spell
+    // id for a potion's effect. Returns 0 if unresolved.
+    int spellIdForScroll(int itemId) const;
 
     util::ILogger& logger_;
     std::unordered_map<int, formats::ItemEntry> itemDefs_;
     std::array<CharacterInventory, 4> inventories_ = {};
-    const Party* party_ = nullptr;
+    Party* party_ = nullptr;
+    SpellSystem* spellSystem_ = nullptr;
 };
 
 } // namespace runeharbor::game

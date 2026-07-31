@@ -9,6 +9,11 @@
 #include "../game/inventory.hpp"
 #include "widgets.hpp"
 
+namespace runeharbor::game
+{
+class SpellSystem; // forward declaration (spells.hpp pulls in many headers)
+}
+
 namespace runeharbor::ui
 {
 
@@ -22,6 +27,7 @@ class InventoryWidget : public Widget
 
     void setGameWorld(game::GameWorld* world) { gameWorld_ = world; }
     void setInventory(game::Inventory* inventory) { inventory_ = inventory; }
+    void setSpellSystem(game::SpellSystem* spells) { spellSystem_ = spells; }
     void setActiveCharacter(int index) { activeCharacterIndex_ = index; }
 
     // Status-line feedback for equip/unequip outcomes (mirrors the shop window).
@@ -56,6 +62,7 @@ class InventoryWidget : public Widget
 
     game::GameWorld* gameWorld_ = nullptr;
     game::Inventory* inventory_ = nullptr;
+    game::SpellSystem* spellSystem_ = nullptr;
     int activeCharacterIndex_ = 0;
     TextureLookup textureLookup_;
     std::function<void(const std::string&)> onStatus_;

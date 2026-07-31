@@ -3,10 +3,12 @@
 
 #include <algorithm>
 #include <charconv>
+#include <format>
 #include <optional>
 
 #include "../util/string_utils.hpp"
 #include "party.hpp"
+#include "spells.hpp"
 
 namespace runeharbor::game
 {
@@ -335,6 +337,162 @@ bool Inventory::unequip(int characterIndex, EquipSlot slot)
 
     logger_.warning("No free backpack slot to unequip item");
     return false;
+}
+
+int Inventory::spellIdForScroll(int itemId) const
+{
+    // scroll.txt maps scroll itemId -> spell id (table at 0x723BB8 in the
+    // binary). A proper scroll_parser is a follow-up; this covers the common
+    // scroll ids via a small runtime table with a sensible default (the first
+    // spell of the school implied by the scroll's position). Scrolls are
+    // itemIds 300+; map the common ones, default to a heal-equivalent.
+    static const std::unordered_map<int, int> kScrollToSpell = {
+        // Healing/Aid scrolls -> Body school heal (spell 67).
+        {300, 67},
+        {301, 67},
+        {302, 67},
+        // Light damage scrolls -> Fire bolt (spell 1).
+        {303, 1},
+        {304, 1},
+    };
+    const auto it = kScrollToSpell.find(itemId);
+    if (it != kScrollToSpell.end())
+    {
+        return it->second;
+    }
+    // Default: a minor heal so scrolls are never inert.
+    return 67;
+}
+
+UseResult Inventory::useItem(int characterIndex, int backpackSlot, int targetCharIndex)
+{
+    UseResult result;
+    if (party_ == nullptr || characterIndex < 0 || characterIndex >= kPartySize ||
+        targetCharIndex < 0 || targetCharIndex >= kPartySize)
+    {
+        result.message = "Invalid target";
+        return result;
+    }
+
+    auto& inv = getInventory(characterIndex);
+    if (backpackSlot < 0 || backpackSlot >= kBackpackSlots)
+    {
+        result.message = "Invalid item slot";
+        return result;
+    }
+    Item& item = inv.backpack[static_cast<size_t>(backpackSlot)];
+    if (!item.valid())
+    {
+        result.message = "No item there";
+        return result;
+    }
+
+    const EquipType kind = getEquipType(item.itemId);
+    const int power = item.chargeCount > 0 ? item.chargeCount : 5; // potion magnitude
+
+    switch (kind)
+    {
+    case EquipType::Potion:
+    {
+        // FUN_004680F1 potion branch: 52-case table by itemId (220..271).
+        // 220=heal, 221=cure-poison(cond 6), 222=mana; others default to heal.
+        Character& target = party_->member(targetCharIndex);
+        switch (item.itemId)
+        {
+        case 222: // mana potion: restore SP directly (+0x1940 writes).
+            target.spellPoints = std::min(target.maxSpellPoints, target.spellPoints + power + 10);
+            result.spRestored = power + 10;
+            result.message = std::format("Restored {} spell points.", result.spRestored);
+            break;
+        case 221: // cure poison (condition index 6 = Poison1).
+            if (target.hasCondition(ConditionIndex::Poison1))
+            {
+                target.clearCondition(ConditionIndex::Poison1);
+                result.message = "Cured poison.";
+            }
+            else
+            {
+                result.message = "Had no poison to cure.";
+            }
+            break;
+        default: // 220 heal + all other potions -> heal via the HP-restore
+                 // primitive (FUN_0048DB9F, power+10). Route through
+                 // castScriptSpell when a SpellSystem is available so the heal
+                 // also clears Unconscious; else apply directly.
+            if (spellSystem_ != nullptr)
+            {
+                const int healSpell = 67; // Body school heal
+                auto r = spellSystem_->castScriptSpell(healSpell, power + 10, targetCharIndex);
+                result.hpHealed = r.healing;
+                result.message = r.description;
+            }
+            else
+            {
+                const int before = target.hitPoints;
+                target.hitPoints = std::min(target.maxHitPoints, target.hitPoints + power + 10);
+                if (target.hitPoints > 0)
+                    target.clearCondition(ConditionIndex::Unconscious);
+                result.hpHealed = std::max(0, target.hitPoints - before);
+                result.message = std::format("Restored {} HP.", result.hpHealed);
+            }
+            break;
+        }
+        result.used = true;
+        result.consumed = true;
+        inv.backpack[static_cast<size_t>(backpackSlot)] = Item{};
+        return result;
+    }
+    case EquipType::SpellScroll:
+    {
+        if (spellSystem_ == nullptr)
+        {
+            result.message = "Cannot cast scroll here";
+            return result;
+        }
+        const int spellId = spellIdForScroll(item.itemId);
+        auto r = spellSystem_->castScriptSpell(spellId, power, targetCharIndex);
+        result.used = r.success;
+        result.hpHealed = r.healing;
+        result.message = r.description;
+        result.consumed = true;
+        inv.backpack[static_cast<size_t>(backpackSlot)] = Item{};
+        return result;
+    }
+    case EquipType::Book:
+    {
+        // Books are itemIds 400+; book index = itemId - 400. Learn the spell
+        // (spell id = bookIndex+1 for this pass) gated on school skill.
+        Character& reader = party_->member(targetCharIndex);
+        const int bookIndex = std::max(0, item.itemId - 400);
+        const int spellId = bookIndex + 1;
+        // Gate on the Fire school skill as the default (the binary's
+        // school-selection by book index is not fully RE'd; refine later).
+        if (reader.learnSpell(spellId, SkillId::Fire))
+        {
+            result.spellLearned = spellId;
+            result.used = true;
+            result.consumed = true;
+            result.message = std::format("Learned spell #{}.", spellId);
+            inv.backpack[static_cast<size_t>(backpackSlot)] = Item{};
+        }
+        else
+        {
+            result.message = "Cannot learn — school not known or already known.";
+        }
+        return result;
+    }
+    case EquipType::MessageScroll:
+    {
+        // FUN_00467F4C: display text, NOT consumed.
+        result.used = true;
+        result.consumed = false;
+        result.message = std::format("You read the scroll (item #{}).", item.itemId);
+        return result;
+    }
+    default:
+        result.message = "Cannot use that item.";
+        return result;
+    }
 }
 
 bool Inventory::addToBackpack(int characterIndex, const Item& item)

@@ -298,7 +298,8 @@ void InventoryWidget::handleClick(int mouseX, int mouseY)
         return;
     }
 
-    // Backpack click: equip the item in the clicked cell.
+    // Backpack click: branch on item kind — usable items are used, equippable
+    // items are equipped.
     const int backpackSlot = backpackSlotAt(mouseX, mouseY);
     if (backpackSlot < 0)
         return;
@@ -307,6 +308,25 @@ void InventoryWidget::handleClick(int mouseX, int mouseY)
         return;
 
     const int itemId = inv.backpack[static_cast<size_t>(backpackSlot)].itemId;
+    const game::EquipType kind = inventory_->getEquipType(itemId);
+
+    // Usable items (FUN_004680F1 consume dispatch): potion/scroll/book/message.
+    if (kind == game::EquipType::Potion || kind == game::EquipType::SpellScroll ||
+        kind == game::EquipType::Book || kind == game::EquipType::MessageScroll)
+    {
+        inventory_->setSpellSystem(spellSystem_);
+        auto result =
+            inventory_->useItem(activeCharacterIndex_, backpackSlot, activeCharacterIndex_);
+        if (onStatus_)
+        {
+            onStatus_(result.message.empty()
+                          ? (result.used ? "Used item." : "Cannot use that item.")
+                          : result.message);
+        }
+        return;
+    }
+
+    // Equippable gear.
     if (inventory_->equip(activeCharacterIndex_, backpackSlot))
     {
         if (onStatus_)

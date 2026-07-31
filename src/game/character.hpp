@@ -276,6 +276,19 @@ struct Character
     std::array<SkillValue, static_cast<size_t>(SkillId::Count)> skillLevels = {};
     std::vector<std::string> skills; // Display names (for character creation UI)
 
+    // Known spells (spellbook). MM7 stores one known-spell byte per spell at
+    // charBase+0x192; RuneHarbor models it as a bool array indexed by spell id
+    // (1..99). Books grant a spell here (FUN_004680F1 book branch).
+    static constexpr int kSpellCount = 100; // spell ids 1..99 (1-based)
+    std::array<bool, kSpellCount> knownSpells = {};
+    bool knowsSpell(int spellId) const
+    {
+        return spellId > 0 && spellId < kSpellCount && knownSpells[static_cast<size_t>(spellId)];
+    }
+    // Learns a spell. Returns false if the character lacks the school skill at
+    // Normal mastery (the gate from the book branch), true on success.
+    bool learnSpell(int spellId, SkillId schoolSkill);
+
     // Equipment
     std::array<ItemSlot, static_cast<size_t>(EquipSlot::Count)> equipment = {};
 

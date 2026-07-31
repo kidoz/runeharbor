@@ -279,6 +279,27 @@ void Character::clearAllConditions()
     conditionTimestamps.fill(0);
 }
 
+bool Character::learnSpell(int spellId, SkillId schoolSkill)
+{
+    if (spellId <= 0 || spellId >= kSpellCount)
+    {
+        return false;
+    }
+    // FUN_004680F1 book branch: the character must know the magic school
+    // (mastery >= Normal) to learn the spell.
+    const auto& skill = skillLevels[static_cast<size_t>(schoolSkill)];
+    if (!skill.learned())
+    {
+        return false;
+    }
+    if (knownSpells[static_cast<size_t>(spellId)])
+    {
+        return false; // already known
+    }
+    knownSpells[static_cast<size_t>(spellId)] = true;
+    return true;
+}
+
 std::optional<SkillId> skillIdFromName(std::string_view name)
 {
     const std::string normalized = normalizeSkillName(name);

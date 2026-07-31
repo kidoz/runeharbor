@@ -70,6 +70,7 @@ test_sources = files(
     'game/combat_test.cpp',
     'game/inventory_test.cpp',
     'game/shop_system_test.cpp',
+    'game/usable_items_test.cpp',
     'graphics/light_stack_test.cpp',
     'graphics/sprite_decoder_test.cpp',
     'graphics/outdoor_renderer_math_test.cpp',
