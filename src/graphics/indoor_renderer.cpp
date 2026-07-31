@@ -17,6 +17,7 @@
 #include "shaders_compiled.hpp"
 #include "sprite_facing.hpp"
 #include "visibility.hpp"
+#include "world_coordinates.hpp"
 
 namespace runeharbor::graphics
 {
@@ -203,6 +204,7 @@ struct BillboardSprite
     SDL_FColor color = {1.0f, 1.0f, 1.0f, 1.0f};
     std::string textureName;
     uint32_t attributes = 0;
+    float scale = 1.0f;
     bool flipU = false;
 };
 
@@ -212,8 +214,9 @@ BillboardSprite makeIndoorDecorationBillboard(const formats::ParsedDecoration& d
                                               [[maybe_unused]] uint32_t ticks)
 {
     BillboardSprite sprite;
-    sprite.basePos = {static_cast<float>(decoration.x), static_cast<float>(decoration.y),
-                      static_cast<float>(decoration.z)};
+    sprite.basePos =
+        gameplayToRenderPosition(static_cast<float>(decoration.x), static_cast<float>(decoration.y),
+                                 static_cast<float>(decoration.z));
     sprite.textureName = decoration.name;
 
     if (spriteFrameTable)
@@ -229,6 +232,7 @@ BillboardSprite makeIndoorDecorationBillboard(const formats::ParsedDecoration& d
                 start++;
             sprite.textureName = tn.substr(start);
             sprite.attributes = entry->attributes;
+            sprite.scale = entry->scale;
         }
     }
 
@@ -266,8 +270,8 @@ BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, co
                                          const formats::SpriteFrameTable* spriteFrameTable)
 {
     BillboardSprite sprite;
-    sprite.basePos = {static_cast<float>(spawn.x), static_cast<float>(spawn.y),
-                      static_cast<float>(spawn.z)};
+    sprite.basePos = gameplayToRenderPosition(
+        static_cast<float>(spawn.x), static_cast<float>(spawn.y), static_cast<float>(spawn.z));
 
     const float baseHeight = std::max(kMinBillboardHeight, static_cast<float>(spawn.radius) * 2.0f);
     sprite.height = std::clamp(baseHeight, 56.0f, 220.0f);
@@ -307,6 +311,11 @@ BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, co
                         sprite.textureName = tn.substr(start);
                     }
                     sprite.attributes = entry->attributes;
+                    sprite.scale = entry->scale;
+                    if (formats::spriteFrameMirrorsOctant(entry->attributes, octant))
+                    {
+                        sprite.flipU = !sprite.flipU;
+                    }
                 }
             }
         }
@@ -431,13 +440,20 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                 float w, h;
                 SDL_GetTextureSize(blitTex, &w, &h);
                 renderer.renderTexture(blitTex, 0, 0, static_cast<int>(w), static_cast<int>(h));
+                // Only claim the walls are on screen once the offscreen target has
+                // actually been composited; otherwise the software pass below has to
+                // draw them or the viewport stays empty.
+                gpuWallsDrawn = true;
             }
-            gpuWallsDrawn = true;
         }
     }
 
     const auto& viewProjection = camera.getViewProjectionMatrix();
     const Vec3 cameraPos = camera.getPosition();
+    // BLV geometry, lights and the sector graph are all in gameplay space (Z up),
+    // while the camera lives in render space (Y up). Anything compared against map
+    // data has to use the gameplay-space camera or it never lines up.
+    const Vec3 gameplayCameraPos = renderToGameplayPosition(cameraPos);
     const float vpW = static_cast<float>(renderer.getViewportWidth());
     const float vpH = static_cast<float>(renderer.getViewportHeight());
     const bool animateWater = (runtimeConfig == nullptr) || !runtimeConfig->noWavyWater;
@@ -447,7 +463,7 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
     if (!visibleSectors)
     {
         PortalVisibility portalVisibility;
-        localVisibleSectors = portalVisibility.computeVisibleSectors(blvData, cameraPos, 8);
+        localVisibleSectors = portalVisibility.computeVisibleSectors(blvData, gameplayCameraPos, 8);
         visibleSectors = &localVisibleSectors;
     }
 
@@ -520,10 +536,10 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         cy *= inv;
         cz *= inv;
 
-        // Backface culling: dot(faceNormal, centroid - cameraPos)
-        float viewDirX = cx - cameraPos.x;
-        float viewDirY = cy - cameraPos.y;
-        float viewDirZ = cz - cameraPos.z;
+        // Backface culling: dot(faceNormal, centroid - cameraPos), in gameplay space.
+        float viewDirX = cx - gameplayCameraPos.x;
+        float viewDirY = cy - gameplayCameraPos.y;
+        float viewDirZ = cz - gameplayCameraPos.z;
 
         float dot = face.normalFX * viewDirX + face.normalFY * viewDirY + face.normalFZ * viewDirZ;
         if (dot > 0.0f)
@@ -621,8 +637,9 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                 }
 
                 const auto& vertex = blvData.vertices[vi];
-                Vec3 worldPos = {static_cast<float>(vertex.x), static_cast<float>(vertex.y),
-                                 static_cast<float>(vertex.z)};
+                Vec3 worldPos = gameplayToRenderPosition(static_cast<float>(vertex.x),
+                                                         static_cast<float>(vertex.y),
+                                                         static_cast<float>(vertex.z));
 
                 Vec4 clip = viewProjection * Vec4(worldPos, 1.0f);
                 if (clip.w >= CLIP_NEAR_EPSILON)
@@ -767,12 +784,14 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                 texture = textureLookup(sprite.textureName);
                 if (texture)
                 {
-                    float w, h;
-                    if (SDL_GetTextureSize(texture, &w, &h))
+                    float w = 0.0f;
+                    float h = 0.0f;
+                    if (SDL_GetTextureSize(texture, &w, &h) && w > 0.0f && h > 0.0f)
                     {
-                        const float scale = 0.6f;
-                        actualHalfWidth = (w * scale) * 0.5f;
-                        actualHeight = h * scale;
+                        // MM7 sprites are authored at one texel per world unit; the
+                        // frame table's scale is the only per-sprite adjustment.
+                        actualHalfWidth = w * sprite.scale * 0.5f;
+                        actualHeight = h * sprite.scale;
                     }
                 }
             }
@@ -781,21 +800,21 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
             SDL_FColor drawColor = sprite.color;
             uint32_t ticks = SDL_GetTicks();
 
-            if (sprite.attributes & 0x80) // Oscillate
+            if (sprite.attributes & formats::kSpriteFrameCenter)
             {
-                float offset = std::sin(ticks * 0.01f) * 4.0f;
-                drawPos.y += offset;
+                // The anchor is the sprite's centre rather than its base.
+                drawPos.y -= actualHeight * 0.5f;
             }
-            if (sprite.attributes & 0x02) // Translucent
+            if (sprite.attributes & formats::kSpriteFrameTransparent)
             {
                 drawColor.a *= 0.5f;
             }
-            if (sprite.attributes & 0x40) // Mirror / Shimmer
+            if (sprite.attributes & formats::kSpriteFrameGlowing)
             {
-                float shimmer = (std::sin(ticks * 0.005f) + 1.0f) * 0.5f;
-                drawColor.r = std::clamp(drawColor.r + shimmer * 0.2f, 0.0f, 1.0f);
-                drawColor.g = std::clamp(drawColor.g + shimmer * 0.2f, 0.0f, 1.0f);
-                drawColor.b = std::clamp(drawColor.b + shimmer * 0.2f, 0.0f, 1.0f);
+                float glow = (std::sin(ticks * 0.005f) + 1.0f) * 0.5f;
+                drawColor.r = std::clamp(drawColor.r + glow * 0.2f, 0.0f, 1.0f);
+                drawColor.g = std::clamp(drawColor.g + glow * 0.2f, 0.0f, 1.0f);
+                drawColor.b = std::clamp(drawColor.b + glow * 0.2f, 0.0f, 1.0f);
             }
 
             const BillboardQuad quad = computeBillboardQuad(drawPos, cameraPos, actualHalfWidth,
@@ -1062,6 +1081,11 @@ void IndoorRenderer::buildGPUIndoor(const formats::BLVMapData& blvData)
                     continue;
 
                 const auto& vPos = blvData.vertices[vIdx];
+                // The vertex shader works in render space (Y up), so the gameplay
+                // Z-up positions have to be converted before upload.
+                const Vec3 renderPos =
+                    gameplayToRenderPosition(static_cast<float>(vPos.x), static_cast<float>(vPos.y),
+                                             static_cast<float>(vPos.z));
 
                 float u = 0.0f, v = 0.0f;
                 if (i < face.uCoords.size() && i < face.vCoords.size())
@@ -1070,15 +1094,9 @@ void IndoorRenderer::buildGPUIndoor(const formats::BLVMapData& blvData)
                     v = static_cast<float>(face.vCoords[i]) / 256.0f;
                 }
 
-                GPUVertex vertex = {static_cast<float>(vPos.x),
-                                    static_cast<float>(vPos.y),
-                                    static_cast<float>(vPos.z),
-                                    faceColor.r,
-                                    faceColor.g,
-                                    faceColor.b,
-                                    faceColor.a,
-                                    u,
-                                    v};
+                GPUVertex vertex = {renderPos.x, renderPos.y, renderPos.z,
+                                    faceColor.r, faceColor.g, faceColor.b,
+                                    faceColor.a, u,           v};
                 vertices.push_back(vertex);
             }
 

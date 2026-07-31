@@ -6,6 +6,7 @@
 #include "indoor_renderer.hpp"
 #include "outdoor_renderer.hpp"
 #include "visibility.hpp"
+#include "world_coordinates.hpp"
 
 namespace runeharbor::graphics
 {
@@ -178,8 +179,9 @@ void WorldRenderer::refreshVisibilityCache(const engine::MapScene& scene, const 
     if (!blvData.sectors.empty())
     {
         PortalVisibility portalVisibility;
-        visibleIndoorSectors_ =
-            portalVisibility.computeVisibleSectors(blvData, camera.getPosition(), 8);
+        // The sector graph is in gameplay space (Z up); the camera is render space.
+        visibleIndoorSectors_ = portalVisibility.computeVisibleSectors(
+            blvData, renderToGameplayPosition(camera.getPosition()), 8);
     }
 
     visibilityCacheValid_ = true;
