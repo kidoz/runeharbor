@@ -46,6 +46,11 @@ class HUD
     void render(graphics::IRenderer& renderer, const graphics::DebugText& debugText, float scale,
                 float offsetX, float offsetY);
 
+    /// Hit-test a screen-space point against the 4 party portraits. Returns
+    /// the member index 0..3, or -1 if the point is not on a portrait.
+    /// @param scale/offsetX/offsetY the same letterbox transform passed to render()
+    int portraitAt(float scale, float offsetX, float offsetY, int screenX, int screenY) const;
+
   private:
     void renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugText& debugText,
                         float scale, float offsetX, float offsetY);

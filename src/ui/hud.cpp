@@ -152,6 +152,33 @@ int HUD::sh(int gameH, float scale) const
     return static_cast<int>(gameH * scale);
 }
 
+int HUD::portraitAt(float scale, float offsetX, float offsetY, int screenX, int screenY) const
+{
+    if (scale <= 0.0f)
+    {
+        return -1;
+    }
+    // Invert the screen->game transform: game = (screen - offset) / scale.
+    const float gameX = (static_cast<float>(screenX) - offsetX) / scale;
+    const float gameY = (static_cast<float>(screenY) - offsetY) / scale;
+
+    // Portraits share Y range [kPartyBarY+14, kPartyBarY+14+kPortraitH].
+    const int portraitY = kPartyBarY + 14;
+    if (gameY < portraitY || gameY >= portraitY + kPortraitH)
+    {
+        return -1;
+    }
+    for (int i = 0; i < game::kPartySize; i++)
+    {
+        const int baseX = kPortraitStartX + i * kPortraitSpacing;
+        if (gameX >= baseX && gameX < baseX + kPortraitW)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
 void HUD::render(graphics::IRenderer& renderer, const graphics::DebugText& debugText, float scale,
                  float offsetX, float offsetY)
 {
@@ -264,6 +291,14 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
             renderer.drawFilledRect(sx(baseX, scale, offsetX), sy(kPartyBarY + 14, scale, offsetY),
                                     sw(kPortraitW, scale), sh(kPortraitH, scale), classHue,
                                     static_cast<uint8_t>(classHue / 2), 40, 180);
+        }
+
+        // Highlight the active party member (selected via portrait click).
+        if (party.activeMemberIndex() == i)
+        {
+            renderer.drawRect(sx(baseX - 2, scale, offsetX), sy(kPartyBarY + 12, scale, offsetY),
+                              sw(kPortraitW + 4, scale), sh(kPortraitH + 4, scale), 255, 220, 80,
+                              255);
         }
 
         // Name and class
