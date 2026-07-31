@@ -132,20 +132,24 @@ bool SpriteFrameTable::parse(const std::vector<uint8_t>& data)
 {
     entries_.clear();
 
-    if (data.size() < 4)
+    // Header is two counts: the frames themselves, then a trailing group lookup
+    // table we do not need. Reading only the first count leaves every field after
+    // the two name strings shifted by four bytes.
+    constexpr size_t kHeaderSize = 8;
+    if (data.size() < kHeaderSize)
     {
         return false;
     }
 
     uint32_t count = readLE<uint32_t>(data.data());
-    size_t expectedSize = 4 + static_cast<size_t>(count) * sizeof(SpriteFrameEntryRaw);
-    if (data.size() < expectedSize)
+    size_t expectedSize = kHeaderSize + static_cast<size_t>(count) * sizeof(SpriteFrameEntryRaw);
+    if (count == 0 || data.size() < expectedSize)
     {
         return false;
     }
 
     entries_.reserve(count);
-    const uint8_t* ptr = data.data() + 4;
+    const uint8_t* ptr = data.data() + kHeaderSize;
 
     for (uint32_t i = 0; i < count; i++)
     {
@@ -159,12 +163,12 @@ bool SpriteFrameTable::parse(const std::vector<uint8_t>& data)
         frame.paletteId = raw.paletteId;
         frame.paletteIndex = raw.paletteIndex;
         frame.attributes = raw.attributes;
+        // Scale is 16.16 fixed point; a zero scale means "unscaled".
+        frame.scale = (raw.scale != 0) ? static_cast<float>(raw.scale) / 65536.0f : 1.0f;
         frame.animDuration = raw.animDuration;
         frame.animLength = raw.animLength;
-        frame.animOffset = raw.animOffset;
-        frame.lightRadius = static_cast<int16_t>(
-            std::clamp(raw.lightRadius, static_cast<int32_t>(std::numeric_limits<int16_t>::min()),
-                       static_cast<int32_t>(std::numeric_limits<int16_t>::max())));
+        frame.animOffset = 0;
+        frame.lightRadius = raw.glowRadius;
         frame.lightR = 0;
         frame.lightG = 0;
         frame.lightB = 0;

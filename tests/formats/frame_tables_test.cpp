@@ -32,21 +32,23 @@ void appendFixedName(std::vector<uint8_t>& data, std::string_view name)
 
 } // namespace
 
-TEST_CASE("SpriteFrameTable parses MM7 dsft records after leading frame field", "[frame_tables]")
+TEST_CASE("SpriteFrameTable parses MM7 dsft records after the two header counts", "[frame_tables]")
 {
     std::vector<uint8_t> data;
-    appendLe32(data, 1);          // count
-    appendLe32(data, 0x00000002); // leading frame flags
+    appendLe32(data, 1); // frame count
+    appendLe32(data, 7); // trailing group-lookup count
     appendFixedName(data, "dec33");
     appendFixedName(data, "dec33a");
-    data.resize(data.size() + 16, 0); // reserved
-    appendLe16(data, 1);              // animDuration
-    appendLe16(data, 21);             // animLength
-    appendLe16(data, 0);              // animOffset
-    appendLe16(data, 0x0080);         // attributes
-    appendLe32(data, 0);
-    appendLe16(data, 2); // paletteId
-    appendLe16(data, 0); // paletteIndex
+    data.resize(data.size() + 16, 0);    // per-octant sprite ids
+    appendLe32(data, 0x00018000);        // scale, 16.16 fixed point = 1.5
+    appendLe32(data, 0x00040020);        // attributes: transparent | centre
+    appendLe16(data, 9);                 // glowRadius
+    appendLe16(data, 2);                 // paletteId
+    appendLe16(data, 0);                 // paletteIndex
+    appendLe16(data, 1);                 // animDuration
+    appendLe16(data, 21);                // animLength
+    appendLe16(data, 0);                 // reserved
+    data.resize(data.size() + 7 * 2, 0); // group lookup table
 
     SpriteFrameTable table;
     REQUIRE(table.parse(data));
@@ -56,7 +58,29 @@ TEST_CASE("SpriteFrameTable parses MM7 dsft records after leading frame field", 
     REQUIRE(entry != nullptr);
     CHECK(entry->iconName == "dec33");
     CHECK(entry->textureName == "dec33a");
-    CHECK(entry->attributes == 0x0080);
+    CHECK(entry->attributes == (kSpriteFrameTransparent | kSpriteFrameCenter));
+    CHECK(entry->scale == Catch::Approx(1.5f));
+    CHECK(entry->lightRadius == 9);
+    CHECK(entry->animDuration == 1);
     CHECK(entry->animLength == 21);
     CHECK(entry->paletteId == 2);
+}
+
+TEST_CASE("SpriteFrameTable rejects truncated dsft data", "[frame_tables]")
+{
+    std::vector<uint8_t> data;
+    appendLe32(data, 4); // claims four frames
+    appendLe32(data, 0);
+    data.resize(data.size() + 60, 0); // only one frame present
+
+    SpriteFrameTable table;
+    CHECK_FALSE(table.parse(data));
+}
+
+TEST_CASE("Sprite frame mirror bits select per-octant flipping", "[frame_tables]")
+{
+    const uint32_t attributes = kSpriteFrameMirror0 << 5;
+    CHECK(spriteFrameMirrorsOctant(attributes, 5));
+    CHECK_FALSE(spriteFrameMirrorsOctant(attributes, 4));
+    CHECK_FALSE(spriteFrameMirrorsOctant(0, 0));
 }

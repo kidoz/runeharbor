@@ -10,23 +10,49 @@ namespace runeharbor::formats
 {
 
 // ---- Sprite Frame Table (dsft.bin) ----
+//
+// File layout: uint32 frameCount, uint32 groupCount, frameCount × 60-byte frames,
+// groupCount × uint16 group lookup entries. The trailing lookup table maps sprite
+// group ids to their first frame and is not needed for name-based lookups.
 
 // Raw on-disk layout: 60 bytes per entry
 struct SpriteFrameEntryRaw
 {
-    uint32_t frameFlags;  // 0x00
-    char iconName[12];    // 0x04
-    char textureName[12]; // 0x10
-    uint8_t reserved[16]; // 0x1C
-    int16_t animDuration; // 0x2C
-    int16_t animLength;   // 0x2E
-    int16_t animOffset;   // 0x30
-    uint16_t attributes;  // 0x32
-    int32_t lightRadius;  // 0x34
-    int16_t paletteId;    // 0x38
-    int16_t paletteIndex; // 0x3A
+    char iconName[12];        // 0x00 — only set on the first frame of a sequence
+    char textureName[12];     // 0x0C — sprite name in SPRITES.LOD, without octant suffix
+    int16_t octantSprites[8]; // 0x18 — per-octant sprite ids, resolved at load time
+    int32_t scale;            // 0x28 — 16.16 fixed-point billboard scale
+    uint32_t attributes;      // 0x2C — SpriteFrameAttribute bits
+    int16_t glowRadius;       // 0x30
+    int16_t paletteId;        // 0x32
+    int16_t paletteIndex;     // 0x34
+    int16_t animDuration;     // 0x36 — frame duration, 1/16th of a second
+    int16_t animLength;       // 0x38 — total sequence duration, first frame only
+    int16_t reserved;         // 0x3A
 };
 static_assert(sizeof(SpriteFrameEntryRaw) == 60, "SpriteFrameEntryRaw must be 60 bytes");
+
+// Sprite frame attribute bits.
+enum SpriteFrameAttribute : uint32_t
+{
+    kSpriteFrameHasMore = 0x00001,     // animation continues with further frames
+    kSpriteFrameLit = 0x00002,         // self-lit; not dimmed by scene lighting
+    kSpriteFrameFirst = 0x00004,       // first frame of a sequence
+    kSpriteFrameSingleImage = 0x00010, // one image shared by all eight octants
+    kSpriteFrameCenter = 0x00020,      // anchor at the sprite's centre, not its base
+    kSpriteFrameFidget = 0x00040,
+    kSpriteFrameLoaded = 0x00080,
+    kSpriteFrameMirror0 = 0x00100, // octant N is mirrored: 0x100 << N
+    kSpriteFrameThreeImages = 0x10000,
+    kSpriteFrameGlowing = 0x20000,
+    kSpriteFrameTransparent = 0x40000,
+};
+
+/// Whether the frame's sprite must be mirrored when seen from `octant` (0..7).
+inline bool spriteFrameMirrorsOctant(uint32_t attributes, int octant)
+{
+    return (attributes & (kSpriteFrameMirror0 << (octant & 7))) != 0;
+}
 
 // Clean parsed representation
 struct SpriteFrameEntry
@@ -36,6 +62,7 @@ struct SpriteFrameEntry
     int16_t paletteId = 0;
     int16_t paletteIndex = 0;
     uint32_t attributes = 0;
+    float scale = 1.0f;
     int16_t animDuration = 0;
     int16_t animLength = 0;
     int16_t animOffset = 0;
