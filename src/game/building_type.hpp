@@ -59,11 +59,11 @@ bool hasShopUI(BuildingType type);
 // each have their own.
 enum class ShopFamily
 {
-    None,         // not a shop UI
-    ItemShop,     // Weapon/Armor/Magic/Alchemist — buy/sell/identify/repair
-    Temple,       // heal / cure / resurrect
-    Training,     // spend gold for experience
-    Travel,       // stables / boats -> map transitions
+    None,     // not a shop UI
+    ItemShop, // Weapon/Armor/Magic/Alchemist — buy/sell/identify/repair
+    Temple,   // heal / cure / resurrect
+    Training, // spend gold for experience
+    Travel,   // stables / boats -> map transitions
 };
 
 ShopFamily shopFamily(BuildingType type);

@@ -295,6 +295,16 @@ struct Character
 
     void clearCondition(ConditionIndex c) { conditionTimestamps[static_cast<size_t>(c)] = 0; }
 
+    // Returns the most severe active condition per the MM7 priority order
+    // (Eradicated > Stoned > Dead > Zombie > Unconscious > Asleep > Paralyzed >
+    // diseases/poisons descending > Insane > Drunk > Afraid > Weak > Cursed),
+    // or ConditionIndex::Count if none are active. Mirrors the engine's
+    // GetWorstCondition (FUN_0048E9EC, priority table at 0x4EDDA0).
+    ConditionIndex worstActiveCondition() const;
+
+    // Clears every active condition (used by temple heal/resurrect).
+    void clearAllConditions();
+
     bool isAlive() const
     {
         return !hasCondition(ConditionIndex::Dead) && !hasCondition(ConditionIndex::Stoned) &&

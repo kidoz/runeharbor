@@ -252,6 +252,33 @@ void Character::rest(int hours)
     }
 }
 
+ConditionIndex Character::worstActiveCondition() const
+{
+    // MM7 priority order (worst-first), from the table at 0x4EDDA0. See
+    // docs/re/30-temple-healing-resurrection.md section 5.
+    static constexpr ConditionIndex kPriorityOrder[] = {
+        ConditionIndex::Eradicated, ConditionIndex::Stoned,      ConditionIndex::Dead,
+        ConditionIndex::Zombie,     ConditionIndex::Unconscious, ConditionIndex::Asleep,
+        ConditionIndex::Paralyzed,  ConditionIndex::Disease3,    ConditionIndex::Poison3,
+        ConditionIndex::Disease2,   ConditionIndex::Poison2,     ConditionIndex::Disease1,
+        ConditionIndex::Poison1,    ConditionIndex::Insane,      ConditionIndex::Drunk,
+        ConditionIndex::Afraid,     ConditionIndex::Weak,        ConditionIndex::Cursed};
+
+    for (ConditionIndex c : kPriorityOrder)
+    {
+        if (hasCondition(c))
+        {
+            return c;
+        }
+    }
+    return ConditionIndex::Count;
+}
+
+void Character::clearAllConditions()
+{
+    conditionTimestamps.fill(0);
+}
+
 std::optional<SkillId> skillIdFromName(std::string_view name)
 {
     const std::string normalized = normalizeSkillName(name);

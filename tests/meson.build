@@ -69,6 +69,7 @@ test_sources = files(
     'game/party_test.cpp',
     'game/combat_test.cpp',
     'game/inventory_test.cpp',
+    'game/shop_system_test.cpp',
     'graphics/light_stack_test.cpp',
     'graphics/sprite_decoder_test.cpp',
     'graphics/outdoor_renderer_math_test.cpp',
@@ -164,6 +165,7 @@ test_game_sources = files(
     '../src/game/spells.cpp',
     '../src/game/quest_log.cpp',
     '../src/game/save_game.cpp',
+    '../src/game/shop_system.cpp',
 )
 
 test_ui_sources = files(

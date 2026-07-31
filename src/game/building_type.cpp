@@ -2,8 +2,9 @@
 #include "building_type.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <string>
+
+#include <cctype>
 
 namespace runeharbor::game
 {

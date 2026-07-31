@@ -108,6 +108,7 @@ game_sources = files(
     'game/spells.cpp',
     'game/quest_log.cpp',
     'game/save_game.cpp',
+    'game/shop_system.cpp',
 )
 
 # Audio sources

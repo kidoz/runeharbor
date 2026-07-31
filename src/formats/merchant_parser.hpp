@@ -34,10 +34,10 @@ enum class MerchantServiceColumn : uint8_t
 // numeric order follows the rows in `MERCHANT.TXT`.
 enum class MerchantScenario : uint8_t
 {
-    NotEnoughGold = 0,   // "I'm sorry, %06, but you don't have enough money."
-    NoSkill = 1,         // untrained merchant (no discount)
-    RegularSkill = 2,    // trained, normal/expert
-    GoodSkill = 3,       // master / highly skilled
+    NotEnoughGold = 0, // "I'm sorry, %06, but you don't have enough money."
+    NoSkill = 1,       // untrained merchant (no discount)
+    RegularSkill = 2,  // trained, normal/expert
+    GoodSkill = 3,     // master / highly skilled
 };
 
 struct MerchantTextRow

@@ -38,8 +38,8 @@ struct TwoDEventEntry
     int closedHour = 24;                            // "Closed"
 
     // Legacy / forward-compat.
-    std::string category;        // first non-numeric text column (the Type label)
-    std::string displayName;     // last non-numeric text column (the shop Name)
+    std::string category;             // first non-numeric text column (the Type label)
+    std::string displayName;          // last non-numeric text column (the shop Name)
     std::vector<std::string> columns; // every column verbatim (fields[1..])
 };
 
