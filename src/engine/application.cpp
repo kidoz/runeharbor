@@ -1083,7 +1083,53 @@ void Application::renderFrame()
         activeState->render();
     }
 
+    captureDevScreenshot();
+
     renderer->present();
+}
+
+void Application::captureDevScreenshot()
+{
+    // Dev-only frame dump: RUNEHARBOR_SCREENSHOT=<path.bmp> grabs the composed
+    // frame once RUNEHARBOR_SCREENSHOT_FRAME frames have been rendered, then
+    // asks the window to close so the capture is reproducible from a script.
+    static const char* const outPath = SDL_getenv("RUNEHARBOR_SCREENSHOT");
+    if (!outPath)
+    {
+        return;
+    }
+
+    static const long targetFrame = []
+    {
+        const char* value = SDL_getenv("RUNEHARBOR_SCREENSHOT_FRAME");
+        return value ? std::strtol(value, nullptr, 10) : 120L;
+    }();
+
+    if (++devFrameCounter_ < targetFrame)
+    {
+        return;
+    }
+
+    if (SDL_Surface* surface = SDL_RenderReadPixels(renderer->getSDLRenderer(), nullptr))
+    {
+        if (!SDL_SaveBMP(surface, outPath))
+        {
+            logger.error(std::format("Screenshot failed: {}", SDL_GetError()));
+        }
+        else
+        {
+            logger.info(std::format("Wrote screenshot {}", outPath));
+        }
+        SDL_DestroySurface(surface);
+    }
+    else
+    {
+        logger.error(std::format("SDL_RenderReadPixels failed: {}", SDL_GetError()));
+    }
+
+    SDL_Event quit = {};
+    quit.type = SDL_EVENT_QUIT;
+    SDL_PushEvent(&quit);
 }
 
 void Application::updateViewport()

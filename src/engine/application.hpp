@@ -164,6 +164,7 @@ class Application
     bool initialized = false;
     int viewportWidth = 0;
     int viewportHeight = 0;
+    long devFrameCounter_ = 0;
 
     // State machine
     std::unique_ptr<StateContext> stateCtx;
@@ -359,6 +360,8 @@ class Application
     void updateStateMachine();
     void updateViewport();
     void renderFrame();
+    /// Dev-only frame dump driven by RUNEHARBOR_SCREENSHOT[_FRAME].
+    void captureDevScreenshot();
 
     void buildIntroPlaylist();
     /// Rebuild the intro playlist and hand it to IntroState, re-entering that state
