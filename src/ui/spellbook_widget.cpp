@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 #include "spellbook_widget.hpp"
 
+#include <SDL3/SDL_scancode.h>
+
+#include <algorithm>
+#include <format>
+
 #include "../game/party.hpp"
 #include "../graphics/debug_text.hpp"
 #include "../graphics/irenderer.hpp"
@@ -34,6 +39,33 @@ void* SpellbookWidget::getCachedTexture(const std::string& name, int& w, int& h)
     return nullptr;
 }
 
+void SpellbookWidget::requestCast(int spellId)
+{
+    if (spellId <= 0 || spellSystem_ == nullptr)
+    {
+        return;
+    }
+
+    // Gate: the active character must be able to cast (skill + mana).
+    if (!spellSystem_->canCast(activeCharacterIndex_, spellId))
+    {
+        if (onStatus_)
+            onStatus_("Cannot cast — insufficient skill or mana.");
+        return;
+    }
+
+    game::SpellTarget target = game::SpellTarget::SingleEnemy;
+    if (const auto* info = spellSystem_->getSpell(spellId))
+    {
+        target = info->target;
+    }
+
+    if (onCastRequest_)
+    {
+        onCastRequest_({spellId, target});
+    }
+}
+
 void SpellbookWidget::render(graphics::IRenderer& renderer, const graphics::DebugText& text)
 {
     if (!visible_)
@@ -57,40 +89,124 @@ void SpellbookWidget::render(graphics::IRenderer& renderer, const graphics::Debu
     {
         renderer.drawFilledRect(bounds_.x, bounds_.y, bounds_.width, bounds_.height, 40, 30, 20,
                                 240);
+        renderer.drawRect(bounds_.x, bounds_.y, bounds_.width, bounds_.height, 130, 108, 60, 255);
     }
 
-    if (!gameWorld_ || activeCharacterIndex_ < 0)
-        return;
-    if (activeCharacterIndex_ >= game::kPartySize)
+    if (!gameWorld_ || activeCharacterIndex_ < 0 || activeCharacterIndex_ >= game::kPartySize)
         return;
 
     auto& party = gameWorld_->party();
     auto& character = party.member(activeCharacterIndex_);
 
     int textX = bounds_.x + 20;
-    int textY = bounds_.y + 20;
+    int textY = bounds_.y + 16;
 
-    text.drawText(sdl, textX, textY, 2, 255, 255, 255, character.name + "'s Spellbook");
-    textY += 40;
+    text.drawText(sdl, textX, textY, 2, 255, 220, 120, character.name + "'s Spellbook");
+    textY += 36;
 
-    text.drawText(sdl, textX, textY, 1, 200, 200, 200, "Fire Magic");
-    textY += 20;
-    text.drawText(sdl, textX, textY, 1, 200, 200, 200, "Air Magic");
-    textY += 20;
-    text.drawText(sdl, textX, textY, 1, 200, 200, 200, "Water Magic");
-    textY += 20;
-    text.drawText(sdl, textX, textY, 1, 200, 200, 200, "Earth Magic");
-    textY += 20;
+    // Build the spell list from the character's available spells.
+    rows_.clear();
+    rowY_.clear();
+    if (spellSystem_ != nullptr)
+    {
+        const auto spellIds = spellSystem_->getAvailableSpells(activeCharacterIndex_);
+        for (int id : spellIds)
+        {
+            const auto* info = spellSystem_->getSpell(id);
+            if (info == nullptr)
+                continue;
+            SpellRow row;
+            row.id = id;
+            row.name = info->name.empty() ? info->shortName : info->name;
+            row.manaCost = spellSystem_->getManaCost(activeCharacterIndex_, id);
+            row.target = info->target;
+            rows_.push_back(std::move(row));
+        }
+    }
+
+    if (rows_.empty())
+    {
+        text.drawText(sdl, textX, textY, 1, 200, 200, 200,
+                      "No spells known. Read a spell book to learn one.");
+        return;
+    }
+
+    // Header.
+    text.drawText(sdl, textX, textY, 1, 200, 200, 160, "Spell                              Mana");
+    textY += rowHeight_ + 2;
+    renderer.drawFilledRect(bounds_.x + 16, textY - 2, bounds_.width - 32, 1, 110, 90, 50, 220);
+    textY += 4;
+
+    if (selected_ >= static_cast<int>(rows_.size()))
+        selected_ = 0;
+
+    for (int i = 0; i < static_cast<int>(rows_.size()); i++)
+    {
+        if (textY + rowHeight_ > bounds_.y + bounds_.height - 24)
+            break; // out of space
+        const auto& row = rows_[i];
+        if (i == selected_)
+        {
+            renderer.drawFilledRect(bounds_.x + 16, textY - 1, bounds_.width - 32, rowHeight_, 80,
+                                    70, 30, 220);
+        }
+        const std::string cost = std::format("{}", row.manaCost);
+        text.drawText(sdl, textX, textY, 1, 230, 230, 230, row.name);
+        text.drawText(sdl, bounds_.x + bounds_.width - 24 - static_cast<int>(cost.size()) * 8,
+                      textY, 1, 120, 180, 255, cost);
+        rowY_.push_back(textY);
+        textY += rowHeight_;
+    }
+
+    // Footer hint.
+    const int hintY = bounds_.y + bounds_.height - 18;
+    text.drawText(sdl, textX, hintY, 1, 160, 160, 170, "Up/Dn: select   Enter: cast   Esc: close");
 }
 
 bool SpellbookWidget::handleEvent(const UIEvent& event)
 {
     if (!visible_ || !enabled_)
         return false;
-
     if (event.type == UIEventType::MouseDown && bounds_.contains(event.mouseX, event.mouseY))
     {
-        return true;
+        // Click a row to select + cast.
+        for (size_t i = 0; i < rowY_.size(); i++)
+        {
+            if (event.mouseY >= rowY_[i] && event.mouseY < rowY_[i] + rowHeight_)
+            {
+                selected_ = static_cast<int>(i);
+                if (i < rows_.size())
+                    requestCast(rows_[i].id);
+                return true;
+            }
+        }
+        return true; // consume clicks inside the panel
+    }
+    if (event.type == UIEventType::KeyDown)
+    {
+        if (event.scancode == SDL_SCANCODE_UP)
+        {
+            if (selected_ > 0)
+                selected_--;
+            return true;
+        }
+        if (event.scancode == SDL_SCANCODE_DOWN)
+        {
+            if (selected_ < static_cast<int>(rows_.size()) - 1)
+                selected_++;
+            return true;
+        }
+        if ((event.scancode == SDL_SCANCODE_RETURN || event.scancode == SDL_SCANCODE_SPACE) &&
+            selected_ < static_cast<int>(rows_.size()))
+        {
+            requestCast(rows_[selected_].id);
+            return true;
+        }
+        if (event.scancode == SDL_SCANCODE_ESCAPE)
+        {
+            setVisible(false);
+            return true;
+        }
     }
     return false;
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "../../game/spells.hpp"
 #include "../../graphics/primitives.hpp"
 #include "../../graphics/visibility.hpp"
 #include "../../ui/character_stats_widget.hpp"
@@ -79,6 +80,12 @@ class InGameState : public IGameState
     std::optional<graphics::PickHit> hoveredPick_;
     std::string hoverLine_;
     std::string statusLine_;
+
+    // Spell targeting state: when a spell is chosen in the spellbook, the
+    // player picks a target (party member for heals, monster for damage).
+    bool targetingActive_ = false;
+    int selectedSpellId_ = 0;
+    game::SpellTarget pendingTargetType_ = game::SpellTarget::SingleEnemy;
 };
 
 } // namespace runeharbor::engine

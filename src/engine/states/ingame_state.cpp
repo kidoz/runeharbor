@@ -172,6 +172,44 @@ void InGameState::enter()
                 ctx.shared->statusMessage = message;
             }
         });
+    spellbook_.setStatusCallback(
+        [this](const std::string& message)
+        {
+            statusLine_ = message;
+            if (ctx.shared)
+            {
+                ctx.shared->statusMessage = message;
+            }
+        });
+    spellbook_.setSpellCastRequestCallback(
+        [this](const ui::SpellCastRequest& req)
+        {
+            // Enter targeting mode for spells that need a clicked target;
+            // fire immediately for self/party buffs.
+            selectedSpellId_ = req.spellId;
+            pendingTargetType_ = req.targetType;
+            if (req.targetType == game::SpellTarget::Self ||
+                req.targetType == game::SpellTarget::AllAllies)
+            {
+                // Buff/self: cast immediately on the active caster.
+                const int caster = findActivePartyMember();
+                if (caster >= 0 && ctx.shared && ctx.shared->spellSystem)
+                {
+                    auto r = ctx.shared->spellSystem->castBuffSpell(caster, req.spellId);
+                    statusLine_ = r.description;
+                }
+                targetingActive_ = false;
+            }
+            else
+            {
+                targetingActive_ = true;
+                spellbook_.setVisible(false); // close the spellbook to pick a target
+                statusLine_ =
+                    (req.targetType == game::SpellTarget::SingleAlly)
+                        ? std::format("Click a party member to cast spell #{}.", req.spellId)
+                        : std::format("Click a monster to cast spell #{}.", req.spellId);
+            }
+        });
 }
 
 void InGameState::exit()
@@ -480,6 +518,20 @@ std::optional<GameStateId> InGameState::update()
         }
     }
 
+    // Spellbook keyboard navigation (Up/Down/Enter/Esc) when open.
+    if (spellbook_.visible())
+    {
+        for (const SDL_Scancode key : {SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_RETURN,
+                                       SDL_SCANCODE_SPACE, SDL_SCANCODE_ESCAPE})
+        {
+            if (ctx.isKeyPressed(key))
+            {
+                ui::UIEvent ev{ui::UIEventType::KeyDown, 0, 0, platform::MouseButton::Left, key};
+                (void)spellbook_.handleEvent(ev);
+            }
+        }
+    }
+
     // Toggle rest screen
     if (ctx.isKeyPressed(SDL_SCANCODE_R))
     {
@@ -580,6 +632,100 @@ std::optional<GameStateId> InGameState::update()
             return GameStateId::Loading;
         }
         statusLine_ = "Load failed (slot 1)";
+    }
+
+    // HUD portrait click: select the active party member. Only when no panel is
+    // open and we are not awaiting a spell target.
+    const bool noPanelOpen = !inventory_.visible() && !spellbook_.visible() &&
+                             !characterStats_.visible() && !restWidget_.visible() &&
+                             !mapWidget_.visible() && !dialogue_.isOpen() && !shopWindow_.isOpen();
+    if (noPanelOpen && !targetingActive_ &&
+        ctx.window.wasMousePressed(platform::MouseButton::Left) && ctx.shared &&
+        ctx.shared->gameWorld)
+    {
+        const auto ms = ctx.window.getMouseState();
+        const float hudScale =
+            std::min(static_cast<float>(ctx.viewportWidth) / static_cast<float>(kGameWidth),
+                     static_cast<float>(ctx.viewportHeight) / static_cast<float>(kGameHeight));
+        const float hudOffsetX =
+            (ctx.viewportWidth - static_cast<float>(kGameWidth) * hudScale) * 0.5f;
+        const float hudOffsetY =
+            (ctx.viewportHeight - static_cast<float>(kGameHeight) * hudScale) * 0.5f;
+        const int portrait = hud_.portraitAt(hudScale, hudOffsetX, hudOffsetY, ms.x, ms.y);
+        if (portrait >= 0)
+        {
+            auto& party = ctx.shared->gameWorld->party();
+            if (party.member(portrait).isConscious())
+            {
+                party.setActiveMemberIndex(portrait);
+                statusLine_ = std::format("Selected {}.", party.member(portrait).name);
+            }
+            else
+            {
+                statusLine_ = std::format("{} cannot act.", party.member(portrait).name);
+            }
+        }
+    }
+
+    // Spell targeting: resolve the queued spell on the next click. SingleAlly
+    // targets a party portrait; SingleEnemy targets the monster under the
+    // cursor. Esc cancels.
+    if (targetingActive_ && ctx.shared && ctx.shared->gameWorld)
+    {
+        if (ctx.isKeyPressed(SDL_SCANCODE_ESCAPE))
+        {
+            targetingActive_ = false;
+            statusLine_ = "Cancelled spell.";
+        }
+        else if (ctx.window.wasMousePressed(platform::MouseButton::Left))
+        {
+            const int caster = findActivePartyMember();
+            const auto ms = ctx.window.getMouseState();
+            const float tScale =
+                std::min(static_cast<float>(ctx.viewportWidth) / static_cast<float>(kGameWidth),
+                         static_cast<float>(ctx.viewportHeight) / static_cast<float>(kGameHeight));
+            const float tOffsetX =
+                (ctx.viewportWidth - static_cast<float>(kGameWidth) * tScale) * 0.5f;
+            const float tOffsetY =
+                (ctx.viewportHeight - static_cast<float>(kGameHeight) * tScale) * 0.5f;
+
+            bool resolved = false;
+            if (pendingTargetType_ == game::SpellTarget::SingleAlly)
+            {
+                const int portrait = hud_.portraitAt(tScale, tOffsetX, tOffsetY, ms.x, ms.y);
+                if (portrait >= 0 && caster >= 0 && ctx.shared->spellSystem)
+                {
+                    auto r =
+                        ctx.shared->spellSystem->castHealSpell(caster, selectedSpellId_, portrait);
+                    statusLine_ = r.description;
+                    resolved = true;
+                }
+            }
+            else if (pendingTargetType_ == game::SpellTarget::SingleEnemy && caster >= 0 &&
+                     ctx.shared->combatSystem && ctx.shared->spellSystem)
+            {
+                const int monsterIdx = pickMonsterUnderCursor();
+                if (monsterIdx >= 0)
+                {
+                    auto* target = ctx.shared->combatSystem->getMonster(monsterIdx);
+                    if (target && target->isAlive())
+                    {
+                        ctx.shared->combatSystem->setInCombat(true);
+                        auto r = ctx.shared->spellSystem->castDamageSpell(caster, selectedSpellId_,
+                                                                          target);
+                        statusLine_ = r.description;
+                        resolved = true;
+                    }
+                }
+            }
+
+            if (!resolved)
+            {
+                statusLine_ = "No valid target.";
+            }
+            targetingActive_ = false;
+        }
+        return std::nullopt; // swallow input while targeting
     }
 
     // Inventory panel input: dispatch mouse clicks to the widget so the player
@@ -813,6 +959,7 @@ void InGameState::render()
         characterStats_.render(*ctx.renderer, *ctx.debugText);
 
         spellbook_.setGameWorld(ctx.shared->gameWorld);
+        spellbook_.setSpellSystem(ctx.shared->spellSystem);
         spellbook_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
                              static_cast<int>(kGameWidth * scale),
                              static_cast<int>(kGameHeight * scale));
@@ -1054,9 +1201,19 @@ int InGameState::findActivePartyMember() const
         return -1;
     }
 
+    // Prefer the player-selected active member if they can act (RE: the active
+    // member at 0x507A6C drives casting/inventory/shops). Falls back to the
+    // first conscious member otherwise.
+    const auto& party = ctx.shared->gameWorld->party();
+    const int selected = party.activeMemberIndex();
+    if (selected >= 0 && selected < game::kPartySize && party.member(selected).isConscious())
+    {
+        return selected;
+    }
+
     for (int i = 0; i < game::kPartySize; i++)
     {
-        if (ctx.shared->gameWorld->party().member(i).isConscious())
+        if (party.member(i).isConscious())
         {
             return i;
         }
@@ -1296,6 +1453,8 @@ void InGameState::renderOverlay()
 
     lines.push_back("ARROWS MOVE/TURN  PGUP/PGDN LOOK  INS/DEL STRAFE  SHIFT RUN");
     lines.push_back("SPACE/A ACTION  I INV  C CHARS  S SPELLS  R REST  M MAP");
+    lines.push_back("CLICK PORTRAIT: SELECT MEMBER  S: SPELLBOOK -> CLICK SPELL -> CLICK TARGET");
+    lines.push_back("RMB: QUICK DAMAGE SPELL  (TARGETING: ESC CANCELS)");
     lines.push_back(std::format("F FLOORS:{}  V WALLS:{}  C CEIL:{}  P PORTAL:{}",
                                 onOff(renderOptions.showFloors), onOff(renderOptions.showWalls),
                                 onOff(renderOptions.showCeilings),
