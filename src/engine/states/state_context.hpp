@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "../../formats/two_d_events_parser.hpp"
 #include "../../game/character.hpp"
 #include "../../graphics/primitives.hpp"
 #include "../../platform/iwindow.hpp"
@@ -98,6 +99,12 @@ struct SharedGameData
     std::string npcDialogueText;
     std::vector<int> npcDialogueChoiceIds;
     std::vector<std::string> npcDialogueChoiceTexts;
+
+    // Runtime shop/building handoff from EVT_SHOW_BUILDING to the shop window.
+    // Set by the onShowBuilding event callback; consumed by InGameState.
+    bool openShop = false;
+    int pendingShopBuildingId = 0;
+    formats::TwoDEventEntry pendingShopBuilding; // resolved entry to open
 };
 
 /// Shared resources and helpers available to all game states.

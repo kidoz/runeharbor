@@ -9,6 +9,7 @@
 #include "../../ui/inventory_widget.hpp"
 #include "../../ui/map_widget.hpp"
 #include "../../ui/rest_widget.hpp"
+#include "../../ui/shop_window.hpp"
 #include "../../ui/spellbook_widget.hpp"
 #include "../map_scene.hpp"
 #include "igame_state.hpp"
@@ -67,6 +68,7 @@ class InGameState : public IGameState
     ui::CharacterStatsWidget characterStats_;
     ui::SpellbookWidget spellbook_;
     ui::RestWidget restWidget_;
+    ui::ShopWindow shopWindow_;
     ui::MapWidget mapWidget_;
     uint64_t lastUpdateTicks_ = 0;
     float fpsAccumulatorMs_ = 0.0f;

@@ -24,6 +24,7 @@
 #include "../formats/snd_archive.hpp"
 #include "../formats/sound_list.hpp"
 #include "../formats/tile_table.hpp"
+#include "../formats/two_d_events_parser.hpp"
 #include "../game/character.hpp"
 #include "../game/combat.hpp"
 #include "../game/event_engine.hpp"
@@ -209,6 +210,9 @@ class Application
     std::unordered_map<std::string, int> mapRespawnDaysByFileName_;
     std::unordered_map<std::string, std::string> mapDisplayNameByFileName_;
     std::unordered_map<int, std::string> buildingDisplayNameById_;
+    // Full typed building/shop entries (the onShowBuilding callback hands the
+    // building id to the shop window, which resolves the entry from here).
+    std::unordered_map<int, formats::TwoDEventEntry> buildingEntryById_;
     std::unordered_map<int, std::string> npcDialogTextById_;
     std::unordered_map<int, std::string> npcDialogOwnerById_;
     std::unordered_map<int, std::string> npcNameById_;

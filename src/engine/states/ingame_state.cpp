@@ -152,11 +152,32 @@ void InGameState::enter()
             statusLine_ = triggered ? std::format("Triggered dialogue event #{}", choiceId)
                                     : std::format("Dialogue event #{} not found", choiceId);
         });
+
+    // Shop window status feedback -> on-screen status line.
+    shopWindow_.setStatusCallback(
+        [this](const std::string& message)
+        {
+            statusLine_ = message;
+            if (ctx.shared)
+            {
+                ctx.shared->statusMessage = message;
+            }
+        });
+    inventory_.setStatusCallback(
+        [this](const std::string& message)
+        {
+            statusLine_ = message;
+            if (ctx.shared)
+            {
+                ctx.shared->statusMessage = message;
+            }
+        });
 }
 
 void InGameState::exit()
 {
     dialogue_.close();
+    shopWindow_.close();
 }
 
 graphics::Rect InGameState::worldViewportRect() const
@@ -291,6 +312,38 @@ std::optional<GameStateId> InGameState::update()
         ctx.shared->npcDialogueText.clear();
         ctx.shared->npcDialogueChoiceIds.clear();
         ctx.shared->npcDialogueChoiceTexts.clear();
+    }
+
+    if (ctx.shared && ctx.shared->openShop)
+    {
+        // Resolve the building entry handed off by EVT_SHOW_BUILDING and open
+        // the shop window. Stock the buy list from the loaded item table.
+        if (ctx.shared->inventory && ctx.shared->gameWorld)
+        {
+            shopWindow_.setContext(&ctx.shared->gameWorld->party(), ctx.shared->inventory);
+            shopWindow_.show(ctx.shared->pendingShopBuilding, ctx.shared->inventory->itemTable());
+        }
+        ctx.shared->openShop = false;
+    }
+
+    if (shopWindow_.isOpen())
+    {
+        if (ctx.window.wasMousePressed(platform::MouseButton::Left))
+        {
+            const auto ms = ctx.window.getMouseState();
+            (void)shopWindow_.handleClick(ms.x, ms.y);
+        }
+
+        for (const SDL_Scancode key : {SDL_SCANCODE_ESCAPE, SDL_SCANCODE_UP, SDL_SCANCODE_DOWN,
+                                       SDL_SCANCODE_RETURN, SDL_SCANCODE_SPACE, SDL_SCANCODE_TAB})
+        {
+            if (ctx.isKeyPressed(key))
+            {
+                (void)shopWindow_.handleKey(static_cast<int>(key));
+            }
+        }
+
+        return std::nullopt;
     }
 
     if (dialogue_.isOpen())
@@ -782,6 +835,13 @@ void InGameState::render()
     if (ctx.renderer && ctx.debugText && dialogue_.isOpen())
     {
         dialogue_.render(*ctx.renderer, *ctx.debugText, ctx.viewportWidth, ctx.viewportHeight);
+    }
+    if (ctx.renderer && ctx.debugText && shopWindow_.isOpen())
+    {
+        shopWindow_.setContext(
+            (ctx.shared && ctx.shared->gameWorld) ? &ctx.shared->gameWorld->party() : nullptr,
+            ctx.shared ? ctx.shared->inventory : nullptr);
+        shopWindow_.render(*ctx.renderer, *ctx.debugText, ctx.viewportWidth, ctx.viewportHeight);
     }
 }
 

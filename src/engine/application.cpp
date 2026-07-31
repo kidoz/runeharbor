@@ -2834,14 +2834,27 @@ void Application::configureGameplayCallbacks()
         };
         callbacks.onShowBuilding = [this](int buildingId)
         {
-            const std::string name = resolveBuildingDisplayName(buildingId);
-            if (sharedData)
+            if (!sharedData)
+                return;
+
+            // If this building is a shop/service with a known UI family, hand
+            // off to the shop window (EVT_SHOW_BUILDING -> Window Type 10).
+            auto it = buildingEntryById_.find(buildingId);
+            if (it != buildingEntryById_.end() && game::hasShopUI(it->second.buildingType))
             {
-                sharedData->statusMessage =
-                    name.empty()
-                        ? std::format("Building interaction opened (id #{})", buildingId)
-                        : std::format("Building interaction opened: {} (id #{})", name, buildingId);
+                sharedData->pendingShopBuildingId = buildingId;
+                sharedData->pendingShopBuilding = it->second;
+                sharedData->openShop = true;
+                return;
             }
+
+            // Otherwise surface the building name as a status message (guilds,
+            // houses, and any building without a dedicated shop UI).
+            const std::string name = resolveBuildingDisplayName(buildingId);
+            sharedData->statusMessage =
+                name.empty()
+                    ? std::format("Building interaction opened (id #{})", buildingId)
+                    : std::format("Building interaction opened: {} (id #{})", name, buildingId);
         };
         callbacks.onPlaySound = [this](int soundId) { playEventSound(soundId); };
         callbacks.onTeleport = [this](const std::string& map, float x, float y, float z, float yaw)
@@ -3412,6 +3425,9 @@ void Application::loadDataTables()
                 {
                     buildingDisplayNameById_[entry.id] = entry.displayName;
                 }
+                // Keep the full typed entry (used by the shop window for name,
+                // proprietor, buy multiplier, and building type).
+                buildingEntryById_[entry.id] = entry;
             }
             logger.info(std::format("Loaded {} 2dEvents building definitions",
                                     buildingDisplayNameById_.size()));

@@ -180,6 +180,7 @@ test_ui_sources = files(
     '../src/ui/spellbook_widget.cpp',
     '../src/ui/rest_widget.cpp',
     '../src/ui/map_widget.cpp',
+    '../src/ui/shop_window.cpp',
 )
 
 test_engine_sources = files(

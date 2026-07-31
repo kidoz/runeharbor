@@ -129,6 +129,7 @@ ui_sources = files(
     'ui/spellbook_widget.cpp',
     'ui/rest_widget.cpp',
     'ui/map_widget.cpp',
+    'ui/shop_window.cpp',
 )
 
 # Dependencies
