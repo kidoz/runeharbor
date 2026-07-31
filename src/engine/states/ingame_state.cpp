@@ -529,6 +529,25 @@ std::optional<GameStateId> InGameState::update()
         statusLine_ = "Load failed (slot 1)";
     }
 
+    // Inventory panel input: dispatch mouse clicks to the widget so the player
+    // can equip/unequip items. When the panel is open it consumes clicks (the
+    // click-pickup/place model from FUN_00468F8E), so they must not fall through
+    // to world-picking/combat below.
+    if (inventory_.visible() && ctx.window.wasMousePressed(platform::MouseButton::Left))
+    {
+        // Keep the inventory's party pointer current so the skill gate applies.
+        if (ctx.shared && ctx.shared->gameWorld && ctx.shared->inventory)
+        {
+            ctx.shared->inventory->setParty(&ctx.shared->gameWorld->party());
+        }
+        const auto ms = ctx.window.getMouseState();
+        ui::UIEvent ev{ui::UIEventType::MouseDown, ms.x, ms.y, platform::MouseButton::Left,
+                       SDL_SCANCODE_UNKNOWN};
+        (void)inventory_.handleEvent(ev);
+        // Skip the world interaction while the inventory is open.
+        return std::nullopt;
+    }
+
     const bool primaryActionPressed = ctx.window.wasMousePressed(platform::MouseButton::Left) ||
                                       ctx.isKeyPressed(SDL_SCANCODE_SPACE) ||
                                       ctx.isKeyPressed(SDL_SCANCODE_A);

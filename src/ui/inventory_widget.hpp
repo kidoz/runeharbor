@@ -24,6 +24,12 @@ class InventoryWidget : public Widget
     void setInventory(game::Inventory* inventory) { inventory_ = inventory; }
     void setActiveCharacter(int index) { activeCharacterIndex_ = index; }
 
+    // Status-line feedback for equip/unequip outcomes (mirrors the shop window).
+    void setStatusCallback(std::function<void(const std::string&)> cb)
+    {
+        onStatus_ = std::move(cb);
+    }
+
     void render(graphics::IRenderer& renderer, const graphics::DebugText& text) override;
     bool handleEvent(const UIEvent& event) override;
 
@@ -42,11 +48,17 @@ class InventoryWidget : public Widget
 
   private:
     void* getCachedTexture(const std::string& name, int& w, int& h);
+    // Hit-test the backpack grid; returns the backpack slot index or -1.
+    int backpackSlotAt(int mouseX, int mouseY) const;
+    // Hit-test the paper-doll; returns the equipped slot clicked or Count.
+    game::EquipSlot equippedSlotAt(int mouseX, int mouseY) const;
+    void handleClick(int mouseX, int mouseY);
 
     game::GameWorld* gameWorld_ = nullptr;
     game::Inventory* inventory_ = nullptr;
     int activeCharacterIndex_ = 0;
     TextureLookup textureLookup_;
+    std::function<void(const std::string&)> onStatus_;
 
     struct CachedTexture
     {

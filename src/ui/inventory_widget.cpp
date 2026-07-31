@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "inventory_widget.hpp"
 
+#include <format>
+
 #include "../game/party.hpp"
 #include "../graphics/irenderer.hpp"
 #include "../graphics/primitives.hpp"
@@ -184,12 +186,137 @@ bool InventoryWidget::handleEvent(const UIEvent& event)
 {
     if (!visible_ || !enabled_)
         return false;
-    // Just swallow clicks for now
-    if (event.type == UIEventType::MouseDown && bounds_.contains(event.mouseX, event.mouseY))
+    if (event.type != UIEventType::MouseDown)
+        return false;
+    if (!bounds_.contains(event.mouseX, event.mouseY))
+        return false;
+
+    handleClick(event.mouseX, event.mouseY);
+    return true; // modal: consume the click while the panel is open
+}
+
+namespace
+{
+
+// Paper-doll slot rectangles in the 460x344 design space (the coordinate
+// system the render code divides bounds_ by). These define the click regions
+// for unequipping; visually the items still render at the body center, so the
+// regions are a pragmatic fixed layout covering the body silhouette.
+struct SlotRect
+{
+    game::EquipSlot slot;
+    int x, y, w, h; // design-space pixels (460x344)
+};
+
+// A standard MM7 paper-doll layout: weapons flanking the body, armor over the
+// torso, helm at the head, boots at the feet, rings/amulet/belt down the sides.
+constexpr SlotRect kPaperDollSlots[] = {
+    {game::EquipSlot::MainHand, 90, 140, 50, 80},  // left hand (weapon)
+    {game::EquipSlot::OffHand, 320, 140, 50, 80},  // right hand (shield)
+    {game::EquipSlot::Bow, 30, 60, 50, 80},        // far left
+    {game::EquipSlot::Armor, 180, 110, 100, 110},  // torso
+    {game::EquipSlot::Helmet, 200, 40, 60, 60},    // head
+    {game::EquipSlot::Boots, 200, 250, 100, 50},   // feet
+    {game::EquipSlot::Belt, 200, 225, 100, 20},    // waist
+    {game::EquipSlot::Cloak, 130, 110, 50, 110},   // back/shoulders
+    {game::EquipSlot::Gauntlets, 90, 230, 50, 40}, // left forearm
+    {game::EquipSlot::Amulet, 210, 100, 40, 30},   // neck
+    {game::EquipSlot::Ring1, 30, 200, 25, 25},     {game::EquipSlot::Ring2, 30, 230, 25, 25},
+    {game::EquipSlot::Ring3, 30, 260, 25, 25},     {game::EquipSlot::Ring4, 405, 200, 25, 25},
+    {game::EquipSlot::Ring5, 405, 230, 25, 25},    {game::EquipSlot::Ring6, 405, 260, 25, 25},
+};
+
+} // namespace
+
+int InventoryWidget::backpackSlotAt(int mouseX, int mouseY) const
+{
+    // Mirror the render math exactly (inventory_widget.cpp render()).
+    const int gridStartX = bounds_.x + (bounds_.width * 180 / 460);
+    const int gridStartY = bounds_.y + (bounds_.height * 20 / 344);
+    const int slotSize = bounds_.width * 30 / 460;
+    const int stride = slotSize + 2;
+    const int cols = 7;
+
+    const int localX = mouseX - gridStartX;
+    const int localY = mouseY - gridStartY;
+    if (localX < 0 || localY < 0 || slotSize <= 0)
+        return -1;
+    const int col = localX / stride;
+    const int row = localY / stride;
+    if (col < 0 || col >= cols || row < 0 || row >= (game::kBackpackSlots / cols + 1))
+        return -1;
+    // Reject clicks in the 2px gap between cells.
+    if (localX - col * stride >= slotSize || localY - row * stride >= slotSize)
+        return -1;
+    const int slot = row * cols + col;
+    if (slot < 0 || slot >= game::kBackpackSlots)
+        return -1;
+    return slot;
+}
+
+game::EquipSlot InventoryWidget::equippedSlotAt(int mouseX, int mouseY) const
+{
+    if (bounds_.width <= 0 || bounds_.height <= 0)
+        return game::EquipSlot::Count;
+    // Convert screen pixel to design-space (460x344) coordinates.
+    const float dx =
+        static_cast<float>(mouseX - bounds_.x) * 460.0f / static_cast<float>(bounds_.width);
+    const float dy =
+        static_cast<float>(mouseY - bounds_.y) * 344.0f / static_cast<float>(bounds_.height);
+    for (const auto& r : kPaperDollSlots)
     {
-        return true;
+        if (dx >= r.x && dx < r.x + r.w && dy >= r.y && dy < r.y + r.h)
+            return r.slot;
     }
-    return false;
+    return game::EquipSlot::Count;
+}
+
+void InventoryWidget::handleClick(int mouseX, int mouseY)
+{
+    if (inventory_ == nullptr)
+        return;
+
+    // Paper-doll click: unequip the item in the clicked slot.
+    const game::EquipSlot slot = equippedSlotAt(mouseX, mouseY);
+    if (slot != game::EquipSlot::Count)
+    {
+        const auto& inv = inventory_->getInventory(activeCharacterIndex_);
+        const size_t slotIdx = static_cast<size_t>(slot);
+        if (slotIdx < inv.equipped.size() && inv.equipped[slotIdx].valid())
+        {
+            const int itemId = inv.equipped[slotIdx].itemId;
+            if (inventory_->unequip(activeCharacterIndex_, slot))
+            {
+                if (onStatus_)
+                    onStatus_(std::format("Unequipped item #{}.", itemId));
+            }
+            else if (onStatus_)
+            {
+                onStatus_("Backpack full — cannot unequip.");
+            }
+        }
+        return;
+    }
+
+    // Backpack click: equip the item in the clicked cell.
+    const int backpackSlot = backpackSlotAt(mouseX, mouseY);
+    if (backpackSlot < 0)
+        return;
+    const auto& inv = inventory_->getInventory(activeCharacterIndex_);
+    if (!inv.backpack[static_cast<size_t>(backpackSlot)].valid())
+        return;
+
+    const int itemId = inv.backpack[static_cast<size_t>(backpackSlot)].itemId;
+    if (inventory_->equip(activeCharacterIndex_, backpackSlot))
+    {
+        if (onStatus_)
+            onStatus_(std::format("Equipped item #{}.", itemId));
+    }
+    else if (onStatus_)
+    {
+        // The most common refusal is the skill gate (FUN_004926F8).
+        onStatus_("Cannot equip — skill not learned or slot unavailable.");
+    }
 }
 
 } // namespace runeharbor::ui

@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "../util/string_utils.hpp"
+#include "party.hpp"
 
 namespace runeharbor::game
 {
@@ -94,6 +95,17 @@ const formats::ItemEntry* Inventory::getItemDef(int itemId) const
     return it != itemDefs_.end() ? &it->second : nullptr;
 }
 
+std::vector<formats::ItemEntry> Inventory::itemTable() const
+{
+    std::vector<formats::ItemEntry> out;
+    out.reserve(itemDefs_.size());
+    for (const auto& [id, def] : itemDefs_)
+    {
+        out.push_back(def);
+    }
+    return out;
+}
+
 EquipType Inventory::getEquipType(int itemId) const
 {
     auto* def = getItemDef(itemId);
@@ -160,6 +172,57 @@ const CharacterInventory& Inventory::getInventory(int characterIndex) const
     return inventories_[static_cast<size_t>(std::clamp(characterIndex, 0, 3))];
 }
 
+std::optional<SkillId> Inventory::requiredSkillForItem(int itemId) const
+{
+    // MM7 gates equipping on the item's weaponSkill byte (ItemDesc +0x21).
+    // RuneHarbor's data carries this via ItemEntry.skillGroup (the skill family
+    // column in items.txt): Sword/Dagger/Axe/Spear/Staff/Mace for weapons,
+    // Shield for shields, Leather/Chain/Plate for armor, Bow for bows.
+    // Items with skillGroup "Misc" (rings, amulets, cloaks, potions, ...)
+    // have skillId >= 37 in the binary and are never skill-gated.
+    const auto* def = getItemDef(itemId);
+    if (def == nullptr)
+    {
+        return std::nullopt;
+    }
+
+    // First try the explicit skillGroup.
+    if (auto skill = skillIdFromName(def->skillGroup))
+    {
+        return skill;
+    }
+    // The "Bow" equipStat (Missile) maps to the Bow skill even when skillGroup
+    // is generic.
+    const EquipType eqType = getEquipType(itemId);
+    if (eqType == EquipType::Missile)
+    {
+        return SkillId::Bow;
+    }
+    return std::nullopt;
+}
+
+bool Inventory::meetsSkillRequirement(int characterIndex, int itemId) const
+{
+    // FUN_004926F8: if the item requires no skill, allowed; else the character
+    // must have that skill learned.
+    const auto required = requiredSkillForItem(itemId);
+    if (!required.has_value())
+    {
+        return true;
+    }
+    if (party_ == nullptr)
+    {
+        // No party wired in: cannot verify skills, so allow (slot-validity only).
+        return true;
+    }
+    if (characterIndex < 0 || characterIndex >= kPartySize)
+    {
+        return false;
+    }
+    const Character& c = party_->member(characterIndex);
+    return c.skillLevels[static_cast<size_t>(*required)].learned();
+}
+
 bool Inventory::canEquip(int characterIndex, int itemId) const
 {
     if (characterIndex < 0 || characterIndex >= static_cast<int>(inventories_.size()))
@@ -167,7 +230,11 @@ bool Inventory::canEquip(int characterIndex, int itemId) const
         return false;
     }
     auto slot = getEquipSlot(itemId);
-    return slot != EquipSlot::Count;
+    if (slot == EquipSlot::Count)
+    {
+        return false;
+    }
+    return meetsSkillRequirement(characterIndex, itemId);
 }
 
 bool Inventory::equip(int characterIndex, int backpackSlot)
@@ -184,6 +251,15 @@ bool Inventory::equip(int characterIndex, int backpackSlot)
     if (slot == EquipSlot::Count)
     {
         logger_.warning("Item " + std::to_string(item.itemId) + " cannot be equipped");
+        return false;
+    }
+
+    // MM7 skill gate (FUN_004926F8): refuse to equip if the character lacks
+    // the required skill.
+    if (!meetsSkillRequirement(characterIndex, item.itemId))
+    {
+        logger_.info("Character " + std::to_string(characterIndex) +
+                     " lacks the skill to equip item " + std::to_string(item.itemId));
         return false;
     }
 
@@ -212,25 +288,22 @@ bool Inventory::equip(int characterIndex, int backpackSlot)
     auto slotIdx = static_cast<size_t>(slot);
     if (inv.equipped[slotIdx].valid())
     {
-        // Find free backpack slot for the displaced item
+        // Find a free backpack slot (other than the source slot) for the
+        // displaced item.
         int freeSlot = -1;
         for (int i = 0; i < kBackpackSlots; i++)
         {
-            if (i == backpackSlot || !inv.backpack[static_cast<size_t>(i)].valid())
+            if (i != backpackSlot && !inv.backpack[static_cast<size_t>(i)].valid())
             {
-                if (i != backpackSlot && !inv.backpack[static_cast<size_t>(i)].valid())
-                {
-                    freeSlot = i;
-                    break;
-                }
+                freeSlot = i;
+                break;
             }
         }
         if (freeSlot < 0)
         {
-            // Use the same slot we're taking from
+            // No other free slot: swap into the source slot.
             inv.backpack[static_cast<size_t>(backpackSlot)] = inv.equipped[slotIdx];
             inv.equipped[slotIdx] = item;
-            // Already swapped
             return true;
         }
         inv.backpack[static_cast<size_t>(freeSlot)] = inv.equipped[slotIdx];

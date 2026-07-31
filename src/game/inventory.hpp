@@ -15,6 +15,8 @@
 namespace runeharbor::game
 {
 
+class Party; // forward declaration (party.hpp does not include this header)
+
 // Item equip type (matches MM7's 21 equip types from items.txt)
 enum class EquipType : uint8_t
 {
@@ -123,8 +125,15 @@ class Inventory
     // Load item definitions from parsed data
     void loadItemData(const std::vector<formats::ItemEntry>& items);
 
+    // Optional party reference: when set, equip/canEquip enforce the MM7 skill
+    // requirement (FUN_004926F8) — a sword needs Sword learned, plate needs
+    // Plate, etc. When null, the skill gate is skipped (slot validity only).
+    void setParty(const Party* party) { party_ = party; }
+
     // Item data lookup
     const formats::ItemEntry* getItemDef(int itemId) const;
+    // All loaded item definitions (for shop stock listing).
+    std::vector<formats::ItemEntry> itemTable() const;
     EquipType getEquipType(int itemId) const;
     EquipSlot getEquipSlot(int itemId) const;
     int getItemWeight(int itemId) const;
@@ -181,10 +190,17 @@ class Inventory
   private:
     EquipType categorizeItem(const formats::ItemEntry& entry) const;
     EquipSlot mapEquipSlot(const formats::ItemEntry& entry) const;
+    // Resolves the skill an item requires (from its skillGroup/equipStat), or
+    // nullopt if the item has no skill requirement (rings, amulets, misc).
+    std::optional<SkillId> requiredSkillForItem(int itemId) const;
+    // True if the character has the item's required skill learned (or the item
+    // requires none). Mirrors FUN_004926F8.
+    bool meetsSkillRequirement(int characterIndex, int itemId) const;
 
     util::ILogger& logger_;
     std::unordered_map<int, formats::ItemEntry> itemDefs_;
     std::array<CharacterInventory, 4> inventories_ = {};
+    const Party* party_ = nullptr;
 };
 
 } // namespace runeharbor::game

@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "../../src/game/inventory.hpp"
+#include "../../src/game/party.hpp"
 #include "../../src/util/ilogger.hpp"
 
 using namespace runeharbor::game;
@@ -401,4 +402,119 @@ TEST_CASE("Inventory equip type categorization", "[game][inventory]")
     {
         REQUIRE(inv.getEquipType(999) == EquipType::None);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Equip skill gating (FUN_004926F8) — see docs/re/31-inventory-equipment.md
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+ItemEntry makeSkilledSword()
+{
+    // A sword whose skillGroup requires the Sword skill (as real items.txt does).
+    ItemEntry e;
+    e.id = 10;
+    e.name = "Knight's Blade";
+    e.equipStat = "weapon1h";
+    e.skillGroup = "Sword";
+    e.value = 100;
+    return e;
+}
+
+ItemEntry makePlateArmor()
+{
+    ItemEntry e;
+    e.id = 11;
+    e.name = "Full Plate";
+    e.equipStat = "armor";
+    e.skillGroup = "Plate";
+    e.value = 200;
+    return e;
+}
+
+ItemEntry makeMiscRing()
+{
+    // Rings/amulets/misc have skillGroup "Misc" -> no skill required.
+    ItemEntry e;
+    e.id = 12;
+    e.name = "Gold Ring";
+    e.equipStat = "ring";
+    e.skillGroup = "Misc";
+    e.value = 50;
+    return e;
+}
+
+} // namespace
+
+TEST_CASE("Equip skill gate: refused when the required skill is unlearned", "[game][inventory]")
+{
+    NullLogger logger;
+    Inventory inv(logger);
+    inv.loadItemData({makeSkilledSword(), makePlateArmor(), makeMiscRing()});
+
+    Party party;
+    // Member 0 has no skills learned.
+    inv.setParty(&party);
+
+    SECTION("sword refused without Sword skill")
+    {
+        REQUIRE_FALSE(inv.canEquip(0, 10));
+    }
+    SECTION("plate refused without Plate skill")
+    {
+        REQUIRE_FALSE(inv.canEquip(0, 11));
+    }
+    SECTION("ring allowed regardless of skills")
+    {
+        REQUIRE(inv.canEquip(0, 12));
+    }
+}
+
+TEST_CASE("Equip skill gate: allowed when the required skill is learned", "[game][inventory]")
+{
+    NullLogger logger;
+    Inventory inv(logger);
+    inv.loadItemData({makeSkilledSword(), makePlateArmor()});
+
+    Party party;
+    Character& c = party.member(0);
+    c.skillLevels[static_cast<size_t>(SkillId::Sword)] = SkillValue{1, SkillMastery::Normal};
+    c.skillLevels[static_cast<size_t>(SkillId::Plate)] = SkillValue{1, SkillMastery::Normal};
+    inv.setParty(&party);
+
+    REQUIRE(inv.canEquip(0, 10)); // sword, Sword learned
+    REQUIRE(inv.canEquip(0, 11)); // plate, Plate learned
+
+    // equip() also enforces the gate.
+    inv.addToBackpack(0, Item{10});
+    REQUIRE(inv.equip(0, 0));
+    REQUIRE(inv.getInventory(0).equipped[static_cast<size_t>(EquipSlot::MainHand)].itemId == 10);
+}
+
+TEST_CASE("Equip skill gate: equip() refuses an unskilled item", "[game][inventory]")
+{
+    NullLogger logger;
+    Inventory inv(logger);
+    inv.loadItemData({makeSkilledSword()});
+
+    Party party; // no skills learned
+    inv.setParty(&party);
+
+    inv.addToBackpack(0, Item{10});
+    REQUIRE_FALSE(inv.equip(0, 0)); // refused
+    REQUIRE_FALSE(inv.getInventory(0).equipped[static_cast<size_t>(EquipSlot::MainHand)].valid());
+    REQUIRE(inv.getInventory(0).backpack[0].valid()); // still in backpack
+}
+
+TEST_CASE("Equip skill gate: skipped (allowed) when no party is wired", "[game][inventory]")
+{
+    // Back-compat: when setParty is not called, the gate is skipped so existing
+    // behavior (slot validity only) is preserved.
+    NullLogger logger;
+    Inventory inv(logger);
+    inv.loadItemData({makeSkilledSword()});
+    // No setParty() call.
+    REQUIRE(inv.canEquip(0, 10));
 }
