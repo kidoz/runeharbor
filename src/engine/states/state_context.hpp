@@ -10,6 +10,11 @@
 
 #include "../../formats/two_d_events_parser.hpp"
 #include "../../game/character.hpp"
+
+namespace runeharbor::game
+{
+class QuestLog; // forward declaration (quest_log.hpp pulls in many headers)
+}
 #include "../../graphics/primitives.hpp"
 #include "../../platform/iwindow.hpp"
 
@@ -67,6 +72,7 @@ struct SharedGameData
     game::CombatSystem* combatSystem = nullptr;
     game::SpellSystem* spellSystem = nullptr;
     game::Inventory* inventory = nullptr;
+    game::QuestLog* questLog = nullptr;
     game::SaveGame* saveGame = nullptr;
     MapScene* mapScene = nullptr;
     std::string newGameStartMapName = "out01.odm";

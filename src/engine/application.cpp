@@ -13,6 +13,7 @@
 #include <cctype>
 #include <cmath>
 
+#include "../formats/autonote_parser.hpp"
 #include "../formats/credits_parser.hpp"
 #include "../formats/hostile_parser.hpp"
 #include "../formats/image_lod_archive.hpp"
@@ -27,6 +28,7 @@
 #include "../formats/npctopic_parser.hpp"
 #include "../formats/pcx_image.hpp"
 #include "../formats/placemon_parser.hpp"
+#include "../formats/quests_parser.hpp"
 #include "../formats/rnditems_parser.hpp"
 #include "../formats/spells_parser.hpp"
 #include "../formats/sprite_lod_archive.hpp"
@@ -71,6 +73,7 @@ Application::Application(util::ILogger& logger, platform::IWindow& window)
       combatSystem_(std::make_unique<game::CombatSystem>(logger)),
       spellSystem_(std::make_unique<game::SpellSystem>(logger)),
       inventory_(std::make_unique<game::Inventory>(logger)),
+      questLog_(std::make_unique<game::QuestLog>(logger)),
       saveGame_(std::make_unique<game::SaveGame>(logger)),
       sndArchive_(std::make_unique<formats::SndArchive>(logger)),
       soundList_(std::make_unique<formats::SoundList>(logger))
@@ -298,6 +301,7 @@ void Application::initStates()
     sharedData->combatSystem = combatSystem_.get();
     sharedData->spellSystem = spellSystem_.get();
     sharedData->inventory = inventory_.get();
+    sharedData->questLog = questLog_.get();
     sharedData->saveGame = saveGame_.get();
     sharedData->newGameStartMapName = defaultStartMapName_;
 
@@ -3217,6 +3221,23 @@ void Application::configureGameplayCallbacks()
                 gameWorld_->setVar(varId, param1 ^ param2 ^ param3);
             }
         };
+        callbacks.onSetGlobalVar = [this](int varIndex, int field, int value)
+        {
+            // Bridge quest-bit writes into the QuestLog. RE: setting a quest
+            // bit (field 0) to a nonzero value acquires the quest; the
+            // 0->nonzero transition is the "New Quest!" moment. startQuest
+            // itself dedupes (only fires the journal entry on Unknown->Active).
+            if (!questLog_ || !gameWorld_)
+            {
+                return;
+            }
+            if (field == 0 && value != 0)
+            {
+                const uint64_t gameTime =
+                    static_cast<uint64_t>(std::max<int64_t>(0, gameWorld_->calendar().totalTicks));
+                questLog_->startQuest(varIndex, gameTime);
+            }
+        };
         eventEngine_->setCallbacks(callbacks);
     }
 
@@ -3346,6 +3367,22 @@ void Application::loadDataTables()
             if (parser.parse(*itemsData))
             {
                 inventory_->loadItemData(parser.getItems());
+            }
+        }
+    }
+
+    // Quest catalog + journal (RE: quests.txt is <id>\t"<text>" per line; the
+    // quest index IS the array position, so QBit N -> quest row N).
+    if (questLog_)
+    {
+        if (auto questsData = readFirstExisting({"quests.txt", "QUESTS.TXT", "Quests.txt"});
+            questsData.has_value())
+        {
+            formats::QuestsParser parser(logger);
+            if (parser.parse(*questsData))
+            {
+                questLog_->loadQuestData(parser.getQuests());
+                logger.info(std::format("Loaded {} quest definitions", parser.getQuests().size()));
             }
         }
     }

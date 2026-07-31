@@ -30,6 +30,7 @@
 #include "../game/event_engine.hpp"
 #include "../game/game_world.hpp"
 #include "../game/inventory.hpp"
+#include "../game/quest_log.hpp"
 #include "../game/save_game.hpp"
 #include "../game/spells.hpp"
 #include "../graphics/camera.hpp"
@@ -205,6 +206,7 @@ class Application
     std::unique_ptr<game::CombatSystem> combatSystem_;
     std::unique_ptr<game::SpellSystem> spellSystem_;
     std::unique_ptr<game::Inventory> inventory_;
+    std::unique_ptr<game::QuestLog> questLog_;
     std::unique_ptr<game::SaveGame> saveGame_;
     std::unordered_map<std::string, int> mapDifficultyByFileName_;
     std::unordered_map<std::string, int> mapRespawnDaysByFileName_;

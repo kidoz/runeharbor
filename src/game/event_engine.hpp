@@ -131,6 +131,10 @@ struct EventCallbacks
     std::function<void(int itemId)> onGiveItem;
     std::function<bool(int itemId)> onRemoveItem;
     std::function<void(const EventCommand& command)> onMapCommand;
+    // Fired when a global/quest variable is set (SetGlobalVar/SetGlobalVar2).
+    // The host bridges quest-bit writes into the QuestLog (RE: setting a quest
+    // bit acquires the quest; the 0->nonzero transition is "New Quest!").
+    std::function<void(int varIndex, int field, int value)> onSetGlobalVar;
 };
 
 class EventEngine

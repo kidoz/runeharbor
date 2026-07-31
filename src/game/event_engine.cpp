@@ -1157,6 +1157,10 @@ size_t EventEngine::executeCommand(const EventScript& script, size_t index, bool
             logger_.debug("SetGlobalVar " + std::to_string(cmd.param1) + " = " +
                           std::to_string(cmd.param2));
         }
+        if (callbacks_.onSetGlobalVar)
+        {
+            callbacks_.onSetGlobalVar(cmd.param1, std::clamp(cmd.param4, 0, 5), cmd.param2);
+        }
         return nextIndex;
 
     case EventOpcode::SetGlobalVar2:
@@ -1167,6 +1171,10 @@ size_t EventEngine::executeCommand(const EventScript& script, size_t index, bool
             gameWorld_->setVar(static_cast<GameVarId>(cmd.param1), cmd.param2);
             logger_.debug("SetGlobalVar2 " + std::to_string(cmd.param1) + " = " +
                           std::to_string(cmd.param2));
+        }
+        if (callbacks_.onSetGlobalVar)
+        {
+            callbacks_.onSetGlobalVar(cmd.param1, 6, cmd.param2);
         }
         return nextIndex;
 
