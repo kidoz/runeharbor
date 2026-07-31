@@ -63,6 +63,7 @@ formats_sources = files(
     'formats/autonote_parser.cpp',
     'formats/credits_parser.cpp',
     'formats/two_d_events_parser.cpp',
+    'formats/merchant_parser.cpp',
     'formats/frame_tables.cpp',
     'formats/evt_script_parser.cpp',
 )
@@ -97,6 +98,7 @@ media_sources = files(
 # Game sources
 game_sources = files(
     'game/character.cpp',
+    'game/building_type.cpp',
     'game/party.cpp',
     'game/game_world.cpp',
     'game/generation.cpp',
@@ -203,7 +205,9 @@ asset_check_sources = files(
     'formats/autonote_parser.cpp',
     'formats/credits_parser.cpp',
     'formats/two_d_events_parser.cpp',
+    'formats/merchant_parser.cpp',
     'formats/frame_tables.cpp',
+    'game/building_type.cpp',
     'media/vid_archive.cpp',
 )
 

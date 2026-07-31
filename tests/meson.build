@@ -107,6 +107,7 @@ test_formats_sources = files(
     '../src/formats/npcnames_parser.cpp',
     '../src/formats/autonote_parser.cpp',
     '../src/formats/two_d_events_parser.cpp',
+    '../src/formats/merchant_parser.cpp',
     '../src/formats/credits_parser.cpp',
     '../src/formats/frame_tables.cpp',
     '../src/formats/evt_script_parser.cpp',
@@ -146,6 +147,7 @@ test_audio_sources = files(
 
 test_game_sources = files(
     '../src/game/character.cpp',
+    '../src/game/building_type.cpp',
     '../src/game/party.cpp',
     '../src/game/game_world.cpp',
     '../src/game/generation.cpp',

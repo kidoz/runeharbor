@@ -10,6 +10,7 @@
 
 #include <cctype>
 
+#include "../game/building_type.hpp"
 #include "../util/string_utils.hpp"
 
 namespace runeharbor::formats
@@ -35,6 +36,42 @@ std::optional<int> parseIntStrict(std::string_view text)
         return std::nullopt;
     }
     return value;
+}
+
+std::optional<float> parseFloatStrict(std::string_view text)
+{
+    // std::from_chars for float is not consistently available across the
+    // supported toolchains; parse via strtod on a trimmed copy.
+    const std::string trimmed = util::trim(std::string(text));
+    if (trimmed.empty())
+    {
+        return std::nullopt;
+    }
+    try
+    {
+        size_t pos = 0;
+        const float value = std::stof(trimmed, &pos);
+        if (pos != trimmed.size())
+        {
+            return std::nullopt;
+        }
+        return value;
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+}
+
+// Safe column accessor: returns the trimmed value or empty if out of range.
+// `columns` is the fields[1..] vector (column 0 == fields[1]).
+std::string columnAt(const std::vector<std::string>& columns, size_t index)
+{
+    if (index < columns.size())
+    {
+        return columns[index];
+    }
+    return {};
 }
 
 } // namespace
@@ -124,6 +161,30 @@ bool TwoDEventsParser::parse(const std::vector<uint8_t>& data)
 
         entry.category = firstText;
         entry.displayName = !lastText.empty() ? lastText : firstText;
+
+        // Decode typed fields from the columns vector. Column indices are
+        // RE-derived from `2dEvents.txt` (see docs/re/29-shops-and-economy.md
+        // section 2.1). columns[N] == fields[N+1].
+        entry.buildingType = game::buildingTypeFromName(columnAt(entry.columns, 1));
+        if (auto v = parseIntStrict(columnAt(entry.columns, 0)))
+            entry.perTypeIndex = *v;
+        if (auto v = parseIntStrict(columnAt(entry.columns, 2)))
+            entry.mapId = *v;
+        if (auto v = parseIntStrict(columnAt(entry.columns, 3)))
+            entry.pictureId = *v;
+        entry.name = columnAt(entry.columns, 4);
+        entry.proprietorName = columnAt(entry.columns, 5);
+        entry.title = columnAt(entry.columns, 6);
+        if (auto v = parseFloatStrict(columnAt(entry.columns, 11)))
+            entry.buyMultiplier = *v;
+        if (auto v = parseFloatStrict(columnAt(entry.columns, 12)))
+            entry.secondaryMultiplier = *v;
+        if (auto v = parseIntStrict(columnAt(entry.columns, 14)))
+            entry.serviceSeed = *v;
+        if (auto v = parseIntStrict(columnAt(entry.columns, 17)))
+            entry.openHour = *v;
+        if (auto v = parseIntStrict(columnAt(entry.columns, 18)))
+            entry.closedHour = *v;
 
         if (entry.displayName.empty())
         {
