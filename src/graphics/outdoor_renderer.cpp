@@ -12,6 +12,7 @@
 #include "billboard.hpp"
 #include "clip_utils.hpp"
 #include "sprite_facing.hpp"
+#include "texture_coordinates.hpp"
 #include "visibility.hpp"
 #include "world_coordinates.hpp"
 
@@ -974,6 +975,15 @@ void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Ca
             }
         }
 
+        // Only faces flagged as flowing scroll their texture; everything else is
+        // static. The offset is in texels and wraps, so it never drifts.
+        TextureFlow flow;
+        if (animateWater && face.hasTextureFlow())
+        {
+            flow = textureFlowOffset(faceTextureFlowDirection(face), waterTimeSeconds, texWidth,
+                                     texHeight);
+        }
+
         int polyCount = 0;
         bool allBehind = true;
 
@@ -1047,14 +1057,10 @@ void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Ca
             float u = 0.0f, uv = 0.0f;
             if (i < face.uCoords.size() && i < face.vCoords.size())
             {
-                u = static_cast<float>(face.uCoords[i]) / texWidth;
-                uv = static_cast<float>(face.vCoords[i]) / texHeight;
-                if (face.isWater() && animateWater)
-                {
-                    const float flow = waterTimeSeconds * 0.08f;
-                    u += flow;
-                    uv += flow * 0.55f;
-                }
+                u = normalizeTextureCoordinate(face.uCoords[i], face.textureDeltaU + flow.u,
+                                               texWidth);
+                uv = normalizeTextureCoordinate(face.vCoords[i], face.textureDeltaV + flow.v,
+                                                texHeight);
             }
 
             polyIn[polyCount++] = {clip, color, u, uv};

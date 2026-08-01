@@ -426,8 +426,10 @@ bool BLVMap::parseFaceExtras(const std::vector<uint8_t>& data, size_t& offset)
         extra.eventID = disk->eventID;
         if (extra.faceId >= 0 && static_cast<size_t>(extra.faceId) < mapData.faces.size())
         {
-            mapData.faces[static_cast<size_t>(extra.faceId)].eventId =
-                static_cast<int>(extra.eventID);
+            auto& face = mapData.faces[static_cast<size_t>(extra.faceId)];
+            face.eventId = static_cast<int>(extra.eventID);
+            face.textureDeltaU = extra.textureDeltaU;
+            face.textureDeltaV = extra.textureDeltaV;
         }
         offset += extraSize;
     }

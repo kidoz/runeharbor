@@ -696,6 +696,8 @@ ParsedFace ODMMap::convertFace(const ODMFaceOnDisk& df, const std::string& texNa
     face.polygonType = df.polygonType;
     face.textureId = df.bitmapId;
     face.textureName = texName;
+    face.textureDeltaU = df.textureDeltaU;
+    face.textureDeltaV = df.textureDeltaV;
     face.sectorId = 0; // No sectors in outdoor
     face.otherSectorId = 0;
     face.eventId = df.eventId;

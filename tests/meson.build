@@ -80,6 +80,7 @@ test_sources = files(
     'graphics/outdoor_renderer_math_test.cpp',
     'graphics/billboard_test.cpp',
     'graphics/sprite_facing_test.cpp',
+    'graphics/texture_coordinates_test.cpp',
     'graphics/hud_test.cpp',
 )
 

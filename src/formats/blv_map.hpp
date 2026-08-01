@@ -246,29 +246,58 @@ static_assert(sizeof(BLVDecorationOnDisk) == 32);
 
 #pragma pack(pop)
 
-// Face attribute flags
+// Face attribute flags. Shared by indoor (BLV) and outdoor (ODM) faces.
+//
+// Most of these are texture-authoring flags rather than surface types: 0x0008
+// (TexAlignDown) and 0x1000 (TexAlignLeft) are the default alignment for
+// hand-placed textures and are set on ~98% of outdoor building faces, and
+// 0x0100/0x0200/0x0400 only record which axis plane a face is closest to. The
+// surface type comes from `polygonType`, not from these bits.
 enum class FaceAttribute : uint32_t
 {
-    Portal = 0x0001,
-    CanSaturate = 0x0002,
-    Floor = 0x0004,
-    Water = 0x0008,
-    Lava = 0x0010,
-    Specular = 0x0020,
-    CannotPickup = 0x0040,
-    SecretDoor = 0x0080,
-    Invisible = 0x0100,
-    Animated = 0x0200,
-    Event = 0x0400,
-    TriggerEvent = 0x0800,
-    Outdoor = 0x1000,
-    HasPulsingLight = 0x2000,
-    IsBitmap = 0x4000,
-    Indoor = 0x8000,
-    Ceiling = 0x10000,
-    Clickable = 0x20000,
-    Pressure = 0x40000,
-    Ethereal = 0x80000
+    Portal = 0x00000001,
+    Secret = 0x00000002,
+    FlowDown = 0x00000004,
+    TexAlignDown = 0x00000008,
+    Fluid = 0x00000010,
+    FlowUp = 0x00000020,
+    FlowLeft = 0x00000040,
+    SeenByParty = 0x00000080,
+    PlaneXY = 0x00000100,
+    PlaneXZ = 0x00000200,
+    PlaneYZ = 0x00000400,
+    FlowRight = 0x00000800,
+    TexAlignLeft = 0x00001000,
+    Invisible = 0x00002000,
+    Animated = 0x00004000,
+    TexAlignRight = 0x00008000,
+    Outlined = 0x00010000,
+    TexAlignBottom = 0x00020000,
+    TexMoveByDoor = 0x00040000,
+    HasHint = 0x00100000,
+    IndoorCarpet = 0x00200000,
+    IndoorSky = 0x00400000,
+    FlipNormalU = 0x00800000,
+    FlipNormalV = 0x01000000,
+    Clickable = 0x02000000,
+    PressurePlate = 0x04000000,
+    TriggerByMonster = 0x08000000,
+    TriggerByObject = 0x10000000,
+    Ethereal = 0x20000000,
+    Lava = 0x40000000,
+    Picked = 0x80000000
+};
+
+// Surface type of a face, stored per face in `polygonType`.
+enum class PolygonType : uint8_t
+{
+    Invalid = 0,
+    VerticalWall = 1,
+    Unknown = 2,
+    Floor = 3,
+    BetweenFloorAndWall = 4,
+    Ceiling = 5,
+    BetweenCeilingAndWall = 6
 };
 
 // Parsed face with resolved vertex indices and UV coordinates
@@ -298,8 +327,10 @@ struct ParsedFace
     int16_t textureId = -1;     // Texture bitmap index
     int16_t faceExtraId = -1;   // Face extra index
     std::string textureName;    // Texture name from face texture table
-    int eventId = 0;            // Event trigger id (face/decor trigger)
-    int eventTriggerType = 0;   // Trigger type marker (if available)
+    int16_t textureDeltaU = 0;  // Face-level texel offset
+    int16_t textureDeltaV = 0;
+    int eventId = 0;          // Event trigger id (face/decor trigger)
+    int eventTriggerType = 0; // Trigger type marker (if available)
 
     // Per-vertex data (from faceData flat array)
     std::vector<int16_t> xIntercepts; // X intercept displacements
@@ -314,21 +345,30 @@ struct ParsedFace
     int16_t minZ = 0, maxZ = 0;
 
     // Helper methods
-    bool isFloor() const { return (attributes & static_cast<uint32_t>(FaceAttribute::Floor)) != 0; }
-    bool isWall() const { return !isFloor() && !isCeiling(); }
-    bool isCeiling() const
+    bool hasAttribute(FaceAttribute attribute) const
     {
-        return (attributes & static_cast<uint32_t>(FaceAttribute::Ceiling)) != 0;
+        return (attributes & static_cast<uint32_t>(attribute)) != 0;
     }
-    bool isPortal() const
+    bool isPolygonType(PolygonType type) const { return polygonType == static_cast<uint8_t>(type); }
+
+    // Surface type comes from polygonType — there are no floor/ceiling attribute bits.
+    bool isFloor() const { return isPolygonType(PolygonType::Floor); }
+    bool isCeiling() const { return isPolygonType(PolygonType::Ceiling); }
+    bool isWall() const { return isPolygonType(PolygonType::VerticalWall); }
+
+    bool isPortal() const { return hasAttribute(FaceAttribute::Portal); }
+    bool isLava() const { return hasAttribute(FaceAttribute::Lava); }
+    bool isWater() const { return hasAttribute(FaceAttribute::Fluid) && !isLava(); }
+    bool isInvisible() const { return hasAttribute(FaceAttribute::Invisible); }
+
+    // Scrolling ("flowing") textures — lava and the four directional flow bits.
+    bool flowsDown() const { return hasAttribute(FaceAttribute::FlowDown); }
+    bool flowsUp() const { return hasAttribute(FaceAttribute::FlowUp); }
+    bool flowsLeft() const { return hasAttribute(FaceAttribute::FlowLeft); }
+    bool flowsRight() const { return hasAttribute(FaceAttribute::FlowRight); }
+    bool hasTextureFlow() const
     {
-        return (attributes & static_cast<uint32_t>(FaceAttribute::Portal)) != 0;
-    }
-    bool isWater() const { return (attributes & static_cast<uint32_t>(FaceAttribute::Water)) != 0; }
-    bool isLava() const { return (attributes & static_cast<uint32_t>(FaceAttribute::Lava)) != 0; }
-    bool isInvisible() const
-    {
-        return (attributes & static_cast<uint32_t>(FaceAttribute::Invisible)) != 0;
+        return flowsDown() || flowsUp() || flowsLeft() || flowsRight() || isLava();
     }
 };
 

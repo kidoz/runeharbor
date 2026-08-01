@@ -16,6 +16,7 @@
 #include "clip_utils.hpp"
 #include "shaders_compiled.hpp"
 #include "sprite_facing.hpp"
+#include "texture_coordinates.hpp"
 #include "visibility.hpp"
 #include "world_coordinates.hpp"
 
@@ -743,6 +744,15 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                 continue; // GPU already drew the walls
 
             const auto& face = blvData.faces[op.index];
+            float textureWidth = 256.0f;
+            float textureHeight = 256.0f;
+            if (textureLookup && !face.textureName.empty())
+            {
+                if (SDL_Texture* faceTexture = textureLookup(face.textureName))
+                {
+                    SDL_GetTextureSize(faceTexture, &textureWidth, &textureHeight);
+                }
+            }
             SDL_FColor faceColor = litIndoorFaceColor(blvData, face, op.cx, op.cy, op.cz,
                                                       stationaryLights_, mobileLights_);
             // Apply night darkening (areas with skylights/windows dim at night;
@@ -754,6 +764,26 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                 faceColor.r *= dim;
                 faceColor.g *= dim;
                 faceColor.b *= dim;
+            }
+            // Fluid surfaces shimmer. The real engine cycles the water texture's
+            // frames; until that exists, modulate the surface colour instead —
+            // unlike a UV offset this cannot make the texture appear to slide.
+            if (face.isWater() && animateWater)
+            {
+                const float wave = std::sin(waterWavePhase(op.cx, op.cy, waterTimeSeconds));
+                faceColor.r = std::clamp(faceColor.r + wave * 0.020f, 0.0f, 1.0f);
+                faceColor.g = std::clamp(faceColor.g + wave * 0.035f, 0.0f, 1.0f);
+                faceColor.b = std::clamp(faceColor.b + wave * 0.065f, 0.0f, 1.0f);
+            }
+
+            // Only faces flagged as flowing scroll their texture; everything
+            // else is static. The offset is in texels and wraps, so it never
+            // drifts however long the map has been loaded.
+            TextureFlow flow;
+            if (animateWater && face.hasTextureFlow())
+            {
+                flow = textureFlowOffset(faceTextureFlowDirection(face), waterTimeSeconds,
+                                         textureWidth, textureHeight);
             }
 
             // Build clip-space polygon
@@ -790,15 +820,10 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                 float u = 0.0f, uv = 0.0f;
                 if (i < face.uCoords.size() && i < face.vCoords.size())
                 {
-                    u = static_cast<float>(face.uCoords[i]) / 256.0f;
-                    uv = static_cast<float>(face.vCoords[i]) / 256.0f;
-                    if (face.isWater() && animateWater)
-                    {
-                        const float wave =
-                            std::sin(waterWavePhase(worldPos.x, worldPos.z, waterTimeSeconds));
-                        u += waterTimeSeconds * 0.09f + wave * 0.03f;
-                        uv += waterTimeSeconds * 0.06f + wave * 0.02f;
-                    }
+                    u = normalizeTextureCoordinate(face.uCoords[i], face.textureDeltaU + flow.u,
+                                                   textureWidth);
+                    uv = normalizeTextureCoordinate(face.vCoords[i], face.textureDeltaV + flow.v,
+                                                    textureHeight);
                 }
 
                 // Per-face lighting (computed once at the centroid above via
@@ -1210,6 +1235,15 @@ void IndoorRenderer::buildGPUIndoor(const formats::BLVMapData& blvData)
     for (const auto& [key, faceIndices] : groupedFaces)
     {
         uint32_t indexStart = static_cast<uint32_t>(indices.size());
+        float textureWidth = 256.0f;
+        float textureHeight = 256.0f;
+        if (textureLookup && !key.textureName.empty())
+        {
+            if (SDL_Texture* texture = textureLookup(key.textureName))
+            {
+                SDL_GetTextureSize(texture, &textureWidth, &textureHeight);
+            }
+        }
 
         for (uint32_t fIdx : faceIndices)
         {
@@ -1254,8 +1288,10 @@ void IndoorRenderer::buildGPUIndoor(const formats::BLVMapData& blvData)
                 float u = 0.0f, v = 0.0f;
                 if (i < face.uCoords.size() && i < face.vCoords.size())
                 {
-                    u = static_cast<float>(face.uCoords[i]) / 256.0f;
-                    v = static_cast<float>(face.vCoords[i]) / 256.0f;
+                    u = normalizeTextureCoordinate(face.uCoords[i], face.textureDeltaU,
+                                                   textureWidth);
+                    v = normalizeTextureCoordinate(face.vCoords[i], face.textureDeltaV,
+                                                   textureHeight);
                 }
 
                 GPUVertex vertex = {renderPos.x, renderPos.y, renderPos.z,
