@@ -84,6 +84,46 @@ TEST_CASE("Character conditions", "[game][character]")
         ch.clearCondition(ConditionIndex::Cursed);
         REQUIRE_FALSE(ch.hasCondition(ConditionIndex::Cursed));
     }
+
+    SECTION("takeDamage reaching 0 HP sets Unconscious")
+    {
+        // Regression: takeDamage centralizes HP mutation so 0 HP downs the
+        // character consistently — previously the event engine's direct HP
+        // write left a 0-HP character "conscious".
+        REQUIRE(ch.hitPoints > 5);
+        ch.takeDamage(ch.hitPoints); // drop to exactly 0
+        REQUIRE(ch.hitPoints == 0);
+        REQUIRE(ch.hasCondition(ConditionIndex::Unconscious));
+        REQUIRE_FALSE(ch.isConscious());
+    }
+
+    SECTION("takeDamage clamps at 0 (no negative HP)")
+    {
+        const int max = ch.maxHitPoints;
+        ch.takeDamage(max + 999);
+        REQUIRE(ch.hitPoints == 0);
+        REQUIRE(ch.hasCondition(ConditionIndex::Unconscious));
+    }
+
+    SECTION("heal clamps at maxHitPoints and does not clear conditions")
+    {
+        ch.takeDamage(ch.hitPoints); // down to 0, Unconscious
+        REQUIRE(ch.hasCondition(ConditionIndex::Unconscious));
+        ch.heal(9999);
+        REQUIRE(ch.hitPoints == ch.maxHitPoints);
+        // heal intentionally does NOT auto-clear conditions — the caller must.
+        REQUIRE(ch.hasCondition(ConditionIndex::Unconscious));
+    }
+
+    SECTION("takeDamage does not override a worse condition")
+    {
+        ch.setCondition(ConditionIndex::Dead);
+        const int hp = ch.hitPoints;
+        ch.takeDamage(hp); // would normally set Unconscious
+        REQUIRE(ch.hitPoints == 0);
+        // Dead remains the worst condition; Unconscious was not added.
+        REQUIRE(ch.hasCondition(ConditionIndex::Dead));
+    }
 }
 
 TEST_CASE("Character stats and derived values", "[game][character]")

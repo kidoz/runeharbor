@@ -985,12 +985,10 @@ void CombatSystem::monsterAttack(MonsterInstance& monster)
         int baseDmg = rollDamage(damageExpr);
         result.damage =
             calculateMonsterDamage(baseDmg, DamageElement::Physical, monster.targetCharacter);
-        target.hitPoints -= result.damage;
+        target.takeDamage(result.damage);
 
         if (target.hitPoints <= 0)
         {
-            target.hitPoints = 0;
-            target.setCondition(ConditionIndex::Unconscious);
             result.description = monster.name + " knocks out " + target.name + " (" +
                                  std::to_string(result.damage) + " damage)";
 

@@ -342,6 +342,18 @@ struct Character
     // Recalculate derived stats (HP, SP, AC, resistances) from base stats + equipment
     void recalculateDerived();
 
+    // Centralized HP mutation. takeDamage subtracts (clamped at 0) and sets the
+    // Unconscious condition when HP reaches 0 — unless a worse condition (Dead,
+    // Stoned, Eradicated) is already active. heal adds (clamped at maxHitPoints)
+    // but does NOT auto-clear conditions (call clearCondition explicitly, e.g.
+    // via temple/rest). Use these instead of writing hitPoints directly so the
+    // death/condition side-effects stay consistent across combat and events.
+    void takeDamage(int amount);
+    void heal(int amount);
+    // Set HP to an absolute value with the same clamping + condition handling
+    // as takeDamage/heal. Used by EVT SetPlayerVar (param1 == 7).
+    void setHitPoints(int value);
+
     // Experience and Leveling
     int xpRequiredForNextLevel() const;
     bool canLevelUp() const;

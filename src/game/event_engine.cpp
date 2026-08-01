@@ -851,7 +851,7 @@ size_t EventEngine::executeCommand(const EventScript& script, size_t index, bool
                 switch (cmd.param1)
                 {
                 case 7: // HP
-                    ch.hitPoints = std::clamp(cmd.param2, 0, std::max(0, ch.maxHitPoints));
+                    ch.setHitPoints(cmd.param2);
                     break;
                 case 8: // SP
                     ch.spellPoints = std::clamp(cmd.param2, 0, std::max(0, ch.maxSpellPoints));
@@ -1551,7 +1551,7 @@ void EventEngine::applyStatDelta(int statId, int delta, uint8_t mode)
         switch (statId)
         {
         case 7: // HP
-            ch.hitPoints = std::clamp(ch.hitPoints + delta, 0, std::max(0, ch.maxHitPoints));
+            ch.setHitPoints(ch.hitPoints + delta);
             break;
         case 8: // SP
             ch.spellPoints = std::clamp(ch.spellPoints + delta, 0, std::max(0, ch.maxSpellPoints));

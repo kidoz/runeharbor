@@ -94,6 +94,39 @@ int Character::effectiveStat(int statIndex) const
     return baseStats.byIndex(statIndex);
 }
 
+void Character::takeDamage(int amount)
+{
+    setHitPoints(hitPoints - amount);
+}
+
+void Character::heal(int amount)
+{
+    setHitPoints(hitPoints + amount);
+}
+
+void Character::setHitPoints(int value)
+{
+    // Clamp to [0, maxHitPoints] (maxHitPoints may be 0 pre-recalculate; treat
+    // the upper bound as at least the current HP so a heal never reduces HP).
+    const int upper = std::max(0, std::max(maxHitPoints, hitPoints));
+    hitPoints = std::clamp(value, 0, upper);
+
+    // Reaching 0 HP downs the character unless a worse condition is already
+    // active. This matches the combat path's behaviour and closes the gap where
+    // the event engine's direct HP write left a 0-HP character "conscious".
+    if (hitPoints <= 0)
+    {
+        const ConditionIndex worst = worstActiveCondition();
+        const bool alreadyWorse = worst == ConditionIndex::Dead ||
+                                  worst == ConditionIndex::Stoned ||
+                                  worst == ConditionIndex::Eradicated;
+        if (!alreadyWorse)
+        {
+            setCondition(ConditionIndex::Unconscious);
+        }
+    }
+}
+
 void Character::recalculateDerived()
 {
     // Update current stats from base
