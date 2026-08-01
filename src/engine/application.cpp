@@ -412,6 +412,11 @@ void Application::transitionTo(GameStateId id)
         SDL_PushEvent(&quitEvent);
         return;
     }
+    default:
+        // Unknown id: do not touch activeState — the previous state was already
+        // exit()-ed above, and entering it again would be wrong. Log and bail.
+        logger.warning(std::format("transitionTo: unknown GameStateId {}", static_cast<int>(id)));
+        return;
     }
 
     if (activeState)
@@ -2774,6 +2779,12 @@ void Application::commitPartyToGameWorld()
     {
         return;
     }
+    // Copies each finalized member from the Application-side `party` vector into
+    // the GameWorld's party. This assigns only per-member state; it does NOT
+    // overwrite party-level fields (gold/food/world position/arrival override)
+    // or inventory — those are set by CharacterCreationState's OK handler before
+    // this runs, and member assignment leaves them untouched. Re-running
+    // finalize here is idempotent with the OK handler's finalize loop.
     auto& gp = gameWorld_->party();
     for (int i = 0; i < game::kPartySize && i < static_cast<int>(party.size()); i++)
     {

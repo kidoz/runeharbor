@@ -44,6 +44,9 @@ class TitleState : public IGameState
 
     std::vector<MenuButton> buttons;
     int selectedIndex = 0;
+    // Status line rendered at the bottom of the screen (e.g. "No save games
+    // found"). Currently never assigned, so render() draws nothing; kept for
+    // future LOAD/CREDITS feedback.
     std::string statusMessage;
 
     int lastViewportWidth = 0;

@@ -107,7 +107,10 @@ std::optional<GameStateId> TitleState::update()
         }
     }
 
-    // Keyboard shortcuts
+    // Single-key shortcuts (matches the original title screen). Note these fire
+    // unconditionally on key press with no modifier gating, so e.g. Q or E exits
+    // the game immediately — there is intentionally no confirmation dialog and
+    // no ESC handler on this screen.
     if (ctx.isKeyPressed(SDL_SCANCODE_N))
     {
         return GameStateId::CharacterCreation;
