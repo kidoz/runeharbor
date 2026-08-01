@@ -21,6 +21,9 @@
 #include "../game/shop_system.hpp"
 #include "../game/travel_destinations.hpp"
 
+// Forward declarations
+struct SDL_Renderer;
+
 namespace runeharbor::graphics
 {
 class IRenderer;
@@ -114,6 +117,31 @@ class ShopWindow
         std::string label;
     };
 
+    // Shared chrome drawn by every family renderer: dim modal backdrop, the
+    // window fill + double border, title + proprietor, and a right-aligned
+    // gold (optionally gold+bank) readout. Returns the SDL renderer handle
+    // (or nullptr if unavailable) and the Y cursor just below the separator,
+    // so callers continue laying out their per-family content from there.
+    // `fillR/G/B` tints the window background per family.
+    struct ChromeResult
+    {
+        SDL_Renderer* sdl = nullptr;
+        int contentY = 0;
+    };
+    ChromeResult renderChrome(graphics::IRenderer& renderer, const graphics::DebugText& debugText,
+                              int viewportW, int viewportH, uint8_t fillR, uint8_t fillG,
+                              uint8_t fillB, bool showBankGold);
+
+    // Draws one service/tab button at (x,by) and records its hit-test rect.
+    void drawButton(graphics::IRenderer& renderer, const graphics::DebugText& debugText,
+                    SDL_Renderer* sdl, int x, int y, int w, std::string label, uint8_t r, uint8_t g,
+                    uint8_t b);
+
+    // Right-aligns `text` to the window's right inner edge (kWindowW - kPadding)
+    // and draws it. Used for the gold readout.
+    void drawRightAligned(const graphics::DebugText& debugText, SDL_Renderer* sdl,
+                          std::string_view text, int y, int scale, uint8_t r, uint8_t g, uint8_t b);
+
     bool open_ = false;
     game::BuildingType buildingType_ = game::BuildingType::None;
     game::ShopFamily family_ = game::ShopFamily::None;
@@ -133,6 +161,14 @@ class ShopWindow
     game::ShopSystem shop_;
 
     std::vector<ButtonRect> buttonRects_;
+    // Cached visible list-row rects (item-shop Buy/Sell only), rebuilt each
+    // render so handleClick can map a click to a row index for mouse selection.
+    struct RowRect
+    {
+        int index = 0; // absolute list index (scrollOffset + i)
+        int x = 0, y = 0, w = 0, h = 0;
+    };
+    std::vector<RowRect> listRowRects_;
     std::function<void(const std::string&)> onStatus_;
 
     // Builds the per-shop buy list by filtering the item table on equipStat.

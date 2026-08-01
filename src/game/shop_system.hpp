@@ -161,6 +161,10 @@ class ShopSystem
     // Flat per-trip cost: (Stables?50:25) * shopMult, then the finalizer.
     static int travelCost(BuildingType type, float shopMult, int discountPct);
 
+    // Charges the party for one trip (gold only). The host performs the actual
+    // map transition via the TravelRequest callback on a successful receipt.
+    std::expected<ShopReceipt, ShopError> chargeTravel(const ShopContext& ctx) const;
+
     // -------- Bank service --------
     std::expected<ShopReceipt, ShopError> depositGold(const ShopContext& ctx, int amount) const;
     std::expected<ShopReceipt, ShopError> withdrawGold(const ShopContext& ctx, int amount) const;

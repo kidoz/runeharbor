@@ -81,6 +81,79 @@ std::string conditionLabel(game::ConditionIndex c)
 
 } // namespace
 
+void ShopWindow::drawRightAligned(const graphics::DebugText& debugText, SDL_Renderer* sdl,
+                                  std::string_view text, int y, int scale, uint8_t r, uint8_t g,
+                                  uint8_t b)
+{
+    if (sdl == nullptr)
+        return;
+    const int w = debugText.measureTextWidth(text, scale);
+    debugText.drawText(sdl, kWindowX + kWindowW - kPadding - w, y, scale, r, g, b, text);
+}
+
+void ShopWindow::drawButton(graphics::IRenderer& renderer, const graphics::DebugText& debugText,
+                            SDL_Renderer* sdl, int x, int y, int w, std::string label, uint8_t r,
+                            uint8_t g, uint8_t b)
+{
+    renderer.drawFilledRect(x, y, w, kButtonHeight, r, g, b, 220);
+    renderer.drawRect(x, y, w, kButtonHeight, 210, 200, 160, 255);
+    if (sdl)
+        debugText.drawText(sdl, x + 6, y + 4, kTextScale, 240, 240, 240, label);
+    buttonRects_.push_back({x, y, w, kButtonHeight, std::move(label)});
+}
+
+ShopWindow::ChromeResult ShopWindow::renderChrome(graphics::IRenderer& renderer,
+                                                  const graphics::DebugText& debugText,
+                                                  int viewportW, int viewportH, uint8_t fillR,
+                                                  uint8_t fillG, uint8_t fillB, bool showBankGold)
+{
+    ChromeResult out;
+
+    // Dim background (modal).
+    renderer.drawFilledRect(0, 0, viewportW, viewportH, 0, 0, 0, 140);
+
+    // Window chrome: fill + double border (consistent across all families).
+    renderer.drawFilledRect(kWindowX, kWindowY, kWindowW, kWindowH, fillR, fillG, fillB, 235);
+    renderer.drawRect(kWindowX, kWindowY, kWindowW, kWindowH, 130, 108, 60, 255);
+    renderer.drawRect(kWindowX + 1, kWindowY + 1, kWindowW - 2, kWindowH - 2, 90, 78, 44, 210);
+
+    SDL_Renderer* sdl = renderer.getSDLRenderer();
+    out.sdl = sdl;
+    if (sdl == nullptr)
+        return out;
+
+    int y = kWindowY + kPadding;
+
+    // Title (shop name) + proprietor.
+    if (!shopName_.empty())
+    {
+        debugText.drawText(sdl, kWindowX + kPadding, y, kTitleScale, 255, 220, 120, shopName_);
+        y += debugText.lineHeight(kTitleScale) + 2;
+    }
+    if (!proprietor_.empty())
+    {
+        debugText.drawText(sdl, kWindowX + kPadding, y, kTextScale, 180, 180, 200, proprietor_);
+        y += debugText.lineHeight(kTextScale) + 2;
+    }
+
+    // Gold (optionally gold + bank) right-aligned to the window's inner edge.
+    if (party_ != nullptr)
+    {
+        const std::string gold =
+            showBankGold ? std::format("Gold: {}   Bank: {}", party_->gold(), party_->bankGold())
+                         : std::format("Gold: {}", party_->gold());
+        drawRightAligned(debugText, sdl, gold, kWindowY + kPadding, kTextScale, 255, 215, 0);
+    }
+
+    // Separator.
+    y += 2;
+    renderer.drawFilledRect(kWindowX + kPadding, y, kWindowW - kPadding * 2, 1, 110, 90, 50, 220);
+    y += kPadding;
+
+    out.contentY = y;
+    return out;
+}
+
 void ShopWindow::show(const formats::TwoDEventEntry& building,
                       const std::vector<formats::ItemEntry>& items)
 {
@@ -233,6 +306,21 @@ bool ShopWindow::handleClick(int mouseX, int mouseY)
     if (!open_)
         return false;
 
+    // Item-shop only: click a list row to select it (does not transact — the
+    // Buy/Do or Sell/Do button or Enter does). Row rects are cached each render.
+    if (family_ == game::ShopFamily::ItemShop)
+    {
+        for (const auto& row : listRowRects_)
+        {
+            if (mouseX >= row.x && mouseX < row.x + row.w && mouseY >= row.y &&
+                mouseY < row.y + row.h)
+            {
+                listSelection_ = row.index;
+                return true;
+            }
+        }
+    }
+
     // Button hit-test (rects cached from the last render).
     for (const auto& btn : buttonRects_)
     {
@@ -316,7 +404,8 @@ bool ShopWindow::handleClick(int mouseX, int mouseY)
             return true;
         }
     }
-    return true; // modal: consume all clicks while open
+    return true; // modal: consume all clicks while open (even misses), so the
+                 // world never sees a click while the shop is up.
 }
 
 bool ShopWindow::handleKey(int scancode)
@@ -482,6 +571,10 @@ void ShopWindow::doBuy()
             onStatus_(std::format("Purchased {} for {} gold.", buyList_[listSelection_].name,
                                   result->goldSpent));
         }
+        // Note: the buy list is NOT rebuilt or re-clamped on success, unlike
+        // doSell(). Stock is fixed for the shop visit (no sold-out tracking),
+        // so the selection stays valid. doSell() must rebuild because the sold
+        // item leaves the backpack.
     }
     else if (onStatus_)
     {
@@ -614,19 +707,21 @@ void ShopWindow::doTravel()
         return;
     }
 
-    const int discount = party_ ? game::ShopSystem::merchantDiscountPct(
-                                      party_->member(std::clamp(party_->activeMemberIndex(), 0, 3)),
-                                      party_->reputation())
-                                : 0;
-    const int cost = game::ShopSystem::travelCost(buildingType_, buyMultiplier_, discount);
-    if (party_->gold() < cost)
+    formats::TwoDEventEntry building;
+    building.id = 0;
+    building.buildingType = buildingType_;
+    building.buyMultiplier = buyMultiplier_;
+    game::ShopContext ctx{&building, party_, inventory_};
+
+    // Charge via ShopSystem so the gold math lives with the rest of the economy.
+    auto result = shop_.chargeTravel(ctx);
+    if (!result.has_value())
     {
         if (onStatus_)
-            onStatus_(std::format("Cannot travel: {}.",
-                                  game::shopErrorText(game::ShopError::InsufficientGold)));
+            onStatus_(std::format("Cannot travel: {}.", game::shopErrorText(result.error())));
         return;
     }
-    (void)party_->spendGold(cost);
+    const int cost = result->goldSpent;
 
     const auto& dest = travelDestinations_[listSelection_];
     if (onTravelRequest_)
@@ -681,66 +776,28 @@ void ShopWindow::render(graphics::IRenderer& renderer, const graphics::DebugText
     if (activeTab_ == ShopTab::Sell)
         rebuildSellList();
 
-    // Dim background (modal).
-    renderer.drawFilledRect(0, 0, viewportW, viewportH, 0, 0, 0, 140);
-
-    // Window chrome.
-    renderer.drawFilledRect(kWindowX, kWindowY, kWindowW, kWindowH, 22, 22, 38, 235);
-    renderer.drawRect(kWindowX, kWindowY, kWindowW, kWindowH, 130, 108, 60, 255);
-    renderer.drawRect(kWindowX + 1, kWindowY + 1, kWindowW - 2, kWindowH - 2, 84, 74, 42, 210);
-
-    SDL_Renderer* sdl = renderer.getSDLRenderer();
+    // Chrome (dim + window + title/gold + separator).
+    auto chrome = renderChrome(renderer, debugText, viewportW, viewportH, 22, 22, 38, false);
+    SDL_Renderer* sdl = chrome.sdl;
     if (sdl == nullptr)
         return;
-
-    int y = kWindowY + kPadding;
-
-    // Title (shop name + proprietor).
-    if (!shopName_.empty())
-    {
-        debugText.drawText(sdl, kWindowX + kPadding, y, kTitleScale, 255, 220, 120, shopName_);
-        y += debugText.lineHeight(kTitleScale) + 2;
-    }
-    if (!proprietor_.empty())
-    {
-        debugText.drawText(sdl, kWindowX + kPadding, y, kTextScale, 180, 180, 200, proprietor_);
-        y += debugText.lineHeight(kTextScale) + 2;
-    }
-
-    // Gold display (top-right).
-    if (party_ != nullptr)
-    {
-        const std::string gold = std::format("Gold: {}", party_->gold());
-        debugText.drawText(sdl, kWindowX + kWindowW - kPadding - 120, kWindowY + kPadding,
-                           kTextScale, 255, 215, 0, gold);
-    }
-
-    // Separator.
-    y += 2;
-    renderer.drawFilledRect(kWindowX + kPadding, y, kWindowW - kPadding * 2, 1, 90, 78, 44, 220);
-    y += kPadding / 2;
+    int y = chrome.contentY;
 
     // Tab buttons + action button + close (cached for hit-testing).
     buttonRects_.clear();
     int bx = kWindowX + kPadding;
     const int by = y;
-
-    auto addBtn = [&](int x, int w, std::string label, uint8_t r, uint8_t g, uint8_t b)
-    {
-        renderer.drawFilledRect(x, by, w, kButtonHeight, r, g, b, 220);
-        renderer.drawRect(x, by, w, kButtonHeight, 200, 190, 160, 255);
-        debugText.drawText(sdl, x + 6, by + 4, kTextScale, 240, 240, 240, label);
-        buttonRects_.push_back({x, by, w, kButtonHeight, std::move(label)});
-    };
-
     const bool onBuy = activeTab_ == ShopTab::Buy;
-    addBtn(bx, kButtonWidth, "Buy Tab", onBuy ? 70 : 40, onBuy ? 110 : 40, onBuy ? 70 : 55);
+    drawButton(renderer, debugText, sdl, bx, by, kButtonWidth, "Buy Tab", onBuy ? 70 : 40,
+               onBuy ? 110 : 40, onBuy ? 70 : 55);
     bx += kButtonWidth + kPadding;
-    addBtn(bx, kButtonWidth, "Sell Tab", !onBuy ? 70 : 40, !onBuy ? 110 : 40, !onBuy ? 70 : 55);
+    drawButton(renderer, debugText, sdl, bx, by, kButtonWidth, "Sell Tab", !onBuy ? 70 : 40,
+               !onBuy ? 110 : 40, !onBuy ? 70 : 55);
     bx += kButtonWidth + kPadding;
-    addBtn(bx, kButtonWidth, onBuy ? "Buy/Do" : "Sell/Do", 50, 90, 50);
-    bx += kButtonWidth + kPadding;
-    addBtn(kWindowX + kWindowW - kPadding - kButtonWidth, kButtonWidth, "Close", 90, 40, 40);
+    drawButton(renderer, debugText, sdl, bx, by, kButtonWidth, onBuy ? "Buy/Do" : "Sell/Do", 50, 90,
+               50);
+    drawButton(renderer, debugText, sdl, kWindowX + kWindowW - kPadding - kButtonWidth, by,
+               kButtonWidth, "Close", 90, 40, 40);
 
     y = by + kButtonHeight + kPadding;
 
@@ -755,6 +812,7 @@ void ShopWindow::render(graphics::IRenderer& renderer, const graphics::DebugText
     debugText.drawText(sdl, listX + 4, listTop + 2, kTextScale, 200, 200, 160, std::string(header));
     y = listTop + kRowHeight + 4;
 
+    listRowRects_.clear();
     const auto& list = onBuy ? buyList_ : sellList_;
     if (list.empty())
     {
@@ -777,13 +835,18 @@ void ShopWindow::render(graphics::IRenderer& renderer, const graphics::DebugText
             renderer.drawFilledRect(listX + 2, y - 1, listW - 4, kRowHeight, 80, 70, 30, 220);
         }
 
+        // Cache this row's rect so handleClick can mouse-select it.
+        listRowRects_.push_back({index, listX, y - 1, listW, kRowHeight});
+
         const std::string name = std::format("{}{}{}", row.broken ? "[broken] " : "",
                                              row.identified ? row.name : ("?" + row.name),
                                              row.identified ? "" : " (unidentified)");
         const std::string price = std::format("{}", row.price);
         debugText.drawText(sdl, listX + 6, y, kTextScale, 230, 230, 230, name);
-        debugText.drawText(sdl, listX + listW - 6 - static_cast<int>(price.size()) * 8, y,
-                           kTextScale, 255, 215, 0, price);
+        // Right-align the price to the list's right edge, measured rather than
+        // assuming a fixed glyph advance.
+        const int priceW = debugText.measureTextWidth(price, kTextScale);
+        debugText.drawText(sdl, listX + listW - 6 - priceW, y, kTextScale, 255, 215, 0, price);
         y += kRowHeight;
     }
 
@@ -798,61 +861,23 @@ void ShopWindow::renderTemple(graphics::IRenderer& renderer, const graphics::Deb
     const int viewportW = 640;
     const int viewportH = 480;
 
-    // Dim background (modal).
-    renderer.drawFilledRect(0, 0, viewportW, viewportH, 0, 0, 0, 140);
-
-    // Window chrome.
-    renderer.drawFilledRect(kWindowX, kWindowY, kWindowW, kWindowH, 30, 24, 22, 235);
-    renderer.drawRect(kWindowX, kWindowY, kWindowW, kWindowH, 150, 120, 60, 255);
-    renderer.drawRect(kWindowX + 1, kWindowY + 1, kWindowW - 2, kWindowH - 2, 96, 80, 44, 210);
-
-    SDL_Renderer* sdl = renderer.getSDLRenderer();
+    auto chrome = renderChrome(renderer, debugText, viewportW, viewportH, 30, 24, 22, false);
+    SDL_Renderer* sdl = chrome.sdl;
     if (sdl == nullptr)
         return;
-
-    int y = kWindowY + kPadding;
-
-    if (!shopName_.empty())
-    {
-        debugText.drawText(sdl, kWindowX + kPadding, y, kTitleScale, 255, 220, 120, shopName_);
-        y += debugText.lineHeight(kTitleScale) + 2;
-    }
-    if (!proprietor_.empty())
-    {
-        debugText.drawText(sdl, kWindowX + kPadding, y, kTextScale, 180, 180, 200, proprietor_);
-        y += debugText.lineHeight(kTextScale) + 2;
-    }
-
-    if (party_ != nullptr)
-    {
-        const std::string gold = std::format("Gold: {}", party_->gold());
-        debugText.drawText(sdl, kWindowX + kWindowW - kPadding - 120, kWindowY + kPadding,
-                           kTextScale, 255, 215, 0, gold);
-    }
-
-    y += 2;
-    renderer.drawFilledRect(kWindowX + kPadding, y, kWindowW - kPadding * 2, 1, 110, 90, 50, 220);
-    y += kPadding;
+    int y = chrome.contentY;
 
     // Service buttons (cached for hit-testing).
     buttonRects_.clear();
     const int by = y;
-    auto addBtn = [&](int x, int w, std::string label, uint8_t r, uint8_t g, uint8_t b)
-    {
-        renderer.drawFilledRect(x, by, w, kButtonHeight, r, g, b, 220);
-        renderer.drawRect(x, by, w, kButtonHeight, 210, 200, 160, 255);
-        debugText.drawText(sdl, x + 6, by + 4, kTextScale, 240, 240, 240, label);
-        buttonRects_.push_back({x, by, w, kButtonHeight, std::move(label)});
-    };
-
     int bx = kWindowX + kPadding;
-    addBtn(bx, kButtonWidth, "Heal All", 50, 110, 60);
+    drawButton(renderer, debugText, sdl, bx, by, kButtonWidth, "Heal All", 50, 110, 60);
     bx += kButtonWidth + kPadding;
-    addBtn(bx, kButtonWidth, "Resurrect", 110, 90, 50);
+    drawButton(renderer, debugText, sdl, bx, by, kButtonWidth, "Resurrect", 110, 90, 50);
     bx += kButtonWidth + kPadding;
-    addBtn(bx, kButtonWidth, "Donate", 90, 90, 130);
-    bx += kButtonWidth + kPadding;
-    addBtn(kWindowX + kWindowW - kPadding - kButtonWidth, kButtonWidth, "Close", 90, 40, 40);
+    drawButton(renderer, debugText, sdl, bx, by, kButtonWidth, "Donate", 90, 90, 130);
+    drawButton(renderer, debugText, sdl, kWindowX + kWindowW - kPadding - kButtonWidth, by,
+               kButtonWidth, "Close", 90, 40, 40);
 
     y = by + kButtonHeight + kPadding;
 
@@ -883,9 +908,11 @@ void ShopWindow::renderTemple(graphics::IRenderer& renderer, const graphics::Deb
 
         std::string condLabel = "Healthy";
         std::string raiseLabel = "-";
+        std::string name = "-";
         if (party_ != nullptr)
         {
             const auto& m = party_->member(i);
+            name = m.name;
             const game::ConditionIndex worst = m.worstActiveCondition();
             if (worst != game::ConditionIndex::Count)
                 condLabel = conditionLabel(worst);
@@ -906,7 +933,7 @@ void ShopWindow::renderTemple(graphics::IRenderer& renderer, const graphics::Deb
                                  party_->member(i).maxSpellPoints)
                    : "-";
         const std::string line =
-            std::format("  #{}  {:<14}{:<12}{:<14}{}", i + 1, "", hpSp, condLabel, raiseLabel);
+            std::format("  #{}  {:<14}{:<12}{:<14}{}", i + 1, name, hpSp, condLabel, raiseLabel);
         const uint8_t col = selected ? 255 : 230;
         debugText.drawText(sdl, rosterX + 4, y, kTextScale, col, col, col, line);
         y += kRowHeight;
@@ -924,43 +951,19 @@ void ShopWindow::renderTraining(graphics::IRenderer& renderer, const graphics::D
     const int viewportW = 640;
     const int viewportH = 480;
 
-    renderer.drawFilledRect(0, 0, viewportW, viewportH, 0, 0, 0, 140);
-    renderer.drawFilledRect(kWindowX, kWindowY, kWindowW, kWindowH, 24, 26, 34, 235);
-    renderer.drawRect(kWindowX, kWindowY, kWindowW, kWindowH, 130, 108, 60, 255);
-    renderer.drawRect(kWindowX + 1, kWindowY + 1, kWindowW - 2, kWindowH - 2, 90, 78, 44, 210);
-
-    SDL_Renderer* sdl = renderer.getSDLRenderer();
+    auto chrome = renderChrome(renderer, debugText, viewportW, viewportH, 24, 26, 34, false);
+    SDL_Renderer* sdl = chrome.sdl;
     if (sdl == nullptr)
         return;
-
-    int y = kWindowY + kPadding;
-    if (!shopName_.empty())
-    {
-        debugText.drawText(sdl, kWindowX + kPadding, y, kTitleScale, 255, 220, 120, shopName_);
-        y += debugText.lineHeight(kTitleScale) + 2;
-    }
-    if (party_ != nullptr)
-    {
-        const std::string gold = std::format("Gold: {}", party_->gold());
-        debugText.drawText(sdl, kWindowX + kWindowW - kPadding - 120, kWindowY + kPadding,
-                           kTextScale, 255, 215, 0, gold);
-    }
-    y += 2;
-    renderer.drawFilledRect(kWindowX + kPadding, y, kWindowW - kPadding * 2, 1, 110, 90, 50, 220);
-    y += kPadding;
+    int y = chrome.contentY;
 
     // Train + Close buttons.
     buttonRects_.clear();
     const int by = y;
-    auto addBtn = [&](int x, int w, std::string label, uint8_t r, uint8_t g, uint8_t b)
-    {
-        renderer.drawFilledRect(x, by, w, kButtonHeight, r, g, b, 220);
-        renderer.drawRect(x, by, w, kButtonHeight, 210, 200, 160, 255);
-        debugText.drawText(sdl, x + 6, by + 4, kTextScale, 240, 240, 240, label);
-        buttonRects_.push_back({x, by, w, kButtonHeight, std::move(label)});
-    };
-    addBtn(kWindowX + kPadding, kButtonWidth, "Train", 60, 90, 130);
-    addBtn(kWindowX + kWindowW - kPadding - kButtonWidth, kButtonWidth, "Close", 90, 40, 40);
+    drawButton(renderer, debugText, sdl, kWindowX + kPadding, by, kButtonWidth, "Train", 60, 90,
+               130);
+    drawButton(renderer, debugText, sdl, kWindowX + kWindowW - kPadding - kButtonWidth, by,
+               kButtonWidth, "Close", 90, 40, 40);
     y = by + kButtonHeight + kPadding;
 
     // Party roster with level / XP-to-go / cost / can-level indicator.
@@ -990,8 +993,8 @@ void ShopWindow::renderTraining(graphics::IRenderer& renderer, const graphics::D
         const bool ready = m.canLevelUp();
         const int cost = game::ShopSystem::trainingCost(m, buyMultiplier_, discount);
         const std::string line =
-            std::format("  #{} {:<14}{:>3}   {}/{}   {:>5}   {}", i + 1, "", m.level, m.experience,
-                        need, cost, ready ? "YES" : "no");
+            std::format("  #{} {:<14}{:>3}   {}/{}   {:>5}   {}", i + 1, m.name, m.level,
+                        m.experience, need, cost, ready ? "YES" : "no");
         debugText.drawText(sdl, rosterX + 4, y, kTextScale, selected ? 255 : 220,
                            selected ? 230 : 220, selected ? 170 : 200, line);
         y += kRowHeight;
@@ -1007,43 +1010,19 @@ void ShopWindow::renderTravel(graphics::IRenderer& renderer, const graphics::Deb
     const int viewportW = 640;
     const int viewportH = 480;
 
-    renderer.drawFilledRect(0, 0, viewportW, viewportH, 0, 0, 0, 140);
-    renderer.drawFilledRect(kWindowX, kWindowY, kWindowW, kWindowH, 20, 28, 34, 235);
-    renderer.drawRect(kWindowX, kWindowY, kWindowW, kWindowH, 130, 108, 60, 255);
-    renderer.drawRect(kWindowX + 1, kWindowY + 1, kWindowW - 2, kWindowH - 2, 90, 78, 44, 210);
-
-    SDL_Renderer* sdl = renderer.getSDLRenderer();
+    auto chrome = renderChrome(renderer, debugText, viewportW, viewportH, 20, 28, 34, false);
+    SDL_Renderer* sdl = chrome.sdl;
     if (sdl == nullptr)
         return;
-
-    int y = kWindowY + kPadding;
-    if (!shopName_.empty())
-    {
-        debugText.drawText(sdl, kWindowX + kPadding, y, kTitleScale, 255, 220, 120, shopName_);
-        y += debugText.lineHeight(kTitleScale) + 2;
-    }
-    if (party_ != nullptr)
-    {
-        const std::string gold = std::format("Gold: {}", party_->gold());
-        debugText.drawText(sdl, kWindowX + kWindowW - kPadding - 120, kWindowY + kPadding,
-                           kTextScale, 255, 215, 0, gold);
-    }
-    y += 2;
-    renderer.drawFilledRect(kWindowX + kPadding, y, kWindowW - kPadding * 2, 1, 110, 90, 50, 220);
-    y += kPadding;
+    int y = chrome.contentY;
 
     // Travel + Close buttons.
     buttonRects_.clear();
     const int by = y;
-    auto addBtn = [&](int x, int w, std::string label, uint8_t r, uint8_t g, uint8_t b)
-    {
-        renderer.drawFilledRect(x, by, w, kButtonHeight, r, g, b, 220);
-        renderer.drawRect(x, by, w, kButtonHeight, 210, 200, 160, 255);
-        debugText.drawText(sdl, x + 6, by + 4, kTextScale, 240, 240, 240, label);
-        buttonRects_.push_back({x, by, w, kButtonHeight, std::move(label)});
-    };
-    addBtn(kWindowX + kPadding, kButtonWidth, "Travel", 60, 110, 130);
-    addBtn(kWindowX + kWindowW - kPadding - kButtonWidth, kButtonWidth, "Close", 90, 40, 40);
+    drawButton(renderer, debugText, sdl, kWindowX + kPadding, by, kButtonWidth, "Travel", 60, 110,
+               130);
+    drawButton(renderer, debugText, sdl, kWindowX + kWindowW - kPadding - kButtonWidth, by,
+               kButtonWidth, "Close", 90, 40, 40);
     y = by + kButtonHeight + kPadding;
 
     const int listX = kWindowX + kPadding;
@@ -1063,7 +1042,10 @@ void ShopWindow::renderTravel(graphics::IRenderer& renderer, const graphics::Deb
                                     : 0;
         const int cost = game::ShopSystem::travelCost(buildingType_, buyMultiplier_, discount);
 
-        renderer.drawRect(listX, y, listW, kRowHeight * 2 + 4, 70, 60, 40, 200);
+        // Box holds the header row plus one row per destination, so it grows with
+        // the destination count instead of clipping rows past the second.
+        const int destCount = static_cast<int>(travelDestinations_.size());
+        renderer.drawRect(listX, y, listW, kRowHeight * (destCount + 1) + 4, 70, 60, 40, 200);
         y += 2;
         debugText.drawText(sdl, listX + 4, y, kTextScale, 200, 200, 160,
                            std::format("  Destination              Days   Cost: {}g each", cost));
@@ -1092,50 +1074,23 @@ void ShopWindow::renderSimpleService(graphics::IRenderer& renderer,
 {
     const int viewportW = 640;
     const int viewportH = 480;
-    renderer.drawFilledRect(0, 0, viewportW, viewportH, 0, 0, 0, 140);
-    renderer.drawFilledRect(kWindowX, kWindowY, kWindowW, kWindowH, 26, 24, 30, 235);
-    renderer.drawRect(kWindowX, kWindowY, kWindowW, kWindowH, 130, 108, 60, 255);
-    renderer.drawRect(kWindowX + 1, kWindowY + 1, kWindowW - 2, kWindowH - 2, 90, 78, 44, 210);
-
-    SDL_Renderer* sdl = renderer.getSDLRenderer();
+    auto chrome = renderChrome(renderer, debugText, viewportW, viewportH, 26, 24, 30, true);
+    SDL_Renderer* sdl = chrome.sdl;
     if (sdl == nullptr)
         return;
-
-    int y = kWindowY + kPadding;
-    if (!shopName_.empty())
-    {
-        debugText.drawText(sdl, kWindowX + kPadding, y, kTitleScale, 255, 220, 120, shopName_);
-        y += debugText.lineHeight(kTitleScale) + 2;
-    }
-    if (party_ != nullptr)
-    {
-        const std::string gold =
-            std::format("Gold: {}   Bank: {}", party_->gold(), party_->bankGold());
-        debugText.drawText(sdl, kWindowX + kWindowW - kPadding - 180, kWindowY + kPadding,
-                           kTextScale, 255, 215, 0, gold);
-    }
-    y += kPadding;
-    renderer.drawFilledRect(kWindowX + kPadding, y, kWindowW - kPadding * 2, 1, 110, 90, 50, 220);
-    y += kPadding;
+    int y = chrome.contentY;
 
     buttonRects_.clear();
     const int by = y;
-    auto addBtn = [&](int x, int w, std::string label, uint8_t r, uint8_t g, uint8_t b)
-    {
-        renderer.drawFilledRect(x, by, w, kButtonHeight, r, g, b, 220);
-        renderer.drawRect(x, by, w, kButtonHeight, 210, 200, 160, 255);
-        debugText.drawText(sdl, x + 6, by + 4, kTextScale, 240, 240, 240, label);
-        buttonRects_.push_back({x, by, w, kButtonHeight, std::move(label)});
-    };
 
     int bx = kWindowX + kPadding;
     if (family_ == game::ShopFamily::Bank)
     {
         debugText.drawText(sdl, kWindowX + kPadding, y + kButtonHeight + kPadding, kTextScale, 200,
                            200, 200, "Deposit 100 gold or withdraw 100 gold from the bank vault.");
-        addBtn(bx, kButtonWidth, "Deposit 100", 70, 120, 70);
+        drawButton(renderer, debugText, sdl, bx, by, kButtonWidth, "Deposit 100", 70, 120, 70);
         bx += kButtonWidth + kPadding;
-        addBtn(bx, kButtonWidth, "Withdraw 100", 70, 100, 130);
+        drawButton(renderer, debugText, sdl, bx, by, kButtonWidth, "Withdraw 100", 70, 100, 130);
     }
     else if (family_ == game::ShopFamily::Tavern)
     {
@@ -1143,7 +1098,7 @@ void ShopWindow::renderSimpleService(graphics::IRenderer& renderer,
         debugText.drawText(sdl, kWindowX + kPadding, y + kButtonHeight + kPadding, kTextScale, 200,
                            200, 200,
                            std::format("Rest for the night ({} gold). Restores HP and SP.", cost));
-        addBtn(bx, kButtonWidth, "Rest", 70, 110, 70);
+        drawButton(renderer, debugText, sdl, bx, by, kButtonWidth, "Rest", 70, 110, 70);
     }
     else // Guild
     {
@@ -1151,9 +1106,10 @@ void ShopWindow::renderSimpleService(graphics::IRenderer& renderer,
         debugText.drawText(
             sdl, kWindowX + kPadding, y + kButtonHeight + kPadding, kTextScale, 200, 200, 200,
             std::format("Learn a spell ({} gold). Requires the matching school skill.", cost));
-        addBtn(bx, kButtonWidth, "Learn Spell", 90, 70, 130);
+        drawButton(renderer, debugText, sdl, bx, by, kButtonWidth, "Learn Spell", 90, 70, 130);
     }
-    addBtn(kWindowX + kWindowW - kPadding - kButtonWidth, kButtonWidth, "Close", 90, 40, 40);
+    drawButton(renderer, debugText, sdl, kWindowX + kWindowW - kPadding - kButtonWidth, by,
+               kButtonWidth, "Close", 90, 40, 40);
 
     const int hintY = kWindowY + kWindowH - kPadding - debugText.lineHeight(kTextScale);
     debugText.drawText(sdl, kWindowX + kPadding, hintY, kTextScale, 160, 160, 170,
@@ -1164,6 +1120,9 @@ void ShopWindow::doDeposit()
 {
     if (party_ == nullptr)
         return;
+    // Bank/tavern/guild services move gold only, so the context carries no
+    // inventory (unlike doBuy/doSell). If these services ever need item access,
+    // pass ctx.shared->inventory here.
     formats::TwoDEventEntry building;
     building.buildingType = game::BuildingType::Bank;
     game::ShopContext ctx{&building, party_, nullptr};
@@ -1211,7 +1170,10 @@ void ShopWindow::doLearnSpell()
     building.buildingType = buildingType_;
     building.buyMultiplier = buyMultiplier_;
     game::ShopContext ctx{&building, party_, nullptr};
-    // Try to learn the first available spell the active member doesn't know.
+    // Placeholder selection: learn the first unknown spell (spellId 1..99),
+    // ignoring the guild's school and the member's known school skill. The
+    // real guild UI lets the player pick from a school-specific list and the
+    // skill gate lives in ShopSystem::learnGuildSpell; this just finds a gap.
     const int member = std::clamp(party_->activeMemberIndex(), 0, 3);
     for (int spellId = 1; spellId < 100; spellId++)
     {

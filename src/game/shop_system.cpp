@@ -617,6 +617,27 @@ int ShopSystem::travelCost(BuildingType type, float shopMult, int discountPct)
     return std::max(result, 1);
 }
 
+std::expected<ShopReceipt, ShopError> ShopSystem::chargeTravel(const ShopContext& ctx) const
+{
+    // Centralizes the gold side of travel so the shop window doesn't reach into
+    // party finances directly (matching buy/sell/heal/train). The map transition
+    // itself is still driven by the host via the TravelRequest callback, since
+    // ShopSystem can't reach the transition machinery.
+    if (ctx.building == nullptr || ctx.party == nullptr)
+        return std::unexpected(ShopError::InvalidArgument);
+
+    const int discount = merchantDiscountPct(activeCharacter(*ctx.party), ctx.party->reputation());
+    const int cost = travelCost(ctx.building->buildingType, ctx.building->buyMultiplier, discount);
+    if (ctx.party->gold() < cost)
+        return std::unexpected(ShopError::InsufficientGold);
+
+    (void)ctx.party->spendGold(cost);
+    ShopReceipt receipt;
+    receipt.goldSpent = cost;
+    receipt.building = ctx.building->buildingType;
+    return receipt;
+}
+
 // -------- Bank service --------
 
 std::expected<ShopReceipt, ShopError> ShopSystem::depositGold(const ShopContext& ctx,

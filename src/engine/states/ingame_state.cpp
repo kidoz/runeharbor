@@ -396,8 +396,14 @@ std::optional<GameStateId> InGameState::update()
             (void)shopWindow_.handleClick(ms.x, ms.y);
         }
 
-        for (const SDL_Scancode key : {SDL_SCANCODE_ESCAPE, SDL_SCANCODE_UP, SDL_SCANCODE_DOWN,
-                                       SDL_SCANCODE_RETURN, SDL_SCANCODE_SPACE, SDL_SCANCODE_TAB})
+        // Forward the navigation keys plus the family-specific service shortcuts
+        // (Temple: H/R/D, Training: T). The shop is modal — handleKey() consumes
+        // every key it's given and returns true — so the global in-game handlers
+        // below are never reached while the shop is open.
+        for (const SDL_Scancode key :
+             {SDL_SCANCODE_ESCAPE, SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_RETURN,
+              SDL_SCANCODE_SPACE, SDL_SCANCODE_TAB, SDL_SCANCODE_H, SDL_SCANCODE_R, SDL_SCANCODE_D,
+              SDL_SCANCODE_T})
         {
             if (ctx.isKeyPressed(key))
             {
