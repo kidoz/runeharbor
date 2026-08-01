@@ -523,6 +523,10 @@ int CombatSystem::calculateMonsterDamage(int baseDamage, DamageElement type,
         resistance = ch.bodyResistance;
         break;
     case DamageElement::Physical:
+        // Approximation: MM7 treats armor class as a hit-avoidance/damage-
+        // reduction hybrid (see docs/combat-system.md). RuneHarbor reuses the
+        // elemental-resistance pipeline for physical damage, so AC here acts
+        // as a flat damage-reduction percentage rather than its RE role.
         resistance = ch.armorClass;
         break;
     default:

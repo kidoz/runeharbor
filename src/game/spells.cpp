@@ -193,7 +193,12 @@ SpellResult SpellSystem::castDamageSpell(int characterIndex, int spellId, Monste
     // Check resistance
     // DamageElement values match SpellSchool for elemental schools
     DamageElement dmgType = static_cast<DamageElement>(static_cast<int>(spell->school));
-    // Resistance roll: target has X% chance to resist
+    // Spell resistance uses a BINARY roll (X% chance to halve damage), unlike
+    // melee which applies a flat (100 - resistance)% reduction every time (see
+    // CombatSystem::calculateDamage). The RE model in docs/combat-system.md
+    // uses the same resistance pipeline for both; this split means a 50% fire
+    // resistance always halves melee fire damage but only halves spell fire
+    // damage ~50% of the time. Aligning the two is a follow-up.
     int resistChance = 0;
     switch (dmgType)
     {
