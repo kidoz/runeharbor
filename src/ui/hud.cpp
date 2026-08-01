@@ -399,7 +399,7 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
             renderer.drawFilledRect(spBarX, spBarY + (spBarH - spFill), spBarW, spFill, 40, 80, 220,
                                     220);
         }
-        renderer.drawRect(hpBarX, spBarY, hpBarW, hpBarH, 80, 80, 80, 255);
+        renderer.drawRect(spBarX, spBarY, spBarW, spBarH, 80, 80, 80, 255);
 
         // HP/SP numbers
         if (sdl)
@@ -530,7 +530,6 @@ void HUD::renderMinimap(graphics::IRenderer& renderer, const graphics::DebugText
         const int arrowLen = static_cast<int>(8 * scale);
         const int ax = cx + static_cast<int>(std::cos(yawRad) * arrowLen);
         const int ay = cy + static_cast<int>(std::sin(yawRad) * arrowLen);
-        SDL_Renderer* sdl = renderer.getSDLRenderer();
         if (sdl)
         {
             SDL_SetRenderDrawColor(sdl, 255, 255, 100, 255);
