@@ -152,8 +152,9 @@ void SpellbookWidget::render(graphics::IRenderer& renderer, const graphics::Debu
         }
         const std::string cost = std::format("{}", row.manaCost);
         text.drawText(sdl, textX, textY, 1, 230, 230, 230, row.name);
-        text.drawText(sdl, bounds_.x + bounds_.width - 24 - static_cast<int>(cost.size()) * 8,
-                      textY, 1, 120, 180, 255, cost);
+        // Right-align the mana cost, measured (not a fixed 8px glyph advance).
+        const int costW = text.measureTextWidth(cost, 1);
+        text.drawText(sdl, bounds_.x + bounds_.width - 24 - costW, textY, 1, 120, 180, 255, cost);
         rowY_.push_back(textY);
         textY += rowHeight_;
     }
