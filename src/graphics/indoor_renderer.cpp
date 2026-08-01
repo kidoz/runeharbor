@@ -902,9 +902,9 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                                static_cast<int>(indoorVertices_.size()), indices.data(),
                                static_cast<int>(indices.size()));
 
-            // Additive light polygon pass — now redundant: the base pass computes
-            // per-vertex dynamic lighting directly (see the vertex loop above), so
-            // the additive overlay would double-count it. Kept as a no-op for now.
+            // Additive light polygon pass — now redundant: the base pass already
+            // includes centroid dynamic lighting, so the overlay would double-count
+            // it. Kept as a no-op for now.
             if (false && (face.attributes & kNoLightFaceBit) == 0 && texture != nullptr)
             {
                 // We re-render the same geometry but with SDL_BLENDMODE_ADD
