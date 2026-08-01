@@ -45,12 +45,6 @@ class InventoryWidget : public Widget
         bgW_ = w;
         bgH_ = h;
     }
-    void setCharacterBody(void* tex, int w, int h)
-    {
-        bodyTexture_ = tex;
-        bodyW_ = w;
-        bodyH_ = h;
-    }
 
   private:
     void* getCachedTexture(const std::string& name, int& w, int& h);
@@ -76,9 +70,6 @@ class InventoryWidget : public Widget
 
     void* bgTexture_ = nullptr;
     int bgW_ = 0, bgH_ = 0;
-
-    void* bodyTexture_ = nullptr;
-    int bodyW_ = 0, bodyH_ = 0;
 };
 
 } // namespace runeharbor::ui
