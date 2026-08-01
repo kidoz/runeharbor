@@ -495,3 +495,70 @@ TEST_CASE("worstActiveCondition follows the MM7 priority order", "[character][te
     c.setCondition(ConditionIndex::Poison3);
     REQUIRE(c.worstActiveCondition() == ConditionIndex::Poison3);
 }
+
+// ---------------------------------------------------------------------------
+// Training service (docs/re/35-training-and-travel.md section 1)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("trainMember refuses a character below the XP threshold", "[shop][training]")
+{
+    Party party;
+    party.setActiveMemberIndex(0);
+    party.setGold(100000);
+    party.member(0).level = 1;
+    party.member(0).experience = 0; // not enough to level
+
+    auto shop = makeShop(BuildingType::Training, 1.0f);
+    ShopContext ctx{&shop, &party, nullptr};
+
+    ShopSystem shopSystem;
+    auto result = shopSystem.trainMember(ctx, 0);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error() == ShopError::NothingToLearn);
+    REQUIRE(party.member(0).level == 1); // unchanged
+    REQUIRE(party.gold() == 100000);     // unchanged
+}
+
+TEST_CASE("trainMember grants a level and deducts gold when eligible", "[shop][training]")
+{
+    Party party;
+    party.setActiveMemberIndex(0);
+    party.setGold(100000);
+    Character& c = party.member(0);
+    c.level = 1;
+    c.experience = c.xpRequiredForNextLevel(); // exactly enough to level
+    c.maxHitPoints = 50;
+    c.hitPoints = 50;
+
+    auto shop = makeShop(BuildingType::Training, 1.0f);
+    ShopContext ctx{&shop, &party, nullptr};
+
+    const int costBefore = ShopSystem::trainingCost(c, 1.0f, 0);
+    ShopSystem shopSystem;
+    auto result = shopSystem.trainMember(ctx, 0);
+    REQUIRE(result.has_value());
+    REQUIRE(result->goldSpent == costBefore);
+    REQUIRE(party.member(0).level == 2);
+    REQUIRE(party.gold() == 100000 - costBefore);
+}
+
+TEST_CASE("training cost scales with level", "[shop][training]")
+{
+    Character low;
+    low.level = 1;
+    low.charClass = CharacterClass::Knight; // tier 1
+    Character high;
+    high.level = 10;
+    high.charClass = CharacterClass::Knight;
+
+    const int lowCost = ShopSystem::trainingCost(low, 1.0f, 0);
+    const int highCost = ShopSystem::trainingCost(high, 1.0f, 0);
+    REQUIRE(highCost > lowCost); // level 10 trains cost more than level 1
+}
+
+TEST_CASE("travel cost is flat per trip (stables > boats)", "[shop][travel]")
+{
+    const int stablesCost = ShopSystem::travelCost(BuildingType::Stables, 1.0f, 0);
+    const int boatCost = ShopSystem::travelCost(BuildingType::Boat, 1.0f, 0);
+    REQUIRE(stablesCost > boatCost); // 50 vs 25 base
+}

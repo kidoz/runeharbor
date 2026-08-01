@@ -44,7 +44,7 @@ BuildingType buildingTypeFromName(std::string_view typeText)
         return BuildingType::Stables;
     if (t == "boats" || t == "boat" || t == "boa")
         return BuildingType::Boat;
-    if (t == "training" || t == "training grounds")
+    if (t == "training" || t == "training grounds" || t == "tra")
         return BuildingType::Training;
     if (t == "tavern" || t == "tav")
         return BuildingType::Tavern;
@@ -52,8 +52,6 @@ BuildingType buildingTypeFromName(std::string_view typeText)
         return BuildingType::Bank;
     if (t == "town hall" || t == "tow")
         return BuildingType::TownHall;
-    if (t == "travel" || t == "tra")
-        return BuildingType::Travel;
     if (t == "fire guild" || t == "fir")
         return BuildingType::FireGuild;
     if (t == "air guild" || t == "air")
@@ -99,7 +97,6 @@ ShopFamily shopFamily(BuildingType type)
         return ShopFamily::Training;
     case BuildingType::Stables:
     case BuildingType::Boat:
-    case BuildingType::Travel:
         return ShopFamily::Travel;
     // Guilds/Tavern/Bank/TownHall are out of scope for the first playable
     // economy pass (see docs/re/29-shops-and-economy.md, "Out of scope").

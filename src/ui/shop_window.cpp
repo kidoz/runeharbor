@@ -106,6 +106,15 @@ void ShopWindow::show(const formats::TwoDEventEntry& building,
     {
         buildBuyList(items);
     }
+    // Stables/boats: build the destination list for this building's map.
+    if (family_ == game::ShopFamily::Travel)
+    {
+        travelDestinations_ = game::destinationsForBuilding(building.mapId, buildingType_);
+    }
+    else
+    {
+        travelDestinations_.clear();
+    }
 }
 
 void ShopWindow::close()
@@ -240,6 +249,20 @@ bool ShopWindow::handleClick(int mouseX, int mouseY)
                 else if (btn.label == "Close" || btn.label == "Exit")
                     close();
             }
+            else if (family_ == game::ShopFamily::Training)
+            {
+                if (btn.label == "Train")
+                    doTrain();
+                else if (btn.label == "Close" || btn.label == "Exit")
+                    close();
+            }
+            else if (family_ == game::ShopFamily::Travel)
+            {
+                if (btn.label == "Travel")
+                    doTravel();
+                else if (btn.label == "Close" || btn.label == "Exit")
+                    close();
+            }
             else
             {
                 if (btn.label == "Buy/Do")
@@ -316,6 +339,54 @@ bool ShopWindow::handleKey(int scancode)
             return true;
         }
         return true; // modal: consume all other keys
+    }
+
+    // Training mode: Up/Down selects a member, Enter/T trains.
+    if (family_ == game::ShopFamily::Training)
+    {
+        if (scancode == SDL_SCANCODE_DOWN)
+        {
+            if (listSelection_ < game::kPartySize - 1)
+                listSelection_++;
+            return true;
+        }
+        if (scancode == SDL_SCANCODE_UP)
+        {
+            if (listSelection_ > 0)
+                listSelection_--;
+            return true;
+        }
+        if (scancode == SDL_SCANCODE_T || scancode == SDL_SCANCODE_RETURN ||
+            scancode == SDL_SCANCODE_SPACE)
+        {
+            doTrain();
+            return true;
+        }
+        return true;
+    }
+
+    // Travel mode: Up/Down selects a destination, Enter travels.
+    if (family_ == game::ShopFamily::Travel)
+    {
+        const int destCount = static_cast<int>(travelDestinations_.size());
+        if (scancode == SDL_SCANCODE_DOWN)
+        {
+            if (listSelection_ < destCount - 1)
+                listSelection_++;
+            return true;
+        }
+        if (scancode == SDL_SCANCODE_UP)
+        {
+            if (listSelection_ > 0)
+                listSelection_--;
+            return true;
+        }
+        if (scancode == SDL_SCANCODE_RETURN || scancode == SDL_SCANCODE_SPACE)
+        {
+            doTravel();
+            return true;
+        }
+        return true;
     }
 
     if (scancode == SDL_SCANCODE_TAB)
@@ -487,16 +558,93 @@ void ShopWindow::doDonate()
     }
 }
 
+void ShopWindow::doTrain()
+{
+    if (party_ == nullptr)
+        return;
+
+    formats::TwoDEventEntry building;
+    building.id = 0;
+    building.buildingType = buildingType_;
+    building.buyMultiplier = buyMultiplier_;
+    game::ShopContext ctx{&building, party_, inventory_};
+
+    const int member = std::clamp(listSelection_, 0, game::kPartySize - 1);
+    auto result = shop_.trainMember(ctx, member);
+    if (onStatus_)
+    {
+        onStatus_(result.has_value()
+                      ? std::format("Trained member {} for {} gold (now level {}).", member + 1,
+                                    result->goldSpent, party_->member(member).level)
+                      : std::format("Cannot train: {}.", game::shopErrorText(result.error())));
+    }
+}
+
+void ShopWindow::doTravel()
+{
+    if (party_ == nullptr)
+        return;
+    if (listSelection_ < 0 || listSelection_ >= static_cast<int>(travelDestinations_.size()))
+    {
+        if (onStatus_)
+            onStatus_("No destination selected.");
+        return;
+    }
+
+    const int discount = party_ ? game::ShopSystem::merchantDiscountPct(
+                                      party_->member(std::clamp(party_->activeMemberIndex(), 0, 3)),
+                                      party_->reputation())
+                                : 0;
+    const int cost = game::ShopSystem::travelCost(buildingType_, buyMultiplier_, discount);
+    if (party_->gold() < cost)
+    {
+        if (onStatus_)
+            onStatus_(std::format("Cannot travel: {}.",
+                                  game::shopErrorText(game::ShopError::InsufficientGold)));
+        return;
+    }
+    (void)party_->spendGold(cost);
+
+    const auto& dest = travelDestinations_[listSelection_];
+    if (onTravelRequest_)
+    {
+        TravelRequest req;
+        req.mapName = dest.mapName;
+        req.arrivalX = dest.arrivalX;
+        req.arrivalY = dest.arrivalY;
+        req.arrivalZ = dest.arrivalZ;
+        req.arrivalFacing = dest.arrivalFacing;
+        req.travelDays = dest.travelDays;
+        onTravelRequest_(req);
+    }
+    if (onStatus_)
+    {
+        onStatus_(std::format("Traveling to {} ({} gold, {} days).", dest.displayName, cost,
+                              dest.travelDays));
+    }
+    close(); // leave the shop on departure
+}
+
 void ShopWindow::render(graphics::IRenderer& renderer, const graphics::DebugText& debugText,
                         int viewportW, int viewportH)
 {
     if (!open_)
         return;
 
-    // Temples render their own roster + service-button layout.
+    // Temples/training/travel render their own roster + service-button layout.
     if (family_ == game::ShopFamily::Temple)
     {
         renderTemple(renderer, debugText);
+        return;
+    }
+    if (family_ == game::ShopFamily::Training)
+    {
+        renderTraining(renderer, debugText);
+        return;
+    }
+    if (family_ == game::ShopFamily::Travel)
+    {
+        renderTravel(renderer, debugText);
         return;
     }
 
@@ -740,6 +888,174 @@ void ShopWindow::renderTemple(graphics::IRenderer& renderer, const graphics::Deb
     debugText.drawText(
         sdl, kWindowX + kPadding, hintY, kTextScale, 160, 160, 170,
         "Up/Dn: select member   H: heal all   R: resurrect   D: donate   Esc: close");
+}
+
+void ShopWindow::renderTraining(graphics::IRenderer& renderer, const graphics::DebugText& debugText)
+{
+    const int viewportW = 640;
+    const int viewportH = 480;
+
+    renderer.drawFilledRect(0, 0, viewportW, viewportH, 0, 0, 0, 140);
+    renderer.drawFilledRect(kWindowX, kWindowY, kWindowW, kWindowH, 24, 26, 34, 235);
+    renderer.drawRect(kWindowX, kWindowY, kWindowW, kWindowH, 130, 108, 60, 255);
+    renderer.drawRect(kWindowX + 1, kWindowY + 1, kWindowW - 2, kWindowH - 2, 90, 78, 44, 210);
+
+    SDL_Renderer* sdl = renderer.getSDLRenderer();
+    if (sdl == nullptr)
+        return;
+
+    int y = kWindowY + kPadding;
+    if (!shopName_.empty())
+    {
+        debugText.drawText(sdl, kWindowX + kPadding, y, kTitleScale, 255, 220, 120, shopName_);
+        y += debugText.lineHeight(kTitleScale) + 2;
+    }
+    if (party_ != nullptr)
+    {
+        const std::string gold = std::format("Gold: {}", party_->gold());
+        debugText.drawText(sdl, kWindowX + kWindowW - kPadding - 120, kWindowY + kPadding,
+                           kTextScale, 255, 215, 0, gold);
+    }
+    y += 2;
+    renderer.drawFilledRect(kWindowX + kPadding, y, kWindowW - kPadding * 2, 1, 110, 90, 50, 220);
+    y += kPadding;
+
+    // Train + Close buttons.
+    buttonRects_.clear();
+    const int by = y;
+    auto addBtn = [&](int x, int w, std::string label, uint8_t r, uint8_t g, uint8_t b)
+    {
+        renderer.drawFilledRect(x, by, w, kButtonHeight, r, g, b, 220);
+        renderer.drawRect(x, by, w, kButtonHeight, 210, 200, 160, 255);
+        debugText.drawText(sdl, x + 6, by + 4, kTextScale, 240, 240, 240, label);
+        buttonRects_.push_back({x, by, w, kButtonHeight, std::move(label)});
+    };
+    addBtn(kWindowX + kPadding, kButtonWidth, "Train", 60, 90, 130);
+    addBtn(kWindowX + kWindowW - kPadding - kButtonWidth, kButtonWidth, "Close", 90, 40, 40);
+    y = by + kButtonHeight + kPadding;
+
+    // Party roster with level / XP-to-go / cost / can-level indicator.
+    const int rosterX = kWindowX + kPadding;
+    const int rosterW = kWindowW - kPadding * 2;
+    renderer.drawRect(rosterX, y, rosterW, kRowHeight * (game::kPartySize + 1) + 4, 70, 60, 40,
+                      200);
+    y += 2;
+    debugText.drawText(sdl, rosterX + 4, y, kTextScale, 200, 200, 160,
+                       "  Member             Lvl   XP / Need     Cost     Ready");
+    y += kRowHeight + 2;
+
+    const int negotiatorIdx =
+        party_ ? std::clamp(party_->activeMemberIndex(), 0, game::kPartySize - 1) : 0;
+    const int discount = party_ ? game::ShopSystem::merchantDiscountPct(
+                                      party_->member(negotiatorIdx), party_->reputation())
+                                : 0;
+
+    for (int i = 0; i < game::kPartySize; i++)
+    {
+        const bool selected = (i == listSelection_);
+        if (selected)
+            renderer.drawFilledRect(rosterX + 2, y - 1, rosterW - 4, kRowHeight, 70, 60, 30, 220);
+
+        const auto& m = party_->member(i);
+        const int need = m.xpRequiredForNextLevel();
+        const bool ready = m.canLevelUp();
+        const int cost = game::ShopSystem::trainingCost(m, buyMultiplier_, discount);
+        const std::string line =
+            std::format("  #{} {:<14}{:>3}   {}/{}   {:>5}   {}", i + 1, "", m.level, m.experience,
+                        need, cost, ready ? "YES" : "no");
+        debugText.drawText(sdl, rosterX + 4, y, kTextScale, selected ? 255 : 220,
+                           selected ? 230 : 220, selected ? 170 : 200, line);
+        y += kRowHeight;
+    }
+
+    const int hintY = kWindowY + kWindowH - kPadding - debugText.lineHeight(kTextScale);
+    debugText.drawText(sdl, kWindowX + kPadding, hintY, kTextScale, 160, 160, 170,
+                       "Up/Dn: select member   T/Enter: train   Esc: close");
+}
+
+void ShopWindow::renderTravel(graphics::IRenderer& renderer, const graphics::DebugText& debugText)
+{
+    const int viewportW = 640;
+    const int viewportH = 480;
+
+    renderer.drawFilledRect(0, 0, viewportW, viewportH, 0, 0, 0, 140);
+    renderer.drawFilledRect(kWindowX, kWindowY, kWindowW, kWindowH, 20, 28, 34, 235);
+    renderer.drawRect(kWindowX, kWindowY, kWindowW, kWindowH, 130, 108, 60, 255);
+    renderer.drawRect(kWindowX + 1, kWindowY + 1, kWindowW - 2, kWindowH - 2, 90, 78, 44, 210);
+
+    SDL_Renderer* sdl = renderer.getSDLRenderer();
+    if (sdl == nullptr)
+        return;
+
+    int y = kWindowY + kPadding;
+    if (!shopName_.empty())
+    {
+        debugText.drawText(sdl, kWindowX + kPadding, y, kTitleScale, 255, 220, 120, shopName_);
+        y += debugText.lineHeight(kTitleScale) + 2;
+    }
+    if (party_ != nullptr)
+    {
+        const std::string gold = std::format("Gold: {}", party_->gold());
+        debugText.drawText(sdl, kWindowX + kWindowW - kPadding - 120, kWindowY + kPadding,
+                           kTextScale, 255, 215, 0, gold);
+    }
+    y += 2;
+    renderer.drawFilledRect(kWindowX + kPadding, y, kWindowW - kPadding * 2, 1, 110, 90, 50, 220);
+    y += kPadding;
+
+    // Travel + Close buttons.
+    buttonRects_.clear();
+    const int by = y;
+    auto addBtn = [&](int x, int w, std::string label, uint8_t r, uint8_t g, uint8_t b)
+    {
+        renderer.drawFilledRect(x, by, w, kButtonHeight, r, g, b, 220);
+        renderer.drawRect(x, by, w, kButtonHeight, 210, 200, 160, 255);
+        debugText.drawText(sdl, x + 6, by + 4, kTextScale, 240, 240, 240, label);
+        buttonRects_.push_back({x, by, w, kButtonHeight, std::move(label)});
+    };
+    addBtn(kWindowX + kPadding, kButtonWidth, "Travel", 60, 110, 130);
+    addBtn(kWindowX + kWindowW - kPadding - kButtonWidth, kButtonWidth, "Close", 90, 40, 40);
+    y = by + kButtonHeight + kPadding;
+
+    const int listX = kWindowX + kPadding;
+    const int listW = kWindowW - kPadding * 2;
+
+    if (travelDestinations_.empty())
+    {
+        debugText.drawText(sdl, listX + 4, y, kTextScale, 200, 200, 200,
+                           "No destinations available from here.");
+    }
+    else
+    {
+        const int negotiatorIdx =
+            party_ ? std::clamp(party_->activeMemberIndex(), 0, game::kPartySize - 1) : 0;
+        const int discount = party_ ? game::ShopSystem::merchantDiscountPct(
+                                          party_->member(negotiatorIdx), party_->reputation())
+                                    : 0;
+        const int cost = game::ShopSystem::travelCost(buildingType_, buyMultiplier_, discount);
+
+        renderer.drawRect(listX, y, listW, kRowHeight * 2 + 4, 70, 60, 40, 200);
+        y += 2;
+        debugText.drawText(sdl, listX + 4, y, kTextScale, 200, 200, 160,
+                           std::format("  Destination              Days   Cost: {}g each", cost));
+        y += kRowHeight + 2;
+
+        for (int i = 0; i < static_cast<int>(travelDestinations_.size()); i++)
+        {
+            const bool selected = (i == listSelection_);
+            if (selected)
+                renderer.drawFilledRect(listX + 2, y - 1, listW - 4, kRowHeight, 70, 60, 30, 220);
+            const auto& d = travelDestinations_[i];
+            const std::string line = std::format("  {:<22}{:>3} days", d.displayName, d.travelDays);
+            debugText.drawText(sdl, listX + 4, y, kTextScale, selected ? 255 : 220,
+                               selected ? 230 : 220, selected ? 170 : 200, line);
+            y += kRowHeight;
+        }
+    }
+
+    const int hintY = kWindowY + kWindowH - kPadding - debugText.lineHeight(kTextScale);
+    debugText.drawText(sdl, kWindowX + kPadding, hintY, kTextScale, 160, 160, 170,
+                       "Up/Dn: select destination   Enter: travel   Esc: close");
 }
 
 } // namespace runeharbor::ui

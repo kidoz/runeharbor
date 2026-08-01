@@ -547,6 +547,76 @@ std::expected<ShopReceipt, ShopError> ShopSystem::donate(const ShopContext& ctx)
     return receipt;
 }
 
+// -------- Training service --------
+
+int ShopSystem::trainingCost(const Character& member, float shopMult, int discountPct)
+{
+    // FUN_004B4673 (0x4B4724): base = round(level * shopMult * classTier),
+    // then the merchant-discount finalizer. classTier = ((class % 4) + 1),
+    // clamped to {1,2,3} (tier 4 -> 3).
+    const float safeMult = shopMult > 0.0f ? shopMult : 1.0f;
+    int tier = (static_cast<int>(member.charClass) % 4) + 1;
+    if (tier > 3)
+        tier = 3;
+    const int base =
+        floorToInt(static_cast<float>(member.level) * safeMult * static_cast<float>(tier));
+    int result = base * (100 - std::clamp(discountPct, 0, 100)) / 100;
+    result = std::max(result, base / 3);
+    return std::max(result, 1);
+}
+
+std::expected<ShopReceipt, ShopError> ShopSystem::trainMember(const ShopContext& ctx,
+                                                              int characterIndex) const
+{
+    if (ctx.building == nullptr || ctx.party == nullptr)
+    {
+        return std::unexpected(ShopError::InvalidArgument);
+    }
+    if (characterIndex < 0 || characterIndex >= kPartySize)
+    {
+        return std::unexpected(ShopError::InvalidArgument);
+    }
+
+    Character& member = ctx.party->member(characterIndex);
+
+    // XP gate: training is the level-up button, not an XP grant.
+    if (!member.canLevelUp())
+    {
+        return std::unexpected(ShopError::NothingToLearn);
+    }
+
+    const Character& negotiator = activeCharacter(*ctx.party);
+    const int discount = merchantDiscountPct(negotiator, ctx.party->reputation());
+    const int cost = trainingCost(member, ctx.building->buyMultiplier, discount);
+
+    if (ctx.party->gold() < cost)
+    {
+        return std::unexpected(ShopError::InsufficientGold);
+    }
+
+    (void)ctx.party->spendGold(cost);
+    member.levelUp();
+
+    ShopReceipt receipt;
+    receipt.goldSpent = cost;
+    receipt.characterIndex = characterIndex;
+    receipt.building = ctx.building->buildingType;
+    return receipt;
+}
+
+// -------- Travel service --------
+
+int ShopSystem::travelCost(BuildingType type, float shopMult, int discountPct)
+{
+    // FUN_004B68A6 (0x4B690F): flat (Stables?50:25) * shopMult, then finalizer.
+    const float safeMult = shopMult > 0.0f ? shopMult : 1.0f;
+    const int baseRate = (type == BuildingType::Stables) ? 50 : 25;
+    const int base = floorToInt(static_cast<float>(baseRate) * safeMult);
+    int result = base * (100 - std::clamp(discountPct, 0, 100)) / 100;
+    result = std::max(result, base / 3);
+    return std::max(result, 1);
+}
+
 const Character& ShopSystem::activeCharacter(const Party& party)
 {
     int idx = party.activeMemberIndex();
@@ -597,6 +667,10 @@ std::string_view shopErrorText(ShopError error)
         return "No one needs healing";
     case ShopError::NothingToRaise:
         return "That character is not dead";
+    case ShopError::NothingToLearn:
+        return "Not enough experience to train";
+    case ShopError::NoSuchDestination:
+        return "No such destination";
     }
     return "Unknown error";
 }

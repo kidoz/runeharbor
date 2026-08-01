@@ -89,6 +89,9 @@ class InGameState : public IGameState
     bool targetingActive_ = false;
     int selectedSpellId_ = 0;
     game::SpellTarget pendingTargetType_ = game::SpellTarget::SingleEnemy;
+
+    // Set by the travel callback; update() transitions to Loading next frame.
+    bool pendingTravel_ = false;
 };
 
 } // namespace runeharbor::engine

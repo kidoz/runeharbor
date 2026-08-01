@@ -109,6 +109,7 @@ game_sources = files(
     'game/quest_log.cpp',
     'game/save_game.cpp',
     'game/shop_system.cpp',
+    'game/travel_destinations.cpp',
 )
 
 # Audio sources

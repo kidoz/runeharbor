@@ -19,6 +19,7 @@
 #include "../formats/two_d_events_parser.hpp"
 #include "../game/building_type.hpp"
 #include "../game/shop_system.hpp"
+#include "../game/travel_destinations.hpp"
 
 namespace runeharbor::graphics
 {
@@ -80,6 +81,23 @@ class ShopWindow
         onStatus_ = std::move(cb);
     }
 
+    // Fired when the player picks a travel destination. The host advances the
+    // game clock and triggers the map transition (the shop system itself can't
+    // reach the transition machinery).
+    struct TravelRequest
+    {
+        std::string mapName;
+        float arrivalX = 0.0f;
+        float arrivalY = 0.0f;
+        float arrivalZ = 0.0f;
+        float arrivalFacing = 0.0f;
+        int travelDays = 1;
+    };
+    void setTravelRequestCallback(std::function<void(const TravelRequest&)> cb)
+    {
+        onTravelRequest_ = std::move(cb);
+    }
+
     // Input. Returns true if the event was consumed (the window is modal).
     bool handleClick(int mouseX, int mouseY);
     bool handleKey(int scancode);
@@ -126,11 +144,20 @@ class ShopWindow
     void doHeal();
     void doResurrect();
     void doDonate();
+    // Training + travel handlers.
+    void doTrain();
+    void doTravel();
     void refreshLists();
     void clampSelection();
 
-    // Temple-mode render helper (party roster + service buttons).
+    // Family-mode render helpers (party roster / list + service buttons).
     void renderTemple(graphics::IRenderer& renderer, const graphics::DebugText& debugText);
+    void renderTraining(graphics::IRenderer& renderer, const graphics::DebugText& debugText);
+    void renderTravel(graphics::IRenderer& renderer, const graphics::DebugText& debugText);
+
+    // Travel destinations offered by the current building (built on show()).
+    std::vector<game::TravelDestination> travelDestinations_;
+    std::function<void(const TravelRequest&)> onTravelRequest_;
 
     // True if an item's equipStat is sold by the given building type.
     static bool itemFitsShop(game::BuildingType type, const std::string& equipStat);

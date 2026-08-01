@@ -45,6 +45,9 @@ enum class ShopError
     // Temple service errors.
     NothingToHeal,  // nobody in the party needs healing/curing
     NothingToRaise, // resurrect target is not dead/stoned/eradicated
+    // Training / travel errors.
+    NothingToLearn,    // character lacks the XP to level up
+    NoSuchDestination, // travel building has no destinations / bad index
 };
 
 // Outcome of a successful transaction.
@@ -140,6 +143,23 @@ class ShopSystem
     // Donate a flat int(templeVal) gold for a small reputation gain (mode 11).
     // The escalating-stat-buff cascade is out of scope for this pass.
     std::expected<ShopReceipt, ShopError> donate(const ShopContext& ctx) const;
+
+    // -------- Training service (RE-derived, see docs/re/35-...) --------
+
+    // Level-up training cost (FUN_004B4673): round(level * shopMult * classTier),
+    // then the merchant-discount finalizer. classTier is 1/2/3 by promotion.
+    static int trainingCost(const Character& member, float shopMult, int discountPct);
+
+    // Spend gold to level up one character (FUN_004B4673). Requires the
+    // character to already have enough XP (canLevelUp); training is the
+    // level-up button, not an XP grant.
+    std::expected<ShopReceipt, ShopError> trainMember(const ShopContext& ctx,
+                                                      int characterIndex) const;
+
+    // -------- Travel service (stables/boats, FUN_004B68A6) --------
+
+    // Flat per-trip cost: (Stables?50:25) * shopMult, then the finalizer.
+    static int travelCost(BuildingType type, float shopMult, int discountPct);
 
   private:
     // Resolves the active character for merchant-skill purposes: the party's

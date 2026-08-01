@@ -42,8 +42,11 @@ enum class BuildingType : int16_t
     Temple = 0x17,
     Stables = 0x1B,
     Boat = 0x1C,
-    Travel = 0x1E,
-    Training = 0x1F, // "Training Grounds" — used by the 89-row table
+    // RE correction (docs/re/35): token `tra` / 0x1E is the Training Ground
+    // (level-up service). There is no separate "Travel" building type —
+    // stables (0x1B) and boats (0x1C) ARE the travel service. The prior
+    // Travel=0x1E / Training=0x1F was swapped relative to the binary.
+    Training = 0x1E, // "Training Grounds" — level-up for gold (FUN_004B4673)
 };
 
 // Converts the `2dEvents.txt` "Type" text to a typed code. Returns None for

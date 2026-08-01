@@ -169,6 +169,7 @@ test_game_sources = files(
     '../src/game/quest_log.cpp',
     '../src/game/save_game.cpp',
     '../src/game/shop_system.cpp',
+    '../src/game/travel_destinations.cpp',
 )
 
 test_ui_sources = files(

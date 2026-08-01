@@ -164,6 +164,29 @@ void InGameState::enter()
                 ctx.shared->statusMessage = message;
             }
         });
+    // Travel: advance the game clock by the trip duration, then request a map
+    // transition to the destination (FUN_004B68A6 advances time then drives the
+    // map-load pipeline directly).
+    shopWindow_.setTravelRequestCallback(
+        [this](const ui::ShopWindow::TravelRequest& req)
+        {
+            if (!ctx.shared || !ctx.shared->gameWorld)
+                return;
+            // Advance the calendar by travelDays * 24 hours.
+            ctx.shared->gameWorld->advanceTime(static_cast<int64_t>(req.travelDays) * 24 * 60);
+            // Hand off the destination to the loading state.
+            ctx.shared->startupMapName = req.mapName;
+            ctx.shared->startupPreferOutdoor =
+                (req.mapName.size() >= 4 &&
+                 req.mapName.compare(req.mapName.size() - 4, 4, ".odm") == 0);
+            ctx.shared->autoLoadMap = true;
+            ctx.shared->arrivalOverrideActive = true;
+            ctx.shared->arrivalX = req.arrivalX;
+            ctx.shared->arrivalY = req.arrivalY;
+            ctx.shared->arrivalZ = req.arrivalZ;
+            ctx.shared->arrivalYaw = req.arrivalFacing;
+            pendingTravel_ = true;
+        });
     inventory_.setStatusCallback(
         [this](const std::string& message)
         {
@@ -661,6 +684,13 @@ std::optional<GameStateId> InGameState::update()
             return GameStateId::Loading;
         }
         statusLine_ = "Load failed (slot 1)";
+    }
+
+    // A travel service requested a map transition; hand off to the Loading state.
+    if (pendingTravel_)
+    {
+        pendingTravel_ = false;
+        return GameStateId::Loading;
     }
 
     // HUD portrait click: select the active party member. Only when no panel is
