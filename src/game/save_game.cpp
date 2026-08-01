@@ -16,6 +16,7 @@
 #include "../formats/game_lod_archive.hpp"
 #include "game_world.hpp"
 #include "inventory.hpp"
+#include "quest_log.hpp"
 
 namespace runeharbor::game
 {
@@ -66,7 +67,7 @@ static_assert(sizeof(SaveArchiveDataHeader) == 8);
 static_assert(sizeof(SaveSlotHeaderBin) == 100);
 
 constexpr uint32_t kInventoryMagic = 0x56494852u; // "RHIV"
-constexpr uint32_t kInventoryVersion = 1;
+constexpr uint32_t kInventoryVersion = 2;
 constexpr uint32_t kTimerRuntimeMagic = 0x54525645u; // "EVRT"
 constexpr uint32_t kTimerRuntimeVersion = 1;
 constexpr size_t kTimerBinSize = 1008;
@@ -576,10 +577,15 @@ std::vector<uint8_t> serializeInventoryState(const Inventory& inventory)
     const auto& inventories = inventory.inventories();
     for (const auto& charInv : inventories)
     {
+        // v2: each array is count-prefixed so a reader can validate/skip surplus
+        // entries if EquipSlot::Count or kBackpackSlots ever drifts between the
+        // saving and loading build.
+        appendU32(out, static_cast<uint32_t>(charInv.equipped.size()));
         for (const auto& item : charInv.equipped)
         {
             appendInventoryItem(out, item);
         }
+        appendU32(out, static_cast<uint32_t>(charInv.backpack.size()));
         for (const auto& item : charInv.backpack)
         {
             appendInventoryItem(out, item);
@@ -603,7 +609,7 @@ bool deserializeInventoryState(const std::vector<uint8_t>& data, Inventory& inve
     {
         return false;
     }
-    if (magic != kInventoryMagic || version != kInventoryVersion)
+    if (magic != kInventoryMagic)
     {
         return false;
     }
@@ -611,19 +617,40 @@ bool deserializeInventoryState(const std::vector<uint8_t>& data, Inventory& inve
     std::array<CharacterInventory, 4> restored = {};
     for (auto& charInv : restored)
     {
-        for (auto& item : charInv.equipped)
+        // v1 wrote fixed-size arrays with no count; v2+ prefixes each with a
+        // u32 count. Read the count, populate up to the fixed array size, and
+        // skip any surplus so the stream stays synchronized.
+        const bool countPrefixed = version >= 2;
+        uint32_t equipCount = countPrefixed ? 0 : static_cast<uint32_t>(charInv.equipped.size());
+        if (countPrefixed && !popU32(ptr, end, equipCount))
+            return false;
+        uint32_t toRead = std::min(equipCount, static_cast<uint32_t>(charInv.equipped.size()));
+        for (uint32_t i = 0; i < toRead; i++)
         {
-            if (!popInventoryItem(ptr, end, item))
-            {
+            if (!popInventoryItem(ptr, end, charInv.equipped[i]))
                 return false;
-            }
         }
-        for (auto& item : charInv.backpack)
+        for (uint32_t i = toRead; i < equipCount; i++)
         {
-            if (!popInventoryItem(ptr, end, item))
-            {
+            Item dummy;
+            if (!popInventoryItem(ptr, end, dummy))
                 return false;
-            }
+        }
+
+        uint32_t backpackCount = countPrefixed ? 0 : static_cast<uint32_t>(charInv.backpack.size());
+        if (countPrefixed && !popU32(ptr, end, backpackCount))
+            return false;
+        toRead = std::min(backpackCount, static_cast<uint32_t>(charInv.backpack.size()));
+        for (uint32_t i = 0; i < toRead; i++)
+        {
+            if (!popInventoryItem(ptr, end, charInv.backpack[i]))
+                return false;
+        }
+        for (uint32_t i = toRead; i < backpackCount; i++)
+        {
+            Item dummy;
+            if (!popInventoryItem(ptr, end, dummy))
+                return false;
         }
     }
 
@@ -668,7 +695,8 @@ std::string SaveGame::resolveExistingSlotPath(int slotIndex) const
 }
 
 bool SaveGame::save(const GameWorld& world, int slotIndex,
-                    const std::vector<uint8_t>* eventRuntimeState, const Inventory* inventory)
+                    const std::vector<uint8_t>* eventRuntimeState, const Inventory* inventory,
+                    const QuestLog* questLog)
 {
     if (slotIndex < 0 || slotIndex >= kMaxSlots)
     {
@@ -722,6 +750,10 @@ bool SaveGame::save(const GameWorld& world, int slotIndex,
     {
         files.push_back({"inventory.bin", serializeInventoryState(*inventory)});
     }
+    if (questLog)
+    {
+        files.push_back({"questlog.bin", serializeQuestLog(*questLog)});
+    }
     files.push_back({"timer.bin", makeTimerBin(eventRuntimeState)});
     files.push_back({"npcdata.bin", std::vector<uint8_t>(38076, 0)});
     files.push_back({"npcgroup.bin", std::vector<uint8_t>(102, 0)});
@@ -764,7 +796,7 @@ bool SaveGame::save(const GameWorld& world, int slotIndex,
 }
 
 bool SaveGame::load(GameWorld& world, int slotIndex, std::vector<uint8_t>* eventRuntimeState,
-                    Inventory* inventory)
+                    Inventory* inventory, QuestLog* questLog)
 {
     if (eventRuntimeState)
     {
@@ -832,6 +864,15 @@ bool SaveGame::load(GameWorld& world, int slotIndex, std::vector<uint8_t>* event
                     logger_.warning("Failed to deserialize inventory payload from save archive");
                 }
             }
+            if (questLog)
+            {
+                auto questBlob = archive.extractFile("questlog.bin");
+                if (questBlob.has_value() && !questBlob->empty() &&
+                    !deserializeQuestLog(*questBlob, *questLog))
+                {
+                    logger_.warning("Failed to deserialize quest-log payload from save archive");
+                }
+            }
         }
         else
         {
@@ -863,7 +904,7 @@ bool SaveGame::load(GameWorld& world, int slotIndex, std::vector<uint8_t>* event
 }
 
 bool SaveGame::loadAutosave(GameWorld& world, std::vector<uint8_t>* eventRuntimeState,
-                            Inventory* inventory)
+                            Inventory* inventory, QuestLog* questLog)
 {
     if (eventRuntimeState)
     {
@@ -924,6 +965,15 @@ bool SaveGame::loadAutosave(GameWorld& world, std::vector<uint8_t>* eventRuntime
                     !deserializeInventoryState(*inventoryBlob, *inventory))
                 {
                     logger_.warning("Failed to deserialize inventory payload from autosave");
+                }
+            }
+            if (questLog)
+            {
+                auto questBlob = archive.extractFile("questlog.bin");
+                if (questBlob.has_value() && !questBlob->empty() &&
+                    !deserializeQuestLog(*questBlob, *questLog))
+                {
+                    logger_.warning("Failed to deserialize quest-log payload from autosave");
                 }
             }
         }
@@ -1261,6 +1311,7 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
     writeI32(out, party.food());
     writeU8(out, static_cast<uint8_t>(party.alignment()));
     writeI32(out, party.reputation());
+    writeI32(out, party.bankGold()); // v12
 
     // Party position
     writeFloat(out, party.worldX());
@@ -1326,6 +1377,25 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
         for (int c = 0; c < Character::kConditionCount; c++)
         {
             writeU64(out, static_cast<uint64_t>(ch.conditionTimestamps[static_cast<size_t>(c)]));
+        }
+
+        // v12: spellbook (knownSpells) — count + ids.
+        uint16_t knownCount = 0;
+        for (bool known : ch.knownSpells)
+            if (known)
+                ++knownCount;
+        writeU16(out, knownCount);
+        for (int spellId = 0; spellId < Character::kSpellCount; ++spellId)
+        {
+            if (ch.knownSpells[static_cast<size_t>(spellId)])
+            {
+                writeU16(out, static_cast<uint16_t>(spellId));
+            }
+        }
+        // v12: quickbar spell slots.
+        for (int slot = 0; slot < Character::kQuickbarSlots; ++slot)
+        {
+            writeI32(out, ch.quickbarSpells[static_cast<size_t>(slot)]);
         }
     }
 
@@ -1580,11 +1650,19 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
         return false;
     if (!readI32(ptr, end, reputation))
         return false;
+    // v12: bank gold (older saves default to 0).
+    int32_t bankGold = 0;
+    if (header.version >= 12)
+    {
+        if (!readI32(ptr, end, bankGold))
+            return false;
+    }
 
     party.setGold(gold);
     party.setFood(food);
     party.setAlignment(static_cast<Alignment>(alignment));
     party.adjustReputation(reputation - party.reputation());
+    party.setBankGold(bankGold);
 
     // Party position
     float px, py, pz, yaw, pitch;
@@ -1594,8 +1672,9 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
         return false;
     party.setWorldPosition(px, py, pz);
     party.setOrientation(yaw, pitch);
-    fprintf(stderr, "[SAVE-LOAD] map='%s' pos=(%.1f,%.1f,%.1f) yaw=%.1f pitch=%.1f\n",
-            mapName.c_str(), px, py, pz, yaw, pitch);
+    logger_.info(std::format("Loaded save: map='{}' pos=({:.1f},{:.1f},{:.1f}) yaw={:.1f} "
+                             "pitch={:.1f}",
+                             mapName, px, py, pz, yaw, pitch));
 
     // Game time
     uint64_t gameTime;
@@ -1725,6 +1804,32 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
             if (!readU64(ptr, end, ts))
                 return false;
             ch.conditionTimestamps[static_cast<size_t>(c)] = static_cast<int64_t>(ts);
+        }
+
+        // v12: spellbook (knownSpells) — count + ids.
+        if (header.version >= 12)
+        {
+            uint16_t knownCount = 0;
+            if (!readU16(ptr, end, knownCount))
+                return false;
+            for (uint16_t k = 0; k < knownCount; k++)
+            {
+                uint16_t spellId;
+                if (!readU16(ptr, end, spellId))
+                    return false;
+                if (spellId < Character::kSpellCount)
+                {
+                    ch.knownSpells[static_cast<size_t>(spellId)] = true;
+                }
+            }
+            // v12: quickbar spell slots.
+            for (int slot = 0; slot < Character::kQuickbarSlots; ++slot)
+            {
+                int32_t spellId;
+                if (!readI32(ptr, end, spellId))
+                    return false;
+                ch.quickbarSpells[static_cast<size_t>(slot)] = spellId;
+            }
         }
     }
 
@@ -2076,6 +2181,120 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
         }
     }
 
+    return true;
+}
+
+namespace
+{
+constexpr uint32_t kQuestLogMagic = 0x4c485152u; // "RHQL" (RuneHarbor Quest Log)
+constexpr uint32_t kQuestLogVersion = 1;
+} // namespace
+
+std::vector<uint8_t> SaveGame::serializeQuestLog(const QuestLog& questLog)
+{
+    std::vector<uint8_t> out;
+    out.reserve(512);
+    writeU32(out, kQuestLogMagic);
+    writeU32(out, kQuestLogVersion);
+
+    // Quest runtime state: every loaded quest with a non-Unknown state, so a
+    // reload can restore Active/Completed/Failed + timing regardless of whether
+    // the quest definitions changed. We serialize the runtime fields only
+    // (questBit identifies the quest; text/owner come from definitions on load).
+    const auto quests = questLog.getAllQuests();
+    writeU32(out, static_cast<uint32_t>(quests.size()));
+    for (const auto* q : quests)
+    {
+        writeI32(out, q->questBit);
+        writeU8(out, static_cast<uint8_t>(q->state));
+        writeU64(out, q->startTime);
+        writeU64(out, q->endTime);
+    }
+
+    // Journal entries (chronological).
+    const auto& journal = questLog.getJournal();
+    writeU32(out, static_cast<uint32_t>(journal.size()));
+    for (const auto& entry : journal)
+    {
+        writeU64(out, entry.gameTime);
+        writeString(out, entry.text);
+        writeI32(out, entry.questBit);
+    }
+    return out;
+}
+
+bool SaveGame::deserializeQuestLog(const std::vector<uint8_t>& data, QuestLog& questLog)
+{
+    if (data.empty())
+    {
+        return true;
+    }
+
+    const uint8_t* ptr = data.data();
+    const uint8_t* end = data.data() + data.size();
+    uint32_t magic = 0;
+    uint32_t version = 0;
+    if (!readU32(ptr, end, magic) || !readU32(ptr, end, version))
+    {
+        return false;
+    }
+    if (magic != kQuestLogMagic)
+    {
+        logger_.warning("Quest-log blob magic mismatch; ignoring quest state.");
+        return false;
+    }
+
+    // Quest states. Definitions must already be loaded (loadQuestData) before
+    // this is called; we re-apply the runtime state via the state mutators so
+    // callbacks/state invariants stay consistent. Quests whose definitions no
+    // longer exist are silently skipped (their bits just won't resolve).
+    uint32_t questCount = 0;
+    if (!readU32(ptr, end, questCount))
+        return false;
+    for (uint32_t i = 0; i < questCount; i++)
+    {
+        int32_t questBit = 0;
+        uint8_t stateRaw = 0;
+        uint64_t startTime = 0;
+        uint64_t endTime = 0;
+        if (!readI32(ptr, end, questBit) || !readU8(ptr, end, stateRaw))
+            return false;
+        if (!readU64(ptr, end, startTime) || !readU64(ptr, end, endTime))
+            return false;
+
+        const auto state = static_cast<QuestState>(stateRaw);
+        switch (state)
+        {
+        case QuestState::Active:
+            questLog.startQuest(questBit, startTime);
+            break;
+        case QuestState::Completed:
+            questLog.completeQuest(questBit, endTime);
+            break;
+        case QuestState::Failed:
+            questLog.failQuest(questBit, endTime);
+            break;
+        case QuestState::Unknown:
+        default:
+            break;
+        }
+    }
+
+    // Journal entries.
+    uint32_t journalCount = 0;
+    if (!readU32(ptr, end, journalCount))
+        return false;
+    for (uint32_t i = 0; i < journalCount; i++)
+    {
+        uint64_t gameTime = 0;
+        std::string text;
+        int32_t questBit = 0;
+        if (!readU64(ptr, end, gameTime) || !readString(ptr, end, text))
+            return false;
+        if (!readI32(ptr, end, questBit))
+            return false;
+        questLog.addJournalEntry(text, gameTime, questBit);
+    }
     return true;
 }
 

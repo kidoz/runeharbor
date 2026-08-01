@@ -220,7 +220,7 @@ bool LoadGameState::loadSelectedSlot()
             return false;
         }
         if (!ctx.shared->saveGame->loadAutosave(*ctx.shared->gameWorld, &eventRuntimeState,
-                                                ctx.shared->inventory))
+                                                ctx.shared->inventory, ctx.shared->questLog))
         {
             statusMessage_ = "Failed to load autosave";
             return false;
@@ -232,7 +232,8 @@ bool LoadGameState::loadSelectedSlot()
         return false;
     }
     else if (!ctx.shared->saveGame->load(*ctx.shared->gameWorld, selectedSlot_ - 1,
-                                         &eventRuntimeState, ctx.shared->inventory))
+                                         &eventRuntimeState, ctx.shared->inventory,
+                                         ctx.shared->questLog))
     {
         statusMessage_ = std::format("Failed to load slot {}", selectedSlot_);
         return false;

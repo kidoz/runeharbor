@@ -13,12 +13,26 @@ namespace runeharbor::game
 
 class GameWorld;
 class Inventory;
+class QuestLog;
 
 /// Save file header
 struct SaveHeader
 {
     static constexpr uint32_t kMagic = 0x52484256; // "RHBV" (RuneHarBor saVe)
-    static constexpr uint32_t kVersion = 11;
+    // Version history:
+    //   1  — core (party, characters, map, vars)
+    //   2  — activeMember, RuntimeConfig, visited/generated maps
+    //   3  — generated-content respawn fields
+    //   4  — sky colors
+    //   5  — saved per-map states
+    //   6  — map transitions
+    //   7  — runtime gammas + shade distances
+    //   8  — spawned map items
+    //   9  — transition arrival override flag
+    //  10  — indoor decoration-hidden flags
+    //  11  — party height / eye level
+    //  12  — per-character spellbook (knownSpells) + quickbar, party bankGold
+    static constexpr uint32_t kVersion = 12;
 
     uint32_t magic = kMagic;
     uint32_t version = kVersion;
@@ -47,15 +61,15 @@ class SaveGame
     /// Save current game state to a slot (0-based index)
     bool save(const GameWorld& world, int slotIndex,
               const std::vector<uint8_t>* eventRuntimeState = nullptr,
-              const Inventory* inventory = nullptr);
+              const Inventory* inventory = nullptr, const QuestLog* questLog = nullptr);
 
     /// Load game state from a slot into the given world
     bool load(GameWorld& world, int slotIndex, std::vector<uint8_t>* eventRuntimeState = nullptr,
-              Inventory* inventory = nullptr);
+              Inventory* inventory = nullptr, QuestLog* questLog = nullptr);
 
     /// Load game state from autosave.mm7
     bool loadAutosave(GameWorld& world, std::vector<uint8_t>* eventRuntimeState = nullptr,
-                      Inventory* inventory = nullptr);
+                      Inventory* inventory = nullptr, QuestLog* questLog = nullptr);
 
     /// Get info about all save slots (for UI display)
     std::vector<SaveSlotInfo> listSlots() const;
@@ -103,6 +117,12 @@ class SaveGame
 
     bool serializeWorld(const GameWorld& world, std::vector<uint8_t>& out);
     bool deserializeWorld(GameWorld& world, const std::vector<uint8_t>& data);
+
+    // Quest-log companion blob ("RHQL"): each quest's runtime state + journal
+    // entries. Stored separately (like inventory.bin) because GameWorld does not
+    // own the QuestLog.
+    std::vector<uint8_t> serializeQuestLog(const QuestLog& questLog);
+    bool deserializeQuestLog(const std::vector<uint8_t>& data, QuestLog& questLog);
 
     util::ILogger& logger_;
     std::string saveDir_ = "saves";

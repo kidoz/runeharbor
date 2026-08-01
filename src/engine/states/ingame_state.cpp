@@ -1482,7 +1482,7 @@ bool InGameState::quickSaveToSlot(int slotIndex)
     }
     return ctx.shared->saveGame->save(*ctx.shared->gameWorld, slotIndex,
                                       ctx.shared->eventEngine ? &eventRuntimeState : nullptr,
-                                      ctx.shared->inventory);
+                                      ctx.shared->inventory, ctx.shared->questLog);
 }
 
 bool InGameState::quickLoadFromSlot(int slotIndex)
@@ -1494,7 +1494,7 @@ bool InGameState::quickLoadFromSlot(int slotIndex)
 
     std::vector<uint8_t> eventRuntimeState;
     if (!ctx.shared->saveGame->load(*ctx.shared->gameWorld, slotIndex, &eventRuntimeState,
-                                    ctx.shared->inventory))
+                                    ctx.shared->inventory, ctx.shared->questLog))
     {
         return false;
     }
