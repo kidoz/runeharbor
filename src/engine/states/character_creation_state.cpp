@@ -301,6 +301,16 @@ void CharacterCreationState::enter()
     activeCharacterIndex = 0;
     menuRowIndex = 3;
     isNaming = false;
+    // Resync each member's base stats to their default face's race group, so
+    // the creation screen shows correct stats immediately (not the initDefault
+    // placeholder stats that only resolve when a face is cycled across a race).
+    if (ctx.shared && ctx.shared->party)
+    {
+        for (int i = 0; i < game::kPartySize; i++)
+        {
+            updateCharacterForFace((*ctx.shared->party)[i]);
+        }
+    }
     rebuildAvailableSkills();
 }
 
@@ -588,6 +598,26 @@ std::optional<GameStateId> CharacterCreationState::update()
                 // RE doc 27-game-flow.md §7.2: X=12552, Y=1816, Z=512, angles=0
                 party.setWorldPosition(12552.0f, 1816.0f, 512.0f);
                 party.setOrientation(0.0f, 0.0f);
+
+                // Starting provisions (RE: Party::initDefault sets gold=200,
+                // food=7; bump to a more playable starting amount and ensure
+                // each character begins with a basic weapon from their first
+                // starting skill).
+                party.setGold(std::max(party.gold(), 200));
+                party.setFood(std::max(party.food(), 7));
+                if (ctx.shared->inventory)
+                {
+                    // Per RE FUN_00491375: a starting item per learned skill.
+                    // Grant a simple dagger (itemId 15) to each character so
+                    // the party isn't unarmed.
+                    for (int i = 0; i < game::kPartySize; i++)
+                    {
+                        game::Item starter;
+                        starter.itemId = 1; // basic sword
+                        starter.identified = true;
+                        ctx.shared->inventory->addToBackpack(i, starter);
+                    }
+                }
 
                 ctx.shared->arrivalOverrideActive = true;
                 ctx.shared->arrivalX = 12552.0f;
