@@ -300,6 +300,24 @@ SpawnBillboard makeLiveActorBillboard(const LiveActor& actor, const Vec3& camera
     return sprite;
 }
 
+SpawnBillboard makeWorldItemBillboard(const WorldItem& item, const Vec3& cameraPos,
+                                      const WorldItemSpriteLookup& spriteLookup)
+{
+    SpawnBillboard sprite;
+    sprite.basePos = gameplayToRenderPosition(item.x, item.y, item.z);
+    // Items render as small ground billboards (loot piles).
+    sprite.height = 32.0f;
+    sprite.halfWidth = 16.0f;
+    sprite.color = {1.0f, 0.95f, 0.6f, 0.9f}; // subtle gold tint so items catch the eye
+    if (spriteLookup)
+    {
+        sprite.textureName = spriteLookup(item.itemId);
+    }
+    const Vec3 delta = sprite.basePos - cameraPos;
+    sprite.distanceSq = delta.lengthSquared();
+    return sprite;
+}
+
 SpawnBillboard makeOutdoorDecorationBillboard(const formats::ParsedDecoration& decoration,
                                               const Vec3& cameraPos,
                                               const formats::SpriteFrameTable* spriteFrameTable)
@@ -836,6 +854,19 @@ void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Ca
         }
     }
 
+    // World-dropped items (loot piles).
+    if (worldItemProvider_)
+    {
+        const auto items = worldItemProvider_();
+        for (const auto& item : items)
+        {
+            RenderOp op;
+            op.billboard = detail::makeWorldItemBillboard(item, cameraPos, worldItemSpriteLookup_);
+            op.distanceSq = op.billboard.distanceSq;
+            ops.push_back(std::move(op));
+        }
+    }
+
     // Static decorations (trees, rocks, signs, campfires). Sound and party-start
     // markers carry no sprite and drop out when their texture does not resolve.
     if (!(runtimeConfig && runtimeConfig->noDecorations))
@@ -871,7 +902,15 @@ void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Ca
         return;
     }
 
-    std::sort(ops.begin(), ops.end(),
+    // Two-pass render: opaque building faces first (back-to-front), then
+    // transparent billboards (back-to-front). This reduces sprite/geometry
+    // z-fighting compared to a single mixed sort (MM7 tests each sprite against
+    // overlapping facets; this is a pragmatic approximation of that).
+    auto opaqueEnd = std::partition(ops.begin(), ops.end(),
+                                    [](const RenderOp& op) { return op.building != nullptr; });
+    std::sort(ops.begin(), opaqueEnd,
+              [](const RenderOp& a, const RenderOp& b) { return a.distanceSq > b.distanceSq; });
+    std::sort(opaqueEnd, ops.end(),
               [](const RenderOp& a, const RenderOp& b) { return a.distanceSq > b.distanceSq; });
 
     SDL_SetRenderDrawBlendMode(renderer.getSDLRenderer(), SDL_BLENDMODE_BLEND);
@@ -881,13 +920,10 @@ void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Ca
     std::vector<ClipVertex> tessellatedVerts;
     std::vector<SDL_Vertex> verts;
 
-    for (const auto& op : ops)
+    // Pass 1: opaque building faces.
+    for (auto it = ops.begin(); it != opaqueEnd; ++it)
     {
-        if (!op.building)
-        {
-            drawBillboard(op.billboard, camera, objectLighting, ticks);
-            continue;
-        }
+        const auto& op = *it;
 
         const auto& building = *op.building;
         const auto& face = building.faces[op.faceIndex];
@@ -1042,6 +1078,13 @@ void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Ca
 
         SDL_RenderGeometry(renderer.getSDLRenderer(), texture, verts.data(),
                            static_cast<int>(verts.size()), nullptr, 0);
+    }
+
+    // Pass 2: transparent billboards (sprites), back-to-front, drawn on top of
+    // all opaque geometry.
+    for (auto it = opaqueEnd; it != ops.end(); ++it)
+    {
+        drawBillboard(it->billboard, camera, objectLighting, ticks);
     }
 }
 

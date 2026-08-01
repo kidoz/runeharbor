@@ -1242,6 +1242,48 @@ void Application::wireUpMapTextures()
             return actors;
         });
 
+    // Feed world-dropped items (loot piles) to the renderers so they appear in
+    // the 3D world as small ground sprites.
+    worldRenderer->setWorldItemProvider(
+        [this]() -> std::vector<graphics::WorldItem>
+        {
+            std::vector<graphics::WorldItem> items;
+            if (!gameWorld_ || !mapScene || !mapScene->isLoaded())
+            {
+                return items;
+            }
+            const std::string currentMap = gameWorld_->currentMap();
+            const auto* spawned = gameWorld_->getSpawnedMapItems(currentMap);
+            if (spawned == nullptr)
+            {
+                return items;
+            }
+            items.reserve(spawned->size());
+            for (const auto& smi : *spawned)
+            {
+                graphics::WorldItem wi;
+                wi.x = smi.x;
+                wi.y = smi.y;
+                wi.z = smi.z;
+                wi.itemId = smi.itemType;
+                items.push_back(wi);
+            }
+            return items;
+        });
+    worldRenderer->setWorldItemSpriteLookup(
+        [this](int itemId) -> std::string
+        {
+            if (inventory_)
+            {
+                const auto* def = inventory_->getItemDef(itemId);
+                if (def && !def->picFile.empty())
+                {
+                    return def->picFile;
+                }
+            }
+            return {};
+        });
+
     worldRenderer->setTextureLookup(
         [this](const std::string& name) -> SDL_Texture*
         {

@@ -405,6 +405,23 @@ makeIndoorLiveActorBillboard(const LiveActor& actor, const Vec3& cameraPos,
     sprite.distanceSq = delta.lengthSquared();
     return sprite;
 }
+
+BillboardSprite makeIndoorWorldItemBillboard(const WorldItem& item, const Vec3& cameraPos,
+                                             const WorldItemSpriteLookup& spriteLookup)
+{
+    BillboardSprite sprite;
+    sprite.basePos = gameplayToRenderPosition(item.x, item.y, item.z);
+    sprite.height = 32.0f;
+    sprite.halfWidth = 16.0f;
+    sprite.color = {1.0f, 0.95f, 0.6f, 0.9f};
+    if (spriteLookup)
+    {
+        sprite.textureName = spriteLookup(item.itemId);
+    }
+    const Vec3 delta = sprite.basePos - cameraPos;
+    sprite.distanceSq = delta.lengthSquared();
+    return sprite;
+}
 } // namespace
 
 IndoorRenderer::IndoorRenderer(SDLRenderer& renderer, util::ILogger& logger)
@@ -460,7 +477,7 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                             const runeharbor::game::RuntimeConfig* runtimeConfig,
                             const std::unordered_set<uint16_t>* visibleSectors,
                             SDL_GPUTexture* colorTex, SDL_GPUTexture* depthTex,
-                            SDL_Texture* blitTex)
+                            SDL_Texture* blitTex, float nightBlend)
 {
     const auto& blvData = scene.getBLVData();
     if (blvData.vertices.empty() || blvData.faces.empty())
@@ -685,7 +702,29 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         }
     }
 
-    std::sort(renderOps.begin(), renderOps.end(),
+    // World-dropped items (loot piles).
+    if (worldItemProvider_)
+    {
+        const auto items = worldItemProvider_();
+        for (const auto& item : items)
+        {
+            BillboardSprite sprite =
+                makeIndoorWorldItemBillboard(item, cameraPos, worldItemSpriteLookup_);
+            RenderOp op;
+            op.type = RenderOpType::Billboard;
+            op.distanceSq = sprite.distanceSq;
+            op.billboard = std::move(sprite);
+            renderOps.push_back(std::move(op));
+        }
+    }
+
+    // Two-pass render: opaque faces first (back-to-front), then transparent
+    // billboards. Reduces sprite/geometry z-fighting vs a single mixed sort.
+    auto facesEnd = std::partition(renderOps.begin(), renderOps.end(), [](const RenderOp& op)
+                                   { return op.type == RenderOpType::Face; });
+    std::sort(renderOps.begin(), facesEnd,
+              [](const RenderOp& a, const RenderOp& b) { return a.distanceSq > b.distanceSq; });
+    std::sort(facesEnd, renderOps.end(),
               [](const RenderOp& a, const RenderOp& b) { return a.distanceSq > b.distanceSq; });
 
     ClipVertex polyIn[MAX_CLIP_VERTS];
@@ -700,8 +739,18 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                 continue; // GPU already drew the walls
 
             const auto& face = blvData.faces[op.index];
-            const SDL_FColor faceColor = litIndoorFaceColor(blvData, face, op.cx, op.cy, op.cz,
-                                                            stationaryLights_, mobileLights_);
+            SDL_FColor faceColor = litIndoorFaceColor(blvData, face, op.cx, op.cy, op.cz,
+                                                      stationaryLights_, mobileLights_);
+            // Apply night darkening (areas with skylights/windows dim at night;
+            // fully-interior dungeons are barely affected since nightBlend is
+            // outdoor-derived but still gives a subtle day/night cue).
+            if (nightBlend > 0.0f)
+            {
+                const float dim = 1.0f - nightBlend * 0.35f;
+                faceColor.r *= dim;
+                faceColor.g *= dim;
+                faceColor.b *= dim;
+            }
 
             // Build clip-space polygon
             int polyCount = 0;
@@ -748,7 +797,31 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                     }
                 }
 
-                polyIn[polyCount++] = {clip, faceColor, u, uv};
+                // Per-vertex lighting: compute the dynamic light contribution at
+                // each vertex (rather than the centroid) for a smoother gradient.
+                // Falls back to the centroid color when the face has no dynamic
+                // lights or the NoLight bit is set.
+                SDL_FColor vertColor = faceColor;
+                if ((face.attributes & kNoLightFaceBit) == 0)
+                {
+                    const SDL_FColor vDyn =
+                        dynamicLightContribution(blvData, face, worldPos.x, worldPos.y, worldPos.z,
+                                                 stationaryLights_, mobileLights_);
+                    const float ambient = sectorAmbientScale(blvData, face);
+                    const SDL_FColor base = surfaceColor(face);
+                    vertColor.r = std::clamp(base.r * ambient + vDyn.r * 0.75f, 0.0f, 1.0f);
+                    vertColor.g = std::clamp(base.g * ambient + vDyn.g * 0.75f, 0.0f, 1.0f);
+                    vertColor.b = std::clamp(base.b * ambient + vDyn.b * 0.75f, 0.0f, 1.0f);
+                    if (nightBlend > 0.0f)
+                    {
+                        const float dim = 1.0f - nightBlend * 0.35f;
+                        vertColor.r *= dim;
+                        vertColor.g *= dim;
+                        vertColor.b *= dim;
+                    }
+                }
+
+                polyIn[polyCount++] = {clip, vertColor, u, uv};
             }
 
             if (allBehind || polyCount < 3)
@@ -815,8 +888,10 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                                static_cast<int>(vertices.size()), indices.data(),
                                static_cast<int>(indices.size()));
 
-            // Additive light polygon pass
-            if ((face.attributes & kNoLightFaceBit) == 0 && texture != nullptr)
+            // Additive light polygon pass — now redundant: the base pass computes
+            // per-vertex dynamic lighting directly (see the vertex loop above), so
+            // the additive overlay would double-count it. Kept as a no-op for now.
+            if (false && (face.attributes & kNoLightFaceBit) == 0 && texture != nullptr)
             {
                 // We re-render the same geometry but with SDL_BLENDMODE_ADD
                 // The color of the vertices for this pass should be purely the dynamic light

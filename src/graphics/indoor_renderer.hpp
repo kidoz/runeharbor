@@ -39,12 +39,21 @@ class IndoorRenderer
     {
         liveActorProvider_ = std::move(provider);
     }
+    // World-dropped items (loot piles).
+    void setWorldItemProvider(WorldItemProvider provider)
+    {
+        worldItemProvider_ = std::move(provider);
+    }
+    void setWorldItemSpriteLookup(WorldItemSpriteLookup lookup)
+    {
+        worldItemSpriteLookup_ = std::move(lookup);
+    }
     void setSpriteFrameTable(const formats::SpriteFrameTable* table);
     void render(const engine::MapScene& scene, const Camera& camera,
                 const runeharbor::game::RuntimeConfig* runtimeConfig = nullptr,
                 const std::unordered_set<uint16_t>* visibleSectors = nullptr,
                 SDL_GPUTexture* colorTex = nullptr, SDL_GPUTexture* depthTex = nullptr,
-                SDL_Texture* blitTex = nullptr);
+                SDL_Texture* blitTex = nullptr, float nightBlend = 0.0f);
     void invalidateGPUCache();
 
     LightStack& getStationaryLightStack() { return stationaryLights_; }
@@ -78,6 +87,8 @@ class IndoorRenderer
     TextureLookup textureLookup;
     MonsterSpriteLookup monsterSpriteLookup;
     LiveActorProvider liveActorProvider_;
+    WorldItemProvider worldItemProvider_;
+    WorldItemSpriteLookup worldItemSpriteLookup_;
     const formats::SpriteFrameTable* spriteFrameTable = nullptr;
 
     LightStack stationaryLights_;

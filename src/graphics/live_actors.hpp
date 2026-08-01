@@ -25,4 +25,14 @@ struct LiveActor
 
 using LiveActorProvider = std::function<std::vector<LiveActor>()>;
 
+// A world-dropped item (loot pile) snapshot for the renderers. The host maps
+// itemId -> a sprite texture name (ItemEntry.picFile) via WorldItemSpriteLookup.
+struct WorldItem
+{
+    float x = 0.0f, y = 0.0f, z = 0.0f; // gameplay-space (Z-up)
+    int itemId = 0;
+};
+using WorldItemProvider = std::function<std::vector<WorldItem>()>;
+using WorldItemSpriteLookup = std::function<std::string(int itemId)>;
+
 } // namespace runeharbor::graphics

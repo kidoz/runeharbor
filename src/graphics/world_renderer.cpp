@@ -149,6 +149,30 @@ void WorldRenderer::setLiveActorProvider(LiveActorProvider provider)
     }
 }
 
+void WorldRenderer::setWorldItemProvider(WorldItemProvider provider)
+{
+    if (indoorRenderer)
+    {
+        indoorRenderer->setWorldItemProvider(provider);
+    }
+    if (outdoorRenderer)
+    {
+        outdoorRenderer->setWorldItemProvider(std::move(provider));
+    }
+}
+
+void WorldRenderer::setWorldItemSpriteLookup(WorldItemSpriteLookup lookup)
+{
+    if (indoorRenderer)
+    {
+        indoorRenderer->setWorldItemSpriteLookup(lookup);
+    }
+    if (outdoorRenderer)
+    {
+        outdoorRenderer->setWorldItemSpriteLookup(std::move(lookup));
+    }
+}
+
 void WorldRenderer::setSpriteFrameTable(const formats::SpriteFrameTable* table)
 {
     if (indoorRenderer)
@@ -296,7 +320,7 @@ void WorldRenderer::render(const engine::MapScene& scene, const Camera& camera,
         {
             indoorRenderer->render(scene, camera, runtimeConfig, &visibleIndoorSectors_,
                                    offscreenGpuTexture_, offscreenDepthTexture_,
-                                   offscreenSdlTexture_);
+                                   offscreenSdlTexture_, nightBlend);
         }
     }
     else if (!scene.getODMData().heightmap.empty())

@@ -35,6 +35,8 @@ class WorldRenderer
     void setMonsterSpriteLookup(MonsterSpriteLookup lookup);
     // Forwards to both indoor + outdoor renderers.
     void setLiveActorProvider(LiveActorProvider provider);
+    void setWorldItemProvider(WorldItemProvider provider);
+    void setWorldItemSpriteLookup(WorldItemSpriteLookup lookup);
     void setSpriteFrameTable(const formats::SpriteFrameTable* table);
     void setExtraPickCandidates(std::vector<PickCandidate> candidates);
     void clearExtraPickCandidates();

@@ -47,6 +47,15 @@ class OutdoorRenderer
     {
         liveActorProvider_ = std::move(provider);
     }
+    // World-dropped items (loot piles). The sprite lookup maps itemId->texture.
+    void setWorldItemProvider(WorldItemProvider provider)
+    {
+        worldItemProvider_ = std::move(provider);
+    }
+    void setWorldItemSpriteLookup(WorldItemSpriteLookup lookup)
+    {
+        worldItemSpriteLookup_ = std::move(lookup);
+    }
     void setSpriteFrameTable(const formats::SpriteFrameTable* table);
     void render(const engine::MapScene& scene, const Camera& camera,
                 const game::RuntimeConfig* runtimeConfig = nullptr, float nightBlend = 0.0f,
@@ -70,6 +79,8 @@ class OutdoorRenderer
     TextureLookup textureLookup;
     MonsterSpriteLookup monsterSpriteLookup;
     LiveActorProvider liveActorProvider_;
+    WorldItemProvider worldItemProvider_;
+    WorldItemSpriteLookup worldItemSpriteLookup_;
     const formats::SpriteFrameTable* spriteFrameTable = nullptr;
 };
 
@@ -118,6 +129,10 @@ SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, co
 SpawnBillboard makeLiveActorBillboard(const LiveActor& actor, const Vec3& cameraPos,
                                       const OutdoorRenderer::MonsterSpriteLookup& monsterLookup,
                                       const formats::SpriteFrameTable* spriteFrameTable);
+
+// Build a small ground billboard for a world-dropped item (loot pile).
+SpawnBillboard makeWorldItemBillboard(const WorldItem& item, const Vec3& cameraPos,
+                                      const WorldItemSpriteLookup& spriteLookup);
 
 SpawnBillboard makeOutdoorDecorationBillboard(const formats::ParsedDecoration& decoration,
                                               const Vec3& cameraPos,
