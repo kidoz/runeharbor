@@ -771,6 +771,25 @@ void Application::configureBootFlow(const std::string& mapName, bool preferOutdo
     pendingArrivalOverride_.active = false;
     pendingTransition_ = {};
 
+    // A direct boot of the party's current map is equivalent to resuming the
+    // current world state, not entering through a map transition. Preserve the
+    // canonical new-game position and yaw instead of replacing them with a
+    // nearby "Party Start" decoration intended for transition fallback.
+    if (autoLoad && gameWorld_ && !mapName.empty())
+    {
+        const std::string bootMap = toLower(normalizeMapName(mapName, preferOutdoor));
+        const std::string partyMap =
+            toLower(normalizeMapName(gameWorld_->party().currentMap(), preferOutdoor));
+        if (bootMap == partyMap)
+        {
+            pendingArrivalOverride_.active = true;
+            pendingArrivalOverride_.x = gameWorld_->party().worldX();
+            pendingArrivalOverride_.y = gameWorld_->party().worldY();
+            pendingArrivalOverride_.z = gameWorld_->party().worldZ();
+            pendingArrivalOverride_.yaw = gameWorld_->party().yaw();
+        }
+    }
+
     // Sync to shared data
     if (sharedData)
     {
