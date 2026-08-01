@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <format>
 
 #include "combat.hpp"
 #include "game_world.hpp"
@@ -265,11 +266,31 @@ void EventEngine::setMapScopedEvents(const std::vector<EventScript>& scripts)
 
 bool EventEngine::triggerEvent(int eventId, int contextFlag)
 {
+    // Global recursion-depth guard. JumpToEvent and timer firing re-enter
+    // triggerEvent; without a depth cap, mutually-recursive events could
+    // stack-overflow before the per-invocation command-count guard trips.
+    constexpr int kMaxTriggerDepth = 64;
+    if (triggerDepth_ >= kMaxTriggerDepth)
+    {
+        logger_.warning("Event trigger recursion depth exceeded (" + std::to_string(triggerDepth_) +
+                        ") at event #" + std::to_string(eventId) + "; aborting");
+        return false;
+    }
+
     const EventScript* script = resolveEventScript(eventId);
     if (!script)
     {
         return false;
     }
+
+    // RAII increment/decrement so every return path (including the early
+    // `index >= size` return) restores the depth.
+    ++triggerDepth_;
+    struct DepthGuard
+    {
+        int& depth;
+        ~DepthGuard() { --depth; }
+    } guard{triggerDepth_};
 
     logger_.debug("Executing event #" + std::to_string(eventId));
     executionContext_ = (contextFlag == 0) ? 0 : 1;
@@ -867,6 +888,12 @@ size_t EventEngine::executeCommand(const EventScript& script, size_t index, bool
                     ch.experience = std::max(0, cmd.param2);
                     break;
                 default:
+                    // Unknown stat id (expected 0-11). Treat as a script variable
+                    // write for back-compat, but log so a malformed/out-of-range
+                    // script is diagnosable rather than silently polluting the
+                    // game-var space (which overlaps quest-bit storage).
+                    logger_.warning(std::format("SetPlayerVar: unknown stat id {} (param2={})",
+                                                cmd.param1, cmd.param2));
                     gameWorld_->setVar(static_cast<GameVarId>(std::clamp(cmd.param1, 0, 65535)),
                                        cmd.param2);
                     break;
@@ -1567,7 +1594,11 @@ void EventEngine::applyStatDelta(int statId, int delta, uint8_t mode)
             ch.experience = std::max(0, ch.experience + delta);
             break;
         default:
-            // Fallback: treat unknown stat IDs as script variables.
+            // Unknown stat id (expected 0-11). Treat as a script variable delta
+            // for back-compat, but log so a malformed/out-of-range script is
+            // diagnosable (the game-var space overlaps quest-bit storage).
+            logger_.warning(
+                std::format("AddStat/SubtractStat: unknown stat id {} (delta={})", statId, delta));
             {
                 const GameVarId varId = static_cast<GameVarId>(std::clamp(statId, 0, 65535));
                 gameWorld_->setVar(varId, gameWorld_->getVar(varId) + delta);

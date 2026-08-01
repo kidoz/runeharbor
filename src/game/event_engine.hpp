@@ -215,6 +215,11 @@ class EventEngine
     std::unordered_set<int> firedOneShotEvents_;
     int64_t lastRuntimeTick_ = -1;
     int executionContext_ = 1;
+    // Current triggerEvent recursion depth (JumpToEvent / timer firing re-enter
+    // triggerEvent). Capped to prevent mutually-recursive events from stack-
+    // overflowing — the per-invocation command-count guard alone can't catch
+    // deep cross-event recursion.
+    int triggerDepth_ = 0;
     uint8_t playerSelectMode_ = 4; // 0..3 specific, 4 active, 5 all, 6 random
     mutable std::mt19937 rng_{0xE7715EEDu};
 };

@@ -3118,7 +3118,7 @@ void Application::configureGameplayCallbacks()
 
             const int param1 = cmd.param1;
             const int param2 = cmd.param2;
-            const int param3 = cmd.param3;
+            [[maybe_unused]] const int param3 = cmd.param3; // used by some opcode branches
             const auto interaction =
                 gameWorld_ ? gameWorld_->lastEventInteraction() : game::EventInteractionContext{};
             constexpr uint32_t kInvisible =
