@@ -15,7 +15,7 @@ using game::BuildingType;
 
 // One row of `2dEvents.txt` (the building/shop registry). Field meanings are
 // RE-derived from the loader FUN_00443824 and the in-memory struct at
-// 0x005912B8 (stride 0x34). See docs/re/29-shops-and-economy.md section 2.
+// 0x005912B8 (stride 0x34). See docs/shops-and-economy.md section 2.
 //
 // The legacy `category`/`displayName`/`columns` members are preserved for
 // back-compat with existing callers; new code should prefer the typed fields.

@@ -255,7 +255,7 @@ void Character::rest(int hours)
 ConditionIndex Character::worstActiveCondition() const
 {
     // MM7 priority order (worst-first), from the table at 0x4EDDA0. See
-    // docs/re/30-temple-healing-resurrection.md section 5.
+    // docs/temple-healing-resurrection.md section 5.
     static constexpr ConditionIndex kPriorityOrder[] = {
         ConditionIndex::Eradicated, ConditionIndex::Stoned,      ConditionIndex::Dead,
         ConditionIndex::Zombie,     ConditionIndex::Unconscious, ConditionIndex::Asleep,

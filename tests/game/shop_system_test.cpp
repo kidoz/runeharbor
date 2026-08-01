@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // Unit tests for the shop economy engine. The expected values are computed by
-// hand from the RE-derived formulas in docs/re/29-shops-and-economy.md
+// hand from the RE-derived formulas in docs/shops-and-economy.md
 // section 3, so these tests pin the implementation to the original engine's
 // arithmetic.
 #include <catch2/catch_test_macros.hpp>
@@ -278,7 +278,7 @@ TEST_CASE("Repair refuses on a non-broken item", "[shop]")
 }
 
 // ---------------------------------------------------------------------------
-// Temple services (docs/re/30-temple-healing-resurrection.md)
+// Temple services (docs/temple-healing-resurrection.md)
 // ---------------------------------------------------------------------------
 
 namespace
@@ -497,7 +497,7 @@ TEST_CASE("worstActiveCondition follows the MM7 priority order", "[character][te
 }
 
 // ---------------------------------------------------------------------------
-// Training service (docs/re/35-training-and-travel.md section 1)
+// Training service (docs/training-and-travel.md section 1)
 // ---------------------------------------------------------------------------
 
 TEST_CASE("trainMember refuses a character below the XP threshold", "[shop][training]")

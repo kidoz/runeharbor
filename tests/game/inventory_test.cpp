@@ -405,7 +405,7 @@ TEST_CASE("Inventory equip type categorization", "[game][inventory]")
 }
 
 // ---------------------------------------------------------------------------
-// Equip skill gating (FUN_004926F8) — see docs/re/31-inventory-equipment.md
+// Equip skill gating (FUN_004926F8) — see docs/inventory-equipment.md
 // ---------------------------------------------------------------------------
 
 namespace

@@ -2,7 +2,7 @@
 //
 // Unit tests for HUD portrait hit-testing (the game<->screen coordinate
 // inversion used to select the active party member by clicking a portrait).
-// See docs/re/33-active-member-and-targeting.md section 1.4.
+// See docs/active-member-and-targeting.md section 1.4.
 #include <catch2/catch_test_macros.hpp>
 
 #include "../../src/ui/hud.hpp"

@@ -3,7 +3,7 @@
 // MM7 building/shop type codes. The numeric values mirror the discriminator
 // stored at struct offset +0x00 of the in-memory 2dEvents array (base
 // 0x005912B8 in MM7-Rel.exe), decoded from the `2dEvents.txt` "Type" column
-// via the loader's string->code comparisons. See docs/re/29-shops-and-economy.md
+// via the loader's string->code comparisons. See docs/shops-and-economy.md
 // section 2.2 for the recovered token->code mapping.
 #pragma once
 
@@ -42,7 +42,7 @@ enum class BuildingType : int16_t
     Temple = 0x17,
     Stables = 0x1B,
     Boat = 0x1C,
-    // RE correction (docs/re/35): token `tra` / 0x1E is the Training Ground
+    // RE correction (docs/training-and-travel.md): token `tra` / 0x1E is the Training Ground
     // (level-up service). There is no separate "Travel" building type —
     // stables (0x1B) and boats (0x1C) ARE the travel service. The prior
     // Travel=0x1E / Training=0x1F was swapped relative to the binary.

@@ -3,7 +3,7 @@
 // Shop / building service window. Mirrors the architecture of DialogueWindow:
 // a self-contained modal driven from the in-game state, rendering with the same
 // IRenderer + DebugText primitives. The transaction math is delegated to
-// game::ShopSystem (see docs/re/29-shops-and-economy.md); this window is the
+// game::ShopSystem (see docs/shops-and-economy.md); this window is the
 // player-facing surface for the economy loop.
 //
 // RE basis: the original engine opens this UI from EVT_SHOW_BUILDING (opcode

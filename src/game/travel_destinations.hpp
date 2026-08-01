@@ -3,7 +3,7 @@
 // Hand-authored travel-destination table for stables/boats. The original MM7
 // hardcodes destinations in the executable (records at 0x4F0830 + per-building
 // menus at 0x4F0B4F/0x4F0BB8) — there is no external data file (trans.txt is
-// area-description flavor text, NOT destinations; see docs/re/35 §3.2).
+// area-description flavor text, NOT destinations; see docs/training-and-travel.md §3.2).
 //
 // This seed set connects the outdoor maps so travel is functional and
 // expandable. Arrival coordinates are map-centre-ish defaults; the full

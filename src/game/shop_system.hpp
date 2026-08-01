@@ -2,7 +2,7 @@
 //
 // Shop / building economy transactions. The pricing formulas and the merchant
 // discount are RE-derived from MM7-Rel.exe and documented in
-// docs/re/29-shops-and-economy.md section 3:
+// docs/shops-and-economy.md section 3:
 //
 //   - FUN_004911EB  merchant discount percent
 //   - FUN_0045646E  item full price (base value + enchant adjustments)
@@ -121,7 +121,7 @@ class ShopSystem
     std::expected<ShopReceipt, ShopError> repairItem(const ShopContext& ctx, int characterIndex,
                                                      int backpackSlot) const;
 
-    // -------- Temple services (RE-derived, see docs/re/30-...) --------
+    // -------- Temple services (RE-derived, see docs/temple-healing-resurrection.md) --------
 
     // Per-character temple cost, tiered by condition severity (FUN_004B7FDF).
     //   severity: worst in {Dead,Stoned} -> tierMult 5; Eradicated -> 10;
@@ -144,7 +144,7 @@ class ShopSystem
     // The escalating-stat-buff cascade is out of scope for this pass.
     std::expected<ShopReceipt, ShopError> donate(const ShopContext& ctx) const;
 
-    // -------- Training service (RE-derived, see docs/re/35-...) --------
+    // -------- Training service (RE-derived, see docs/training-and-travel.md) --------
 
     // Level-up training cost (FUN_004B4673): round(level * shopMult * classTier),
     // then the merchant-discount finalizer. classTier is 1/2/3 by promotion.

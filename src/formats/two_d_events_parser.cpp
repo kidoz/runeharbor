@@ -163,7 +163,7 @@ bool TwoDEventsParser::parse(const std::vector<uint8_t>& data)
         entry.displayName = !lastText.empty() ? lastText : firstText;
 
         // Decode typed fields from the columns vector. Column indices are
-        // RE-derived from `2dEvents.txt` (see docs/re/29-shops-and-economy.md
+        // RE-derived from `2dEvents.txt` (see docs/shops-and-economy.md
         // section 2.1). columns[N] == fields[N+1].
         entry.buildingType = game::buildingTypeFromName(columnAt(entry.columns, 1));
         if (auto v = parseIntStrict(columnAt(entry.columns, 0)))

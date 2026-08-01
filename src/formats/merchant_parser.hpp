@@ -14,7 +14,7 @@ namespace runeharbor::formats
 // Shopkeeper flavor text, indexed by the player's Merchant-skill scenario and
 // the service kind. RE-derived from `MERCHANT.TXT` (5 rows x 4 service columns).
 // This is *dialogue text only* — actual pricing is computed by
-// game::ShopSystem from the formulas in docs/re/29-shops-and-economy.md.
+// game::ShopSystem from the formulas in docs/shops-and-economy.md.
 //
 // The four service columns (matching the table header) are Buy / Sell / Repair
 // / Identify; %06/%24/%25/%27/%29 are MM7 text-substitution tokens resolved by

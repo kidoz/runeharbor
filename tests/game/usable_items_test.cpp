@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // Unit tests for usable items (potions/scrolls/books/message-scrolls) — the
-// consume path documented in docs/re/32-usable-items.md. Verifies the effect
+// consume path documented in docs/usable-items.md. Verifies the effect
 // application and consume-on-use behavior of Inventory::useItem.
 #include <catch2/catch_test_macros.hpp>
 

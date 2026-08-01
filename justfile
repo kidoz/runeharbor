@@ -214,3 +214,15 @@ stats:
     @find tests -name "*.cpp" -o -name "*.hpp" | wc -l
     @echo "Total lines of code:"
     @find src tests -name "*.cpp" -o -name "*.hpp" | xargs wc -l | tail -1
+
+# ============================================================================
+# Documentation (MkDocs)
+# ============================================================================
+
+# Serve the documentation site locally (http://127.0.0.1:8000)
+docs-serve:
+    uv run mkdocs serve
+
+# Build documentation and validate
+docs-check:
+    uv run mkdocs build --strict --site-dir build/docs

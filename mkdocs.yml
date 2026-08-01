@@ -1,0 +1,76 @@
+site_name: RuneHarbor Documentation
+site_description: Engine and contributor documentation for RuneHarbor.
+repo_url: https://github.com/apavlov/runeharbor
+repo_name: apavlov/runeharbor
+edit_uri: edit/main/docs/
+
+theme:
+  name: mkdocs
+  color_mode: auto
+  user_color_mode_toggle: true
+
+markdown_extensions:
+  - toc:
+      permalink: true
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Home: index.md
+  - Open Questions: open-questions.md
+  - Contributing:
+      - Documentation Standard: contributing/documentation-standard.md
+      - Ghidra Headless Setup: contributing/ghidra-headless.md
+  - Architecture:
+      - Overview: architecture.md
+      - Game Flow: game-flow.md
+  - Game Mechanics:
+      - Combat System: combat-system.md
+      - Turn-Based Combat: turn-based-combat.md
+      - Spell System: spell-system.md
+      - Character System: character-system.md
+      - Party Management: party-management.md
+      - Item System: item-system.md
+      - NPC Dialogue: npc-dialogue.md
+      - Monster AI: monster-ai.md
+      - Content Generation: generation.md
+      - Shops and Economy: shops-and-economy.md
+      - Temple Healing and Resurrection: temple-healing-resurrection.md
+      - Inventory and Equipment: inventory-equipment.md
+      - Usable Items: usable-items.md
+      - Active Member and Targeting: active-member-and-targeting.md
+      - Quest Journal: quest-journal.md
+      - Training and Travel: training-and-travel.md
+  - File Formats:
+      - LOD Archives: lod-archives.md
+      - BLV Indoor Maps: blv-indoor-maps.md
+      - ODM Outdoor Maps: odm-outdoor-maps.md
+      - Event Engine: event-engine.md
+      - Save and Load: save-load.md
+      - Video System: video-system.md
+      - INI Configuration: ini-configuration.md
+      - Texture and Image Pipeline: texture-image-pipeline.md
+  - Rendering:
+      - Rendering Pipeline: rendering-pipeline.md
+      - Indoor Rendering: indoor-rendering.md
+      - Outdoor Rendering: outdoor-rendering.md
+      - Sprite Billboard: sprite-billboard.md
+      - Lighting: lighting.md
+      - Visibility: visibility.md
+  - Systems and I/O:
+      - Audio System: audio-system.md
+      - UI Windows: ui-windows.md
+      - Time and Calendar: time-calendar.md
+      - Map Transitions: map-transitions.md
+      - Input System: input-system.md
+  - Analysis and Data:
+      - World Rendering Analysis: world-rendering-analysis.md
+      - Globals Reference: data/globals-reference.md
+      - Function Index: data/function-index.md
+      - Struct Catalog: data/struct-catalog.md
+      - Enum Catalog: data/enum-catalog.md
+      - Source File Map: data/source-file-map.md

@@ -18,7 +18,7 @@ namespace runeharbor::ui
 
 // Quest / journal screen (the MM7 "Quest" book, opened with Q). Renders the
 // active and completed quest lists, the selected quest's description, and a
-// chronological journal log. See docs/re/34-quest-journal.md.
+// chronological journal log. See docs/quest-journal.md.
 class JournalWidget : public Widget
 {
   public:

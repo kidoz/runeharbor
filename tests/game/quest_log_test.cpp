@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // Unit tests for the QuestLog system (the journal backend wired up per
-// docs/re/34-quest-journal.md). Pins the load + state-transition + filtering
+// docs/quest-journal.md). Pins the load + state-transition + filtering
 // behavior that the JournalWidget and the event-engine bridge rely on.
 #include <catch2/catch_test_macros.hpp>
 
