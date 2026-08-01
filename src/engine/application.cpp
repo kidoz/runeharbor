@@ -2403,7 +2403,9 @@ void Application::finalizeLoadingTask()
             loadMapEventScripts(mapName);
             if (eventEngine_)
             {
-                eventEngine_->onMapLoaded();
+                // Restore runtime state (fired one-shot set + timers) BEFORE
+                // onMapLoaded(), so already-fired OnMapLoad/OnMapEnter events
+                // are skipped instead of re-granting their rewards.
                 if (sharedData && sharedData->hasPendingEventRuntimeState)
                 {
                     if (!eventEngine_->deserializeRuntimeState(
@@ -2414,6 +2416,7 @@ void Application::finalizeLoadingTask()
                     sharedData->hasPendingEventRuntimeState = false;
                     sharedData->pendingEventRuntimeState.clear();
                 }
+                eventEngine_->onMapLoaded();
             }
 
             bool shouldGenerateContent = false;
@@ -3297,14 +3300,12 @@ void Application::configureGameplayCallbacks()
                 break;
 
             default:
+                // Routed opcodes the host doesn't yet implement (e.g. ModifyNpc,
+                // ModifyNpcEx, ShowEffect, PlayAnimation) land here. Log once
+                // per opcode so the gap is visible rather than a silent no-op.
+                logger.debug(std::format("onMapCommand: opcode {} not yet implemented",
+                                         static_cast<int>(cmd.opcode)));
                 break;
-            }
-
-            if (gameWorld_)
-            {
-                const game::GameVarId varId = static_cast<game::GameVarId>(
-                    0x7000 + static_cast<int>(static_cast<uint8_t>(cmd.opcode)));
-                gameWorld_->setVar(varId, param1 ^ param2 ^ param3);
             }
         };
         callbacks.onSetGlobalVar = [this](int varIndex, int field, int value)

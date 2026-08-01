@@ -16,7 +16,9 @@ namespace runeharbor::game
 namespace
 {
 constexpr uint32_t kRuntimeStateMagic = 0x45565254u; // "EVRT"
-constexpr uint32_t kRuntimeStateVersion = 1;
+//   1 — lastRuntimeTick + timerTriggers
+//   2 — + firedOneShotEvents (OnMapLoad/OnMapEnter already fired this map scope)
+constexpr uint32_t kRuntimeStateVersion = 2;
 
 void writeU32(std::vector<uint8_t>& out, uint32_t value)
 {
@@ -251,6 +253,10 @@ void EventEngine::loadEvents(const std::vector<EventScript>& scripts)
 void EventEngine::setMapScopedEvents(const std::vector<EventScript>& scripts)
 {
     mapScopedEvents_.clear();
+    // A new map scope means one-shot fired-state from the previous map no longer
+    // applies. (When loading a save, deserializeRuntimeState repopulates this
+    // set AFTER setMapScopedEvents, before onMapLoaded runs.)
+    firedOneShotEvents_.clear();
     for (const auto& script : scripts)
     {
         mapScopedEvents_[script.eventId] = script;
@@ -395,6 +401,14 @@ void EventEngine::onMapLoaded()
     std::vector<int> ambientEvents;
     std::vector<int> immediateTimerEvents;
 
+    // RE divergence (docs/event-engine.md §"OnMapLoad"): MM7 identifies
+    // OnMapLoad/OnMapEnter triggers via a SEPARATE per-map trigger table
+    // (FUN_00443fb8), where a trigger-type byte ('5' = 0x35 = 53 for OnMapLoad)
+    // marks each entry. RuneHarbor instead classifies by the FIRST command's
+    // opcode in each script. This works iff real .evt OnMapLoad scripts begin
+    // with a command whose opcode byte equals 53 — which needs verification
+    // against actual .evt data (open question). If real scripts don't follow
+    // that convention, map-load triggers are silently misclassified here.
     for (const auto& [eventId, script] : mapScopedEvents_)
     {
         const EventCommand* first = firstScriptCommand(script);
@@ -461,6 +475,12 @@ void EventEngine::onMapLoaded()
     std::sort(onEnterEvents.begin(), onEnterEvents.end());
     for (int eventId : onEnterEvents)
     {
+        // One-shot: skip if already fired for this map scope (e.g. on save load).
+        if (firedOneShotEvents_.count(eventId))
+        {
+            continue;
+        }
+        firedOneShotEvents_.insert(eventId);
         (void)triggerEvent(eventId, 0);
     }
 
@@ -473,6 +493,12 @@ void EventEngine::onMapLoaded()
     std::sort(onMapLoadEvents.begin(), onMapLoadEvents.end());
     for (int eventId : onMapLoadEvents)
     {
+        // One-shot: skip if already fired for this map scope (e.g. on save load).
+        if (firedOneShotEvents_.count(eventId))
+        {
+            continue;
+        }
+        firedOneShotEvents_.insert(eventId);
         (void)triggerEvent(eventId, 0);
     }
     if (onMapLoadEvents.empty() && resolveEventScript(1))
@@ -539,6 +565,7 @@ void EventEngine::clear()
     events_.clear();
     mapScopedEvents_.clear();
     timerTriggers_.clear();
+    firedOneShotEvents_.clear();
     lastRuntimeTick_ = -1;
 }
 
@@ -559,6 +586,14 @@ std::vector<uint8_t> EventEngine::serializeRuntimeState() const
         writeI64(out, trigger.intervalTicks);
         out.push_back(trigger.periodic ? 1u : 0u);
         out.push_back(trigger.active ? 1u : 0u);
+    }
+
+    // v2: fired one-shot map events (so a save load skips already-fired
+    // OnMapLoad/OnMapEnter events instead of re-granting rewards).
+    writeU32(out, static_cast<uint32_t>(firedOneShotEvents_.size()));
+    for (int eventId : firedOneShotEvents_)
+    {
+        writeI32(out, eventId);
     }
 
     return out;
@@ -586,7 +621,12 @@ bool EventEngine::deserializeRuntimeState(const std::vector<uint8_t>& data)
         return false;
     }
 
-    if (magic != kRuntimeStateMagic || version != kRuntimeStateVersion)
+    if (magic != kRuntimeStateMagic)
+    {
+        return false;
+    }
+    // Accept v1 (no fired-set) and v2 (with fired-set); anything else is rejected.
+    if (version < 1 || version > kRuntimeStateVersion)
     {
         return false;
     }
@@ -621,6 +661,28 @@ bool EventEngine::deserializeRuntimeState(const std::vector<uint8_t>& data)
 
     timerTriggers_ = std::move(restored);
     lastRuntimeTick_ = savedRuntimeTick;
+
+    // v2: fired one-shot map events. Missing in v1 → empty set (those saves will
+    // re-fire OnMapLoad events once on first load, which is the pre-fix behavior).
+    firedOneShotEvents_.clear();
+    if (version >= 2)
+    {
+        uint32_t firedCount = 0;
+        if (!readU32(ptr, end, firedCount))
+        {
+            return false;
+        }
+        for (uint32_t i = 0; i < firedCount; i++)
+        {
+            int32_t eventId = 0;
+            if (!readI32(ptr, end, eventId))
+            {
+                return false;
+            }
+            firedOneShotEvents_.insert(eventId);
+        }
+    }
+
     return true;
 }
 

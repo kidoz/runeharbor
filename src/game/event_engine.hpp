@@ -208,6 +208,11 @@ class EventEngine
     std::unordered_map<int, EventScript> events_;
     std::unordered_map<int, EventScript> mapScopedEvents_;
     std::vector<TimerTrigger> timerTriggers_;
+    // One-shot map events (OnMapLoad / OnMapEnter) that have already fired for
+    // the current map scope. Persisted across save/load so reloading a save
+    // doesn't re-grant gold/XP/items from OnMapLoad events. Cleared on each
+    // onMapLoaded() only when the map scope itself changes.
+    std::unordered_set<int> firedOneShotEvents_;
     int64_t lastRuntimeTick_ = -1;
     int executionContext_ = 1;
     uint8_t playerSelectMode_ = 4; // 0..3 specific, 4 active, 5 all, 6 random
