@@ -363,6 +363,15 @@ class Application
     // Map texture cache (face texture name -> GPU texture handle)
     std::unordered_map<std::string, void*> mapTextureCache;
 
+    struct CachedUiTexture
+    {
+        void* texture = nullptr;
+        int width = 0;
+        int height = 0;
+    };
+    // Owns textures resolved lazily by in-game widgets, including failed lookups.
+    std::unordered_map<std::string, CachedUiTexture> uiTextureCache;
+
     // Methods
     void setGameState(GameState state);
     void transitionTo(GameStateId id);
@@ -406,6 +415,7 @@ class Application
     // Asset loading
     bool loadUiAssets();
     void unloadUiAssets();
+    void* loadCachedUiTexture(const std::string& name, int& width, int& height);
     bool loadPcxTexture(const std::vector<std::string>& candidates, const std::string& label,
                         void*& textureHandle, int& width, int& height);
     bool loadPcxSequence(const std::string& prefix, std::vector<void*>& textures,

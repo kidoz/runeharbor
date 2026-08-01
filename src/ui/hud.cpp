@@ -209,25 +209,25 @@ void HUD::render(graphics::IRenderer& renderer, const graphics::DebugText& debug
     {
         int w, h;
         // Right panel
-        void* tex_r = textureLookup_("ib-r-A", w, h);
+        void* tex_r = lookupCached("ib-r-A", w, h);
         if (tex_r)
             renderer.renderTexture(tex_r, sx(476, scale, offsetX), sy(0, scale, offsetY),
                                    sw(164, scale), sh(480, scale));
 
         // Bottom panel
-        void* tex_b = textureLookup_("ib-b-A", w, h);
+        void* tex_b = lookupCached("ib-b-A", w, h);
         if (tex_b)
             renderer.renderTexture(tex_b, sx(0, scale, offsetX), sy(359, scale, offsetY),
                                    sw(476, scale), sh(121, scale));
 
         // Top border
-        void* tex_t = textureLookup_("ib-t-A", w, h);
+        void* tex_t = lookupCached("ib-t-A", w, h);
         if (tex_t)
             renderer.renderTexture(tex_t, sx(0, scale, offsetX), sy(0, scale, offsetY),
                                    sw(476, scale), sh(8, scale));
 
         // Left border
-        void* tex_l = textureLookup_("ib-l-A", w, h);
+        void* tex_l = lookupCached("ib-l-A", w, h);
         if (tex_l)
             renderer.renderTexture(tex_l, sx(0, scale, offsetX), sy(8, scale, offsetY),
                                    sw(8, scale), sh(351, scale));
@@ -255,6 +255,8 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
 
         // Portrait rendering
         void* portraitTex = nullptr;
+        int portraitW = 0;
+        int portraitH = 0;
         if (textureLookup_)
         {
             int w, h;
@@ -310,20 +312,30 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
             std::snprintf(buf, sizeof(buf), "pc%02d-%02d", ch.faceId + 1, frameIndex);
             std::string texName(buf);
             portraitTex = lookupCached(texName, w, h);
+            portraitW = w;
+            portraitH = h;
 
             // Fallback to base name if specific frame not found
             if (!portraitTex)
             {
                 std::snprintf(buf, sizeof(buf), "pc%02d", ch.faceId + 1);
                 portraitTex = lookupCached(buf, w, h);
+                portraitW = w;
+                portraitH = h;
             }
         }
 
         if (portraitTex)
         {
-            renderer.renderTexture(portraitTex, sx(baseX, scale, offsetX),
-                                   sy(kPartyBarY + 14, scale, offsetY), sw(kPortraitW, scale),
-                                   sh(kPortraitH, scale));
+            // Center the portrait at its natural size inside the 59x79 slot.
+            // Face textures are not 59x79, so stretching to the slot distorts
+            // them; centering preserves aspect and seats them correctly.
+            const int natW = portraitW > 0 ? portraitW : kPortraitW;
+            const int natH = portraitH > 0 ? portraitH : kPortraitH;
+            const int slotX = baseX + (kPortraitW - natW) / 2;
+            const int slotY = kPartyBarY + 14 + (kPortraitH - natH) / 2;
+            renderer.renderTexture(portraitTex, sx(slotX, scale, offsetX),
+                                   sy(slotY, scale, offsetY), sw(natW, scale), sh(natH, scale));
         }
         else
         {
@@ -526,7 +538,10 @@ void HUD::renderMinimap(graphics::IRenderer& renderer, const graphics::DebugText
     if (gameWorld_)
     {
         const float yaw = gameWorld_->party().yaw();
-        const float yawRad = yaw * (3.14159265f / 2048.0f);
+        // MM7 turn-units: 0..2047 = full circle → radians = yaw * 2π/2048 =
+        // yaw * π/1024. (Was π/2048, which made the arrow point the wrong way —
+        // half the correct angle.)
+        const float yawRad = yaw * (3.14159265f / 1024.0f);
         const int arrowLen = static_cast<int>(8 * scale);
         const int ax = cx + static_cast<int>(std::cos(yawRad) * arrowLen);
         const int ay = cy + static_cast<int>(std::sin(yawRad) * arrowLen);

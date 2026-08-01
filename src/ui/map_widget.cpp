@@ -235,15 +235,17 @@ void MapWidget::render(graphics::IRenderer& renderer, const graphics::DebugText&
     }
 
     // Project a world (x,y) to viewport pixels. World Y grows up, screen Y down.
+    // Project a world (x,y) to viewport pixels (float, no integer truncation —
+    // truncation biased the blip down-left and parked it on the clip edge).
     auto projX = [&](float wx)
     {
-        return static_cast<float>(mapX +
-                                  static_cast<int>(normalizeToUnit(wx, wb.minX, wb.maxX) * mapW));
+        return static_cast<float>(mapX) +
+               normalizeToUnit(wx, wb.minX, wb.maxX) * static_cast<float>(mapW);
     };
     auto projY = [&](float wy)
     {
-        return static_cast<float>(
-            mapY + static_cast<int>((1.0f - normalizeToUnit(wy, wb.minY, wb.maxY)) * mapH));
+        return static_cast<float>(mapY) +
+               (1.0f - normalizeToUnit(wy, wb.minY, wb.maxY)) * static_cast<float>(mapH);
     };
 
     const auto& party = gameWorld_->party();
@@ -311,7 +313,8 @@ void MapWidget::render(graphics::IRenderer& renderer, const graphics::DebugText&
         SDL_SetRenderDrawColor(sdl, 255, 255, 100, 255);
         SDL_RenderFillRect(sdl, &dot);
 
-        const float yawRad = party.yaw() * (3.14159265f / 2048.0f); // MM7 turn units 0..2047
+        // MM7 turn-units: 0..2047 = full circle → radians = yaw * π/1024.
+        const float yawRad = party.yaw() * (3.14159265f / 1024.0f);
         const float arrowLen = 12.0f;
         const float ax = px + std::cos(yawRad) * arrowLen;
         const float ay = py + std::sin(yawRad) * arrowLen;

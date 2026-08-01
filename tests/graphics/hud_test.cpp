@@ -1,13 +1,39 @@
 // SPDX-License-Identifier: MIT
 //
-// Unit tests for HUD portrait hit-testing (the game<->screen coordinate
-// inversion used to select the active party member by clicking a portrait).
-// See docs/active-member-and-targeting.md section 1.4.
+// Unit tests for HUD hit-testing and texture lookup behavior.
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 #include <catch2/catch_test_macros.hpp>
 
+#include "../../src/game/game_world.hpp"
+#include "../../src/graphics/debug_text.hpp"
+#include "../../src/graphics/irenderer.hpp"
 #include "../../src/ui/hud.hpp"
 
 using namespace runeharbor::ui;
+
+namespace
+{
+
+class TestRenderer final : public runeharbor::graphics::IRenderer
+{
+  public:
+    void clear(uint8_t, uint8_t, uint8_t, uint8_t) override {}
+    void present() override {}
+    void* createTexture(const runeharbor::graphics::Image&) override { return nullptr; }
+    void destroyTexture(void*) override {}
+    void renderTexture(void*, int, int, int, int) override {}
+    void drawRect(int, int, int, int, uint8_t, uint8_t, uint8_t, uint8_t) override {}
+    void drawFilledRect(int, int, int, int, uint8_t, uint8_t, uint8_t, uint8_t) override {}
+    void renderTexturedPolygon(const std::vector<SDL_Vertex>&, SDL_Texture*) override {}
+    SDL_Renderer* getSDLRenderer() override { return nullptr; }
+    int getViewportWidth() const override { return 640; }
+    int getViewportHeight() const override { return 480; }
+};
+
+} // namespace
 
 TEST_CASE("HUD portraitAt maps screen clicks to member indices", "[ui][hud]")
 {
@@ -43,4 +69,32 @@ TEST_CASE("HUD portraitAt maps screen clicks to member indices", "[ui][hud]")
     {
         REQUIRE(hud.portraitAt(0.0f, 0.0f, 0.0f, 150, 410) == -1);
     }
+}
+
+TEST_CASE("HUD caches border texture lookups between frames", "[ui][hud]")
+{
+    HUD hud;
+    runeharbor::game::GameWorld world;
+    runeharbor::graphics::DebugText debugText;
+    TestRenderer renderer;
+    std::unordered_map<std::string, int> lookupCounts;
+    int textureToken = 0;
+
+    hud.setGameWorld(&world);
+    hud.setTextureLookup(
+        [&](const std::string& name, int& width, int& height) -> void*
+        {
+            ++lookupCounts[name];
+            width = 1;
+            height = 1;
+            return &textureToken;
+        });
+
+    hud.render(renderer, debugText, 1.0f, 0.0f, 0.0f);
+    hud.render(renderer, debugText, 1.0f, 0.0f, 0.0f);
+
+    CHECK(lookupCounts["ib-r-A"] == 1);
+    CHECK(lookupCounts["ib-b-A"] == 1);
+    CHECK(lookupCounts["ib-t-A"] == 1);
+    CHECK(lookupCounts["ib-l-A"] == 1);
 }

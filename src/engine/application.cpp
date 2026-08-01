@@ -1911,18 +1911,8 @@ bool Application::loadUiAssets()
         inGameState->setInventoryBackground(inventoryBackground, inventoryBackgroundWidth,
                                             inventoryBackgroundHeight);
 
-        inGameState->setTextureLookup(
-            [this](const std::string& name, int& w, int& h) -> void*
-            {
-                void* tex = nullptr;
-                if (loadPcxTexture(
-                        {name, name + ".pcx", name + ".PCX", name + "01", name + "01.pcx"}, "Item",
-                        tex, w, h))
-                {
-                    return tex;
-                }
-                return nullptr;
-            });
+        inGameState->setTextureLookup([this](const std::string& name, int& w, int& h) -> void*
+                                      { return loadCachedUiTexture(name, w, h); });
     }
 
     uiAssetsLoaded = true;
@@ -1933,6 +1923,10 @@ void Application::unloadUiAssets()
 {
     if (renderer)
     {
+        for (const auto& entry : uiTextureCache)
+        {
+            renderer->destroyTexture(entry.second.texture);
+        }
         renderer->destroyTexture(titleBackground);
         renderer->destroyTexture(createBackground);
         renderer->destroyTexture(loadingBackground);
@@ -1962,6 +1956,7 @@ void Application::unloadUiAssets()
             renderer->destroyTexture(ccClassIcons_[i].tex);
         }
     }
+    uiTextureCache.clear();
 
     titleBackground = nullptr;
     createBackground = nullptr;
@@ -2009,6 +2004,25 @@ void Application::unloadUiAssets()
     uiAssetsLoaded = false;
 }
 
+void* Application::loadCachedUiTexture(const std::string& name, int& width, int& height)
+{
+    const std::string cacheKey = toLower(name);
+    if (const auto it = uiTextureCache.find(cacheKey); it != uiTextureCache.end())
+    {
+        width = it->second.width;
+        height = it->second.height;
+        return it->second.texture;
+    }
+
+    CachedUiTexture cached;
+    loadPcxTexture({name, name + ".pcx", name + ".PCX", name + "01", name + "01.pcx"}, "Item",
+                   cached.texture, cached.width, cached.height);
+    const auto it = uiTextureCache.emplace(cacheKey, cached).first;
+    width = it->second.width;
+    height = it->second.height;
+    return it->second.texture;
+}
+
 bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
                                  const std::string& label, void*& textureHandle, int& width,
                                  int& height)
@@ -2018,8 +2032,135 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
         return false;
     }
 
+    auto findPaletteData = [this](const std::string& imageName,
+                                  int paletteId) -> std::optional<std::vector<uint8_t>>
+    {
+        if (!imageName.empty())
+        {
+            if (auto embedded = vfs->getImagePalette(imageName); embedded.has_value())
+            {
+                return embedded;
+            }
+        }
+
+        if (paletteId == 0 && !screenPaletteRGB.empty())
+        {
+            return screenPaletteRGB;
+        }
+
+        const int resolvedPaletteId = paletteId > 0 ? paletteId : 1;
+        const std::array<std::string, 3> paletteCandidates = {
+            std::format("PAL{:03d}", resolvedPaletteId),
+            std::format("pal{:03d}", resolvedPaletteId),
+            "PAL001",
+        };
+        for (const auto& paletteName : paletteCandidates)
+        {
+            if (!vfs->fileExists(paletteName))
+            {
+                continue;
+            }
+            if (auto palette = vfs->readFile(paletteName); palette.has_value())
+            {
+                return palette;
+            }
+        }
+        return std::nullopt;
+    };
+
+    auto createTexture = [this, &textureHandle, &width,
+                          &height](std::unique_ptr<graphics::Image> image, uint32_t imageWidth,
+                                   uint32_t imageHeight) -> bool
+    {
+        if (!image)
+        {
+            return false;
+        }
+        void* texture = renderer->createTexture(*image);
+        if (!texture)
+        {
+            return false;
+        }
+        renderer->destroyTexture(textureHandle);
+        textureHandle = texture;
+        width = static_cast<int>(imageWidth);
+        height = static_cast<int>(imageHeight);
+        return true;
+    };
+
     for (const auto& name : candidates)
     {
+        // Candidate lists intentionally contain optional aliases. Check first so a normal miss
+        // does not enter every archive extractor and produce warning/debug noise.
+        if (!vfs->fileExists(name))
+        {
+            continue;
+        }
+
+        const auto imageInfo = vfs->getImageInfo(name);
+        if (imageInfo.has_value() && imageInfo->width > 0 && imageInfo->height > 0)
+        {
+            auto pixels = vfs->readFile(name);
+            auto paletteData = findPaletteData(name, imageInfo->paletteId);
+            if (!pixels.has_value() || !paletteData.has_value())
+            {
+                logger.warning(std::format("No image data or palette found for '{}'", name));
+                continue;
+            }
+
+            auto paletteResult = graphics::Palette::fromRGBData(*paletteData);
+            if (!paletteResult.has_value())
+            {
+                logger.warning(std::format("Failed to convert paletted image '{}': {}", name,
+                                           paletteResult.error().message));
+                continue;
+            }
+            auto palette = *paletteResult;
+            palette.setColor(0, graphics::Palette::Color(0, 0, 0, 0));
+
+            auto imageResult = graphics::Image::fromPalettedData(*pixels, imageInfo->width,
+                                                                 imageInfo->height, palette);
+            if (imageResult.has_value() &&
+                createTexture(std::move(*imageResult), imageInfo->width, imageInfo->height))
+            {
+                logger.info(std::format("Loaded UI texture '{}' as paletted: {} ({}x{})", label,
+                                        name, width, height));
+                return true;
+            }
+            if (!imageResult.has_value())
+            {
+                logger.warning(std::format("Failed to convert paletted image '{}': {}", name,
+                                           imageResult.error().message));
+            }
+            continue;
+        }
+
+        if (const auto spriteInfo = vfs->getSpriteInfo(name); spriteInfo.has_value())
+        {
+            auto spriteData = vfs->readFile(name);
+            auto paletteData = findPaletteData({}, spriteInfo->paletteId);
+            if (!spriteData.has_value() || !paletteData.has_value())
+            {
+                logger.warning(std::format("No sprite data or palette found for '{}'", name));
+                continue;
+            }
+            auto paletteResult = graphics::Palette::fromRGBData(*paletteData);
+            if (!paletteResult.has_value())
+            {
+                logger.warning(std::format("Failed to convert sprite palette '{}': {}", name,
+                                           paletteResult.error().message));
+                continue;
+            }
+            auto image = graphics::SpriteDecoder::decode(*spriteData, *paletteResult, logger);
+            if (createTexture(std::move(image), spriteInfo->width, spriteInfo->height))
+            {
+                logger.info(std::format("Loaded UI texture '{}' as sprite: {} ({}x{})", label, name,
+                                        width, height));
+                return true;
+            }
+            continue;
+        }
+
         auto data = vfs->readFile(name);
         if (!data.has_value())
         {
@@ -2029,136 +2170,49 @@ bool Application::loadPcxTexture(const std::vector<std::string>& candidates,
         auto pcx = formats::decodePCX(*data, logger);
         if (pcx.has_value())
         {
-            // Successfully decoded as PCX
+            auto imageResult =
+                pcx->is24Bit()
+                    ? graphics::Image::fromRGBAData(pcx->rgbaPixels, pcx->width, pcx->height)
+                    : graphics::Image::fromPalettedData(pcx->indices, pcx->width, pcx->height,
+                                                        pcx->palette);
+            if (imageResult.has_value() &&
+                createTexture(std::move(*imageResult), pcx->width, pcx->height))
             {
-                auto imageResult =
-                    pcx->is24Bit()
-                        ? graphics::Image::fromRGBAData(pcx->rgbaPixels, pcx->width, pcx->height)
-                        : graphics::Image::fromPalettedData(pcx->indices, pcx->width, pcx->height,
-                                                            pcx->palette);
-                if (imageResult.has_value() && *imageResult)
-                {
-                    void* tex = renderer->createTexture(**imageResult);
-                    if (tex)
-                    {
-                        renderer->destroyTexture(textureHandle);
-                        textureHandle = tex;
-                        width = static_cast<int>(pcx->width);
-                        height = static_cast<int>(pcx->height);
-                        logger.info(std::format("Loaded UI texture '{}': {} ({}x{})", label, name,
-                                                width, height));
-                        return true;
-                    }
-                }
-                else if (!imageResult.has_value())
-                {
-                    logger.warning(std::format("Failed to convert PCX '{}': {}", name,
-                                               imageResult.error().message));
-                }
+                logger.info(
+                    std::format("Loaded UI texture '{}': {} ({}x{})", label, name, width, height));
+                return true;
+            }
+            if (!imageResult.has_value())
+            {
+                logger.warning(std::format("Failed to convert PCX '{}': {}", name,
+                                           imageResult.error().message));
             }
             continue;
         }
 
-        // Try loading as sprite
-        logger.debug(std::format("PCX decode failed for '{}', trying sprite", name));
+        // Some legacy data entries contain self-describing sprites with an embedded palette.
+        // Only unknown archive types reach this compatibility path.
         formats::SpriteParser spriteParser(logger);
         formats::Sprite sprite = spriteParser.parse(*data);
-
         if (sprite.frames.empty())
         {
-            logger.debug(std::format("Sprite parsing failed for '{}'", name));
             continue;
         }
 
-        auto& frame = sprite.frames[0];
+        const auto& frame = sprite.frames.front();
         auto imageResult = graphics::Image::fromPalettedData(frame.data, frame.width, frame.height,
                                                              sprite.palette);
-        if (imageResult.has_value() && *imageResult)
+        if (imageResult.has_value() &&
+            createTexture(std::move(*imageResult), frame.width, frame.height))
         {
-            void* tex = renderer->createTexture(**imageResult);
-            if (tex)
-            {
-                renderer->destroyTexture(textureHandle);
-                textureHandle = tex;
-                width = static_cast<int>(frame.width);
-                height = static_cast<int>(frame.height);
-                logger.info(std::format("Loaded UI texture '{}' as sprite: {} ({}x{})", label, name,
-                                        width, height));
-                return true;
-            }
+            logger.info(std::format("Loaded UI texture '{}' as legacy sprite: {} ({}x{})", label,
+                                    name, width, height));
+            return true;
         }
-        else if (!imageResult.has_value())
+        if (!imageResult.has_value())
         {
-            logger.warning(std::format("Failed to convert sprite frame to image '{}': {}", name,
+            logger.warning(std::format("Failed to convert legacy sprite '{}': {}", name,
                                        imageResult.error().message));
-        }
-    }
-
-    // Third fallback: try raw paletted data from image archives
-    for (const auto& name : candidates)
-    {
-        auto imgInfo = vfs->getImageInfo(name);
-        if (!imgInfo.has_value() || imgInfo->width == 0 || imgInfo->height == 0)
-        {
-            continue;
-        }
-
-        auto pixelData = vfs->readFile(name);
-        if (!pixelData.has_value())
-        {
-            continue;
-        }
-
-        // Load palette: prefer embedded palette from the LOD entry itself,
-        // then try screen palette, then PAL### from BITMAPS.LOD.
-        std::optional<std::vector<uint8_t>> palData = vfs->getImagePalette(name);
-        if (!palData.has_value() && imgInfo->paletteId == 0 && !screenPaletteRGB.empty())
-        {
-            palData = screenPaletteRGB;
-        }
-        if (!palData.has_value())
-        {
-            int palId = imgInfo->paletteId > 0 ? imgInfo->paletteId : 1;
-            std::string palName = std::format("PAL{:03d}", palId);
-            palData = vfs->readFile(palName);
-            if (!palData.has_value() && palId != 1)
-            {
-                palData = vfs->readFile("PAL001");
-            }
-        }
-        if (!palData.has_value())
-        {
-            logger.warning(
-                std::format("No palette found for '{}' (paletteId={})", name, imgInfo->paletteId));
-            continue;
-        }
-
-        auto paletteResult = graphics::Palette::fromRGBData(*palData);
-        if (!paletteResult.has_value())
-        {
-            logger.warning(std::format("Failed to convert paletted image '{}': {}", name,
-                                       paletteResult.error().message));
-            continue;
-        }
-        auto palette = *paletteResult;
-        // Index 0 is transparent
-        palette.setColor(0, graphics::Palette::Color(0, 0, 0, 0));
-
-        auto imageResult =
-            graphics::Image::fromPalettedData(*pixelData, imgInfo->width, imgInfo->height, palette);
-        if (imageResult.has_value() && *imageResult)
-        {
-            void* tex = renderer->createTexture(**imageResult);
-            if (tex)
-            {
-                renderer->destroyTexture(textureHandle);
-                textureHandle = tex;
-                width = static_cast<int>(imgInfo->width);
-                height = static_cast<int>(imgInfo->height);
-                logger.info(std::format("Loaded UI texture '{}' as paletted: {} ({}x{})", label,
-                                        name, width, height));
-                return true;
-            }
         }
     }
 
