@@ -32,7 +32,8 @@ struct SaveHeader
     //  10  — indoor decoration-hidden flags
     //  11  — party height / eye level
     //  12  — per-character spellbook (knownSpells) + quickbar, party bankGold
-    static constexpr uint32_t kVersion = 12;
+    //  13  — per-map automap explored sectors (fog-of-war)
+    static constexpr uint32_t kVersion = 13;
 
     uint32_t magic = kMagic;
     uint32_t version = kVersion;

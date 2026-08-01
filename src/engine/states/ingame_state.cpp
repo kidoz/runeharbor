@@ -1480,6 +1480,9 @@ bool InGameState::quickSaveToSlot(int slotIndex)
     {
         eventRuntimeState = ctx.shared->eventEngine->serializeRuntimeState();
     }
+    // Flush the automap's explored-sector set into the per-map SavedMapState so
+    // it round-trips through the save.
+    mapWidget_.syncExploredToWorld();
     return ctx.shared->saveGame->save(*ctx.shared->gameWorld, slotIndex,
                                       ctx.shared->eventEngine ? &eventRuntimeState : nullptr,
                                       ctx.shared->inventory, ctx.shared->questLog);

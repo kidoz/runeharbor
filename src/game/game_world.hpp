@@ -119,6 +119,10 @@ struct SavedMapState
     std::vector<uint32_t> indoorFaceAttributes;
     std::vector<uint8_t> indoorDecorationHidden;
     std::vector<std::vector<uint32_t>> outdoorBuildingFaceAttributes;
+    // Indoor sectors the party has entered (automap fog-of-war). Compact list of
+    // sector ids; populated by MapWidget as the party moves, persisted across
+    // save/load so the automap remembers explored areas. v13.
+    std::vector<uint16_t> exploredSectors;
 };
 
 // Runtime items spawned by EVT/map logic.

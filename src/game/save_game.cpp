@@ -1539,6 +1539,13 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
         {
             writeU8(out, hidden != 0 ? 1u : 0u);
         }
+
+        // v13: automap explored sectors (indoor fog-of-war).
+        writeU32(out, static_cast<uint32_t>(state.exploredSectors.size()));
+        for (uint16_t sector : state.exploredSectors)
+        {
+            writeU16(out, sector);
+        }
     }
 
     std::vector<std::string> spawnedItemMaps;
@@ -2080,6 +2087,21 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
                         if (!readU8(ptr, end, hidden))
                             return false;
                         state.indoorDecorationHidden[di] = (hidden != 0) ? 1u : 0u;
+                    }
+                }
+
+                if (header.version >= 13)
+                {
+                    uint32_t exploredCount = 0;
+                    if (!readU32(ptr, end, exploredCount))
+                        return false;
+                    state.exploredSectors.reserve(exploredCount);
+                    for (uint32_t ei = 0; ei < exploredCount; ei++)
+                    {
+                        uint16_t sector = 0;
+                        if (!readU16(ptr, end, sector))
+                            return false;
+                        state.exploredSectors.push_back(sector);
                     }
                 }
 
