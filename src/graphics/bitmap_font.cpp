@@ -49,6 +49,14 @@ BitmapFont::BitmapFont(BitmapFont&& other) noexcept
 {
     std::memcpy(glyphs_, other.glyphs_, sizeof(glyphs_));
     std::memcpy(atlasRects_, other.atlasRects_, sizeof(atlasRects_));
+    // Leave the moved-from object in a fully zeroed, "not loaded" state so
+    // height()/isLoaded() stay consistent (loaded_ alone gates most ops, but
+    // clearing the scalars keeps the invariant obvious).
+    other.firstChar_ = 0;
+    other.lastChar_ = 0;
+    other.fontHeight_ = 0;
+    other.atlasWidth_ = 0;
+    other.atlasHeight_ = 0;
     other.atlas_ = nullptr;
     other.loaded_ = false;
 }
@@ -72,6 +80,11 @@ BitmapFont& BitmapFont::operator=(BitmapFont&& other) noexcept
         atlasHeight_ = other.atlasHeight_;
         std::memcpy(glyphs_, other.glyphs_, sizeof(glyphs_));
         std::memcpy(atlasRects_, other.atlasRects_, sizeof(atlasRects_));
+        other.firstChar_ = 0;
+        other.lastChar_ = 0;
+        other.fontHeight_ = 0;
+        other.atlasWidth_ = 0;
+        other.atlasHeight_ = 0;
         other.atlas_ = nullptr;
         other.loaded_ = false;
     }
@@ -111,6 +124,15 @@ bool BitmapFont::load(std::span<const uint8_t> fntData, std::span<const uint8_t>
     fontHeight_ = fntData[5];
 
     if (fontHeight_ == 0)
+    {
+        return false;
+    }
+
+    // A corrupt .fnt may have firstChar > lastChar. createAtlas() would then
+    // build an empty atlas and return false, but renderText()/measureText()
+    // would still silently fall back to space metrics for every glyph with no
+    // diagnostic. Reject it up front so a malformed font fails loudly at load.
+    if (firstChar_ > lastChar_)
     {
         return false;
     }
@@ -201,7 +223,16 @@ bool BitmapFont::createAtlas(SDL_Renderer* sdlRenderer)
         atlasRects_[i] = {static_cast<float>(curX), 0.0f, static_cast<float>(gw),
                           static_cast<float>(fontHeight_)};
 
-        // Copy glyph pixels into atlas
+        // Copy glyph pixels into atlas.
+        //
+        // MM7 .fnt pixel bytes are indices into the FONTPAL palette, but we
+        // deliberately do NOT apply FONTPAL colors here. Instead we collapse the
+        // palette to three roles: index 0 = transparent, index 1 = opaque black
+        // (drop shadow), and any index >= 2 = opaque white body. Body pixels are
+        // white so renderText() can tint them to an arbitrary color via
+        // SDL_SetTextureColorMod (e.g. the yellow selected-stat color). This
+        // means paletteRGB_ — the FONTPAL copy stashed in load() — is kept only
+        // for potential future use and is not consulted during rendering.
         uint32_t offset = glyphs_[i].pixelOffset;
         for (int row = 0; row < fontHeight_; row++)
         {
