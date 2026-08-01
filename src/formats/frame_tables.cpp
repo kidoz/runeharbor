@@ -132,6 +132,7 @@ uint32_t readLE<uint32_t>(const uint8_t* p)
 bool SpriteFrameTable::parse(const std::vector<uint8_t>& data)
 {
     entries_.clear();
+    iconIndex_.clear();
 
     // Header is two counts: the frames themselves, then a trailing group lookup
     // table we do not need. Reading only the first count leaves every field after
@@ -176,12 +177,14 @@ bool SpriteFrameTable::parse(const std::vector<uint8_t>& data)
         entries_.push_back(std::move(frame));
     }
 
+    rebuildIconIndex();
     return true;
 }
 
 bool SpriteFrameTable::parseText(std::string_view text)
 {
     entries_.clear();
+    iconIndex_.clear();
     if (text.empty())
     {
         return false;
@@ -236,19 +239,31 @@ bool SpriteFrameTable::parseText(std::string_view text)
         entries_.push_back(std::move(frame));
     }
 
+    rebuildIconIndex();
     return !entries_.empty();
 }
 
 const SpriteFrameEntry* SpriteFrameTable::findEntryByIcon(std::string_view iconName) const
 {
-    auto it =
-        std::find_if(entries_.begin(), entries_.end(), [iconName](const SpriteFrameEntry& entry)
-                     { return util::equalsIgnoreCase(entry.iconName, iconName); });
-    if (it != entries_.end())
+    const auto it = iconIndex_.find(util::toLower(iconName));
+    if (it != iconIndex_.end() && it->second < entries_.size())
     {
-        return &(*it);
+        return &entries_[it->second];
     }
     return nullptr;
+}
+
+void SpriteFrameTable::rebuildIconIndex()
+{
+    iconIndex_.clear();
+    iconIndex_.reserve(entries_.size());
+    for (size_t i = 0; i < entries_.size(); i++)
+    {
+        if (!entries_[i].iconName.empty())
+        {
+            iconIndex_.try_emplace(util::toLower(entries_[i].iconName), i);
+        }
+    }
 }
 
 bool TextureFrameTable::parse(const std::vector<uint8_t>& data)

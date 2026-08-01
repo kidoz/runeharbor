@@ -84,3 +84,15 @@ TEST_CASE("Sprite frame mirror bits select per-octant flipping", "[frame_tables]
     CHECK_FALSE(spriteFrameMirrorsOctant(attributes, 4));
     CHECK_FALSE(spriteFrameMirrorsOctant(0, 0));
 }
+
+TEST_CASE("SpriteFrameTable rebuilds its case-insensitive icon index", "[frame_tables]")
+{
+    SpriteFrameTable table;
+    REQUIRE(table.parseText("Goblin,Goblin01\nDragon,Dragon01\n"));
+    REQUIRE(table.findEntryByIcon("GOBLIN") != nullptr);
+    CHECK(table.findEntryByIcon("goblin")->textureName == "Goblin01");
+
+    REQUIRE(table.parseText("Bat,Bat01\n"));
+    CHECK(table.findEntryByIcon("Goblin") == nullptr);
+    REQUIRE(table.findEntryByIcon("BAT") != nullptr);
+}

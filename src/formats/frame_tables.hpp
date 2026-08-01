@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace runeharbor::formats
@@ -81,7 +82,10 @@ class SpriteFrameTable
     const SpriteFrameEntry* findEntryByIcon(std::string_view iconName) const;
 
   private:
+    void rebuildIconIndex();
+
     std::vector<SpriteFrameEntry> entries_;
+    std::unordered_map<std::string, size_t> iconIndex_;
 };
 
 // Resolves the animated texture name for a billboard. MM7 animates sprites by

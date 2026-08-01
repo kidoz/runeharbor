@@ -60,6 +60,7 @@ void SpriteLODArchive::close()
         logger.debug(std::format("Closed sprite archive: {}", archivePath.string()));
     }
     entries.clear();
+    entryIndexByName.clear();
     opened = false;
 }
 
@@ -131,6 +132,12 @@ bool SpriteLODArchive::readDirectory()
     // First entry is the archive container metadata (for example "sprites08"). Its offset is the
     // delta added to subsequent entry offsets to get an absolute file position.
     offsetDelta = static_cast<std::streamoff>(entries.front().offset);
+    entryIndexByName.clear();
+    entryIndexByName.reserve(entries.size() - 1);
+    for (size_t i = 1; i < entries.size(); i++)
+    {
+        entryIndexByName.try_emplace(util::toLower(buildFilename(entries[i])), i);
+    }
     logger.debug(std::format("Sprite archive metadata: {}, offset delta 0x{:X}",
                              buildFilename(entries.front()), static_cast<uint64_t>(offsetDelta)));
     logger.debug(std::format("Read {} sprite directory entries", entries.size()));
@@ -166,6 +173,16 @@ std::streamoff SpriteLODArchive::calculateDataOffset(size_t entryIndex) const
     return offsetDelta + static_cast<std::streamoff>(entries[entryIndex].offset);
 }
 
+std::optional<size_t> SpriteLODArchive::findEntryIndex(std::string_view filename) const
+{
+    const auto it = entryIndexByName.find(util::toLower(filename));
+    if (it == entryIndexByName.end())
+    {
+        return std::nullopt;
+    }
+    return it->second;
+}
+
 std::optional<std::vector<uint8_t>> SpriteLODArchive::extractFile(const std::string& filename)
 {
     if (!opened)
@@ -174,45 +191,18 @@ std::optional<std::vector<uint8_t>> SpriteLODArchive::extractFile(const std::str
         return std::nullopt;
     }
 
-    // Find entry index (case-insensitive). Entry 0 is archive metadata, not a sprite.
-    size_t entryIndex = 0;
-    bool found = false;
-    for (size_t i = 1; i < entries.size(); i++)
-    {
-        std::string entryName = buildFilename(entries[i]);
-
-        if (entryName.size() != filename.size())
-            continue;
-
-        bool match = true;
-        for (size_t j = 0; j < entryName.size(); j++)
-        {
-            if (std::tolower(entryName[j]) != std::tolower(filename[j]))
-            {
-                match = false;
-                break;
-            }
-        }
-
-        if (match)
-        {
-            entryIndex = i;
-            found = true;
-            break;
-        }
-    }
-
-    if (!found)
+    const auto entryIndex = findEntryIndex(filename);
+    if (!entryIndex)
     {
         logger.debug(std::format("Sprite not found: {}", filename));
         return std::nullopt;
     }
 
     // Calculate offset based on directory order
-    std::streamoff dataOffset = calculateDataOffset(entryIndex);
+    std::streamoff dataOffset = calculateDataOffset(*entryIndex);
     logger.debug(std::format("Extracting sprite: {} (calculated offset: 0x{:X}, size: {})",
                              filename, static_cast<uint64_t>(dataOffset),
-                             entries[entryIndex].size));
+                             entries[*entryIndex].size));
 
     // Seek to sprite data
     file.seekg(dataOffset, std::ios::beg);
@@ -351,41 +341,14 @@ std::optional<SpriteFileHeader> SpriteLODArchive::getFileInfo(const std::string&
         return std::nullopt;
     }
 
-    // Find entry index. Entry 0 is archive metadata, not a sprite.
-    size_t entryIndex = 0;
-    bool found = false;
-    for (size_t i = 1; i < entries.size(); i++)
-    {
-        std::string entryName = buildFilename(entries[i]);
-
-        if (entryName.size() != filename.size())
-            continue;
-
-        bool match = true;
-        for (size_t j = 0; j < entryName.size(); j++)
-        {
-            if (std::tolower(entryName[j]) != std::tolower(filename[j]))
-            {
-                match = false;
-                break;
-            }
-        }
-
-        if (match)
-        {
-            entryIndex = i;
-            found = true;
-            break;
-        }
-    }
-
-    if (!found)
+    const auto entryIndex = findEntryIndex(filename);
+    if (!entryIndex)
     {
         return std::nullopt;
     }
 
     // Calculate offset based on directory order
-    std::streamoff dataOffset = calculateDataOffset(entryIndex);
+    std::streamoff dataOffset = calculateDataOffset(*entryIndex);
 
     // Seek to file and read header
     file.seekg(dataOffset, std::ios::beg);

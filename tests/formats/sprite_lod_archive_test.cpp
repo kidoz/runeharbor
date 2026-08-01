@@ -126,6 +126,13 @@ TEST_CASE("SpriteLODArchive reads MM7 sprite directory entries", "[sprite_lod]")
         REQUIRE(info->centerY == 2);
     }
 
+    SECTION("Resolves case-insensitive misses and hits through the directory index")
+    {
+        CHECK(archive.getFileInfo("missing_sprite") == std::nullopt);
+        CHECK(archive.getFileInfo("MISSING_SPRITE") == std::nullopt);
+        CHECK(archive.getFileInfo("test_sprite_long").has_value());
+    }
+
     SECTION("Extracts sprite pixels using metadata offset delta")
     {
         auto data = archive.extractFile("test_sprite_long");

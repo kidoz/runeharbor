@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <fstream>
@@ -84,6 +85,7 @@ class SpriteLODArchive
     bool readHeader();
     bool readDirectory();
     std::string buildFilename(const SpriteLODDirectoryEntry& entry) const;
+    std::optional<size_t> findEntryIndex(std::string_view filename) const;
     std::streamoff calculateDataOffset(size_t entryIndex) const;
 
     util::ILogger& logger;
@@ -92,6 +94,7 @@ class SpriteLODArchive
     bool opened = false;
 
     std::vector<SpriteLODDirectoryEntry> entries;
+    std::unordered_map<std::string, size_t> entryIndexByName;
     std::streamoff dataSectionStart = 0;
     std::streamoff offsetDelta = 0;
 };
