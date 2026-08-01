@@ -152,6 +152,26 @@ int HUD::sh(int gameH, float scale) const
     return static_cast<int>(gameH * scale);
 }
 
+void* HUD::lookupCached(const std::string& name, int& w, int& h)
+{
+    auto it = portraitCache_.find(name);
+    if (it != portraitCache_.end())
+    {
+        w = it->second.w;
+        h = it->second.h;
+        return it->second.tex;
+    }
+    CachedPortrait c;
+    if (textureLookup_)
+    {
+        c.tex = textureLookup_(name, c.w, c.h);
+    }
+    portraitCache_[name] = c;
+    w = c.w;
+    h = c.h;
+    return c.tex;
+}
+
 int HUD::portraitAt(float scale, float offsetX, float offsetY, int screenX, int screenY) const
 {
     if (scale <= 0.0f)
@@ -289,13 +309,13 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
             char buf[16];
             std::snprintf(buf, sizeof(buf), "pc%02d-%02d", ch.faceId + 1, frameIndex);
             std::string texName(buf);
-            portraitTex = textureLookup_(texName, w, h);
+            portraitTex = lookupCached(texName, w, h);
 
             // Fallback to base name if specific frame not found
             if (!portraitTex)
             {
                 std::snprintf(buf, sizeof(buf), "pc%02d", ch.faceId + 1);
-                portraitTex = textureLookup_(buf, w, h);
+                portraitTex = lookupCached(buf, w, h);
             }
         }
 
@@ -405,6 +425,29 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
                                    status);
             }
         }
+
+        // Spell quickbar: 2 small slots below the portrait name. RuneHarbor
+        // doesn't yet model the per-character quickbar bytes (+0x1A4E/F), so
+        // for now show the first 2 known spells as a read-only indicator.
+        if (sdl)
+        {
+            const int qbarY = sy(kPartyBarY + 110, scale, offsetY);
+            const int slotSize = sw(10, scale);
+            for (int slot = 0; slot < 2; slot++)
+            {
+                const int slotX = sx(baseX + slot * (slotSize + 2), scale, offsetX);
+                // Frame
+                renderer.drawRect(slotX, qbarY, slotSize, slotSize, 90, 80, 50, 200);
+                // Filled if the character knows at least (slot+1) spells.
+                const bool filled =
+                    (slot == 0 && ch.knownSpells[1]) || (slot == 1 && ch.knownSpells[2]);
+                if (filled)
+                {
+                    renderer.drawFilledRect(slotX + 1, qbarY + 1, slotSize - 2, slotSize - 2, 80,
+                                            60, 140, 220);
+                }
+            }
+        }
     }
 }
 
@@ -477,6 +520,24 @@ void HUD::renderMinimap(graphics::IRenderer& renderer, const graphics::DebugText
     const int cx = sx(static_cast<int>(px), scale, offsetX);
     const int cy = sy(static_cast<int>(py), scale, offsetY);
     renderer.drawFilledRect(cx - 2, cy - 2, 5, 5, 255, 255, 100, 255);
+
+    // Facing-direction indicator: a short line from the party dot in the
+    // direction the party is looking (yaw is in MM7 turn units 0..2047).
+    if (gameWorld_)
+    {
+        const float yaw = gameWorld_->party().yaw();
+        const float yawRad = yaw * (3.14159265f / 2048.0f);
+        const int arrowLen = static_cast<int>(8 * scale);
+        const int ax = cx + static_cast<int>(std::cos(yawRad) * arrowLen);
+        const int ay = cy + static_cast<int>(std::sin(yawRad) * arrowLen);
+        SDL_Renderer* sdl = renderer.getSDLRenderer();
+        if (sdl)
+        {
+            SDL_SetRenderDrawColor(sdl, 255, 255, 100, 255);
+            SDL_RenderLine(sdl, static_cast<float>(cx), static_cast<float>(cy),
+                           static_cast<float>(ax), static_cast<float>(ay));
+        }
+    }
 }
 
 void HUD::renderTimeDisplay(graphics::IRenderer& renderer, const graphics::DebugText& debugText,

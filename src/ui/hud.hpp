@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <string>
+#include <unordered_map>
 
 namespace runeharbor::graphics
 {
@@ -70,6 +71,17 @@ class HUD
     game::GameWorld* gameWorld_ = nullptr;
     engine::MapScene* mapScene_ = nullptr;
     TextureLookup textureLookup_;
+
+    // Cache of resolved portrait/face textures keyed by name, so the HUD does
+    // not re-decode the PCX/sprite every frame for the 4 portraits.
+    struct CachedPortrait
+    {
+        void* tex = nullptr;
+        int w = 0, h = 0;
+    };
+    std::unordered_map<std::string, CachedPortrait> portraitCache_;
+    // Wraps textureLookup_ with the cache. Returns the cached texture (or null).
+    void* lookupCached(const std::string& name, int& w, int& h);
 };
 
 } // namespace runeharbor::ui
