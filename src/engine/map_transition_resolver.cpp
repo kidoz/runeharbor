@@ -153,17 +153,20 @@ int resolveSpawnIndexFromDirection(int direction)
 
 std::optional<float> directionToEntryYaw(int direction)
 {
-    // Face into the map when arriving from an edge transition.
+    // Face into the map when arriving from an edge transition. Values are in
+    // MM7 turn-units (0..2047 = full circle), matching how Party stores yaw and
+    // how the camera/HUD/minimap consume it. (Previously returned degrees, which
+    // was misread as turn-units and produced a wrong facing on arrival.)
     switch (resolveSpawnIndexFromDirection(direction))
     {
-    case 1: // North edge -> face South
-        return 180.0f;
-    case 2: // South edge -> face North
+    case 1: // North edge -> face South (half circle)
+        return 1024.0f;
+    case 2: // South edge -> face North (zero)
         return 0.0f;
-    case 3: // East edge -> face West
-        return 270.0f;
-    case 4: // West edge -> face East
-        return 90.0f;
+    case 3: // East edge -> face West (three-quarter circle)
+        return 1536.0f;
+    case 4: // West edge -> face East (quarter circle)
+        return 512.0f;
     default:
         return std::nullopt;
     }

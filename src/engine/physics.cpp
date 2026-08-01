@@ -401,7 +401,13 @@ void updatePartyPhysics(game::Party& party, const formats::BLVMapData* blv,
             {
                 float distToFloor =
                     (terrainZ - (state.positionLo.z - state.radiusLo)) / state.direction.z;
-                if (distToFloor >= 0.0f && distToFloor < state.adjustedMoveDistance)
+                // If distToFloor is negative, the party's feet are already at or
+                // below the terrain (e.g. stepped uphill). Treat that as an
+                // immediate collision so the snap-up below runs — without this,
+                // the guard silently lets the party pass under the surface.
+                if (distToFloor < 0.0f)
+                    distToFloor = 0.0f;
+                if (distToFloor < state.adjustedMoveDistance)
                 {
                     state.adjustedMoveDistance = distToFloor;
                     state.hit.type = HitType::Terrain;
@@ -460,6 +466,23 @@ void updatePartyPhysics(game::Party& party, const formats::BLVMapData* blv,
 
         vel *= DAMPING_FACTOR;
         dt -= (state.adjustedMoveDistance / state.speed);
+    }
+
+    // Outdoor ground clamp: unconditionally keep the party at or above the
+    // terrain. The CCD terrain branch above only catches falls onto the floor
+    // from above; once feet reach/below the surface (uphill steps, post-landing
+    // dips), the guard rejects the hit and gravity sinks the party. This clamp
+    // is the guaranteed backstop — it snaps Z up to the terrain and zeroes
+    // downward velocity so gravity can't accumulate into a sink.
+    if (odm)
+    {
+        const float terrainZ = sampleOutdoorTerrainHeight(*odm, pos.x, pos.y);
+        if (pos.z < terrainZ)
+        {
+            pos.z = terrainZ;
+            if (vel.z < 0)
+                vel.z = 0;
+        }
     }
 
     party.setWorldPosition(pos.x, pos.y, pos.z);

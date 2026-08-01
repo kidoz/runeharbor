@@ -26,7 +26,7 @@ struct TravelDestination
     float arrivalX = 0.0f;
     float arrivalY = 0.0f;
     float arrivalZ = 0.0f;
-    float arrivalFacing = 0.0f; // yaw (degrees)
+    float arrivalFacing = 0.0f; // yaw in MM7 turn-units (0..2047), matching Party::yaw
     int travelDays = 1;
 };
 

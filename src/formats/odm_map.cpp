@@ -875,7 +875,10 @@ float ODMMap::getHeightAtWorld(float worldX, float worldY) const
     constexpr float HALF_TERRAIN = ODMMapData::TERRAIN_SIZE / 2.0f;
 
     float gridX = (worldX / CELL_SIZE) + HALF_TERRAIN;
-    float gridY = (worldY / CELL_SIZE) + HALF_TERRAIN;
+    // Grid Y grows south while world Y grows north — mirror about the map
+    // center, matching outdoorWorldToGridY in odm_map.hpp. (Was unmirrored,
+    // which sampled the wrong row and returned heights for a different region.)
+    float gridY = HALF_TERRAIN - (worldY / CELL_SIZE);
 
     // Bilinear interpolation
     int x0 = static_cast<int>(gridX);
