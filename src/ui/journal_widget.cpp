@@ -145,101 +145,181 @@ void JournalWidget::render(graphics::IRenderer& renderer, const graphics::DebugT
     int x = bounds_.x + 20;
     int y = bounds_.y + 16;
 
-    text.drawText(sdl, x, y, 2, 255, 220, 120, "Quest Journal");
-    y += 34;
+    text.drawText(sdl, x, y, 2, 255, 220, 120, "Journal");
+    y += 30;
 
-    rebuildRows();
-
-    if (questLog_ == nullptr)
+    // Tab buttons: Quests / Autonotes / Awards.
+    rowY_.clear();
+    const char* tabLabels[] = {"Quests", "Autonotes", "Awards"};
+    for (int t = 0; t < 3; t++)
     {
-        text.drawText(sdl, x, y, 1, 200, 200, 200, "(quest log unavailable)");
-        return;
+        const int tabW = 72;
+        const int tabX = x + t * (tabW + 6);
+        const bool active = (static_cast<int>(activeTab_) == t);
+        renderer.drawFilledRect(tabX, y, tabW, 20, active ? 80 : 40, active ? 70 : 35,
+                                active ? 30 : 20, 220);
+        renderer.drawRect(tabX, y, tabW, 20, 130, 108, 60, 255);
+        text.drawText(sdl, tabX + 8, y + 3, 1, active ? 255 : 180, active ? 230 : 180,
+                      active ? 120 : 150, tabLabels[t]);
     }
-
-    // Header counts.
-    const std::string counts =
-        std::format("{} active   {} completed   {} total", questLog_->activeQuestCount(),
-                    questLog_->completedQuestCount(), questLog_->totalQuestCount());
-    text.drawText(sdl, x, y, 1, 200, 200, 160, counts);
-    y += rowHeight_ + 4;
+    y += 26;
     renderer.drawFilledRect(bounds_.x + 16, y, bounds_.width - 32, 1, 110, 90, 50, 220);
     y += 6;
 
-    if (rows_.empty())
-    {
-        text.drawText(sdl, x, y, 1, 200, 200, 200,
-                      "No quests yet. Explore and talk to NPCs to find them.");
-        return;
-    }
-
-    // Left pane: quest list (about 40% of width).
     const int listW = bounds_.width * 2 / 5;
     const int detailX = bounds_.x + listW + 32;
     const int detailW = bounds_.width - listW - 60;
+    const int maxListY = bounds_.y + bounds_.height - 30;
 
-    text.drawText(sdl, x, y, 1, 180, 180, 200, "Quests");
-    y += rowHeight_ + 2;
-    rowY_.clear();
-
-    if (selected_ >= static_cast<int>(rows_.size()))
-        selected_ = 0;
-
-    for (int i = 0; i < static_cast<int>(rows_.size()); i++)
+    if (activeTab_ == JournalTab::Quests)
     {
-        if (y + rowHeight_ > bounds_.y + bounds_.height - 30)
-            break;
-        const auto& row = rows_[i];
-        if (i == selected_)
+        rebuildRows();
+        if (questLog_ == nullptr)
         {
-            renderer.drawFilledRect(bounds_.x + 16, y - 1, listW, rowHeight_, 80, 70, 30, 220);
+            text.drawText(sdl, x, y, 1, 200, 200, 200, "(quest log unavailable)");
         }
-        const uint8_t col = row.active ? 240 : 170;
-        const uint8_t g = row.active ? 230 : 170;
-        const uint8_t b = row.active ? 170 : 150;
-        text.drawText(sdl, x, y, 1, col, g, b,
-                      row.label.size() > 34 ? row.label.substr(0, 33) + "..." : row.label);
-        rowY_.push_back(y);
-        y += rowHeight_;
-    }
-
-    // Right pane: selected quest detail.
-    if (selected_ >= 0 && selected_ < static_cast<int>(rows_.size()))
-    {
-        const auto& row = rows_[selected_];
-        int dy = bounds_.y + 56;
-        text.drawText(sdl, detailX, dy, 1, 255, 220, 120, "Details");
-        dy += rowHeight_ + 2;
-        renderer.drawFilledRect(detailX - 4, dy, detailW + 8, 1, 110, 90, 50, 220);
-        dy += 6;
-
-        const std::string status = statusLabel(row.entry->state);
-        const std::string heading = std::format("{} {}", row.entry->text, status);
-        for (const auto& ln : wrapText(heading, detailW / 8))
+        else if (rows_.empty())
         {
-            text.drawText(sdl, detailX, dy, 1, 230, 230, 230, ln);
-            dy += rowHeight_;
+            text.drawText(sdl, x, y, 1, 200, 200, 200,
+                          "No quests yet. Explore and talk to NPCs to find them.");
         }
-        if (!row.entry->owner.empty())
+        else
         {
-            dy += 4;
-            text.drawText(sdl, detailX, dy, 1, 180, 180, 200,
-                          std::format("Given by: {}", row.entry->owner));
-            dy += rowHeight_;
-        }
-        if (!row.entry->notes.empty())
-        {
-            dy += 4;
-            for (const auto& ln : wrapText(row.entry->notes, detailW / 8))
+            const std::string counts =
+                std::format("{} active   {} completed", questLog_->activeQuestCount(),
+                            questLog_->completedQuestCount());
+            text.drawText(sdl, x, y, 1, 200, 200, 160, counts);
+            y += rowHeight_ + 2;
+            if (selected_ >= static_cast<int>(rows_.size()))
+                selected_ = 0;
+            for (int i = 0; i < static_cast<int>(rows_.size()); i++)
             {
-                text.drawText(sdl, detailX, dy, 1, 200, 200, 170, ln);
-                dy += rowHeight_;
+                if (y + rowHeight_ > maxListY)
+                    break;
+                const auto& row = rows_[i];
+                if (i == selected_)
+                    renderer.drawFilledRect(bounds_.x + 16, y - 1, listW, rowHeight_, 80, 70, 30,
+                                            220);
+                text.drawText(sdl, x, y, 1, row.active ? 240 : 170, row.active ? 230 : 170,
+                              row.active ? 170 : 150,
+                              row.label.size() > 34 ? row.label.substr(0, 33) + "..." : row.label);
+                rowY_.push_back(y);
+                y += rowHeight_;
+            }
+            // Detail pane.
+            if (selected_ >= 0 && selected_ < static_cast<int>(rows_.size()))
+            {
+                const auto& row = rows_[selected_];
+                int dy = bounds_.y + 72;
+                const std::string heading =
+                    std::format("{} {}", row.entry->text, statusLabel(row.entry->state));
+                for (const auto& ln : wrapText(heading, detailW / 8))
+                {
+                    text.drawText(sdl, detailX, dy, 1, 230, 230, 230, ln);
+                    dy += rowHeight_;
+                }
+                if (!row.entry->owner.empty())
+                {
+                    dy += 4;
+                    text.drawText(sdl, detailX, dy, 1, 180, 180, 200,
+                                  std::format("Given by: {}", row.entry->owner));
+                }
+            }
+        }
+    }
+    else if (activeTab_ == JournalTab::Autonotes)
+    {
+        if (autonoteCatalog_ == nullptr || autonoteCatalog_->empty())
+        {
+            text.drawText(sdl, x, y, 1, 200, 200, 200, "(no autonotes available)");
+        }
+        else
+        {
+            if (selected_ >= static_cast<int>(autonoteCatalog_->size()))
+                selected_ = 0;
+            for (size_t i = 0; i < autonoteCatalog_->size(); i++)
+            {
+                if (y + rowHeight_ > maxListY)
+                    break;
+                const auto& note = (*autonoteCatalog_)[i];
+                if (static_cast<int>(i) == selected_)
+                    renderer.drawFilledRect(bounds_.x + 16, y - 1, listW, rowHeight_, 80, 70, 30,
+                                            220);
+                std::string label = note.autonoteText;
+                if (label.size() > 34)
+                    label = label.substr(0, 33) + "...";
+                text.drawText(sdl, x, y, 1, static_cast<int>(i) == selected_ ? 250 : 200,
+                              static_cast<int>(i) == selected_ ? 230 : 200,
+                              static_cast<int>(i) == selected_ ? 170 : 170, label);
+                rowY_.push_back(y);
+                y += rowHeight_;
+            }
+            // Detail pane.
+            if (selected_ >= 0 && selected_ < static_cast<int>(autonoteCatalog_->size()))
+            {
+                int dy = bounds_.y + 72;
+                for (const auto& ln :
+                     wrapText((*autonoteCatalog_)[selected_].autonoteText, detailW / 8))
+                {
+                    text.drawText(sdl, detailX, dy, 1, 230, 230, 230, ln);
+                    dy += rowHeight_;
+                }
+            }
+        }
+    }
+    else // Awards
+    {
+        if (awardCatalog_ == nullptr || awardCatalog_->empty())
+        {
+            text.drawText(sdl, x, y, 1, 200, 200, 200, "(no awards available)");
+        }
+        else
+        {
+            if (selected_ >= static_cast<int>(awardCatalog_->size()))
+                selected_ = 0;
+            for (size_t i = 0; i < awardCatalog_->size(); i++)
+            {
+                if (y + rowHeight_ > maxListY)
+                    break;
+                const auto& award = (*awardCatalog_)[i];
+                if (static_cast<int>(i) == selected_)
+                    renderer.drawFilledRect(bounds_.x + 16, y - 1, listW, rowHeight_, 80, 70, 30,
+                                            220);
+                std::string label = award.awardText;
+                if (label.size() > 34)
+                    label = label.substr(0, 33) + "...";
+                text.drawText(sdl, x, y, 1, static_cast<int>(i) == selected_ ? 250 : 200,
+                              static_cast<int>(i) == selected_ ? 230 : 200,
+                              static_cast<int>(i) == selected_ ? 170 : 170, label);
+                rowY_.push_back(y);
+                y += rowHeight_;
+            }
+            // Detail pane.
+            if (selected_ >= 0 && selected_ < static_cast<int>(awardCatalog_->size()))
+            {
+                int dy = bounds_.y + 72;
+                for (const auto& ln : wrapText((*awardCatalog_)[selected_].awardText, detailW / 8))
+                {
+                    text.drawText(sdl, detailX, dy, 1, 230, 230, 230, ln);
+                    dy += rowHeight_;
+                }
+                if (!(*awardCatalog_)[selected_].notes.empty())
+                {
+                    dy += 4;
+                    for (const auto& ln : wrapText((*awardCatalog_)[selected_].notes, detailW / 8))
+                    {
+                        text.drawText(sdl, detailX, dy, 1, 200, 200, 170, ln);
+                        dy += rowHeight_;
+                    }
+                }
             }
         }
     }
 
     // Footer hint.
     const int hintY = bounds_.y + bounds_.height - 18;
-    text.drawText(sdl, x, hintY, 1, 160, 160, 170, "Up/Dn: select quest   Esc: close");
+    text.drawText(sdl, x, hintY, 1, 160, 160, 170,
+                  "Up/Dn: select   Click tab to switch   Esc: close");
 }
 
 bool JournalWidget::handleEvent(const UIEvent& event)
@@ -248,6 +328,21 @@ bool JournalWidget::handleEvent(const UIEvent& event)
         return false;
     if (event.type == UIEventType::MouseDown && bounds_.contains(event.mouseX, event.mouseY))
     {
+        // Tab buttons (3 tabs at y ~46..66 from bounds top).
+        const int tabY = bounds_.y + 46;
+        if (event.mouseY >= tabY && event.mouseY < tabY + 20)
+        {
+            for (int t = 0; t < 3; t++)
+            {
+                const int tabX = bounds_.x + 20 + t * 78;
+                if (event.mouseX >= tabX && event.mouseX < tabX + 72)
+                {
+                    activeTab_ = static_cast<JournalTab>(t);
+                    selected_ = 0;
+                    return true;
+                }
+            }
+        }
         for (size_t i = 0; i < rowY_.size(); i++)
         {
             if (event.mouseY >= rowY_[i] && event.mouseY < rowY_[i] + rowHeight_)

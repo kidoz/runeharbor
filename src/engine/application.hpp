@@ -17,6 +17,8 @@
 #include <vector>
 
 #include "../audio/audio_system.hpp"
+#include "../formats/autonote_parser.hpp"
+#include "../formats/awards_parser.hpp"
 #include "../formats/evt_script_parser.hpp"
 #include "../formats/frame_tables.hpp"
 #include "../formats/npcgreet_parser.hpp"
@@ -215,6 +217,9 @@ class Application
     // Full typed building/shop entries (the onShowBuilding callback hands the
     // building id to the shop window, which resolves the entry from here).
     std::unordered_map<int, formats::TwoDEventEntry> buildingEntryById_;
+    // Autonote + award catalogs (for the journal's autonotes/awards tabs).
+    std::vector<formats::AutonoteEntry> autonoteEntries_;
+    std::vector<formats::AwardEntry> awardEntries_;
     std::unordered_map<int, std::string> npcDialogTextById_;
     std::unordered_map<int, std::string> npcDialogOwnerById_;
     std::unordered_map<int, std::string> npcNameById_;

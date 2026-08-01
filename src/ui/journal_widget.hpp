@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "../formats/autonote_parser.hpp"
+#include "../formats/awards_parser.hpp"
 #include "../game/game_world.hpp"
 #include "../game/quest_log.hpp"
 #include "widgets.hpp"
@@ -26,6 +29,14 @@ class JournalWidget : public Widget
 
     void setGameWorld(game::GameWorld* world) { gameWorld_ = world; }
     void setQuestLog(game::QuestLog* questLog) { questLog_ = questLog; }
+    void setAutonoteCatalog(const std::vector<formats::AutonoteEntry>* catalog)
+    {
+        autonoteCatalog_ = catalog;
+    }
+    void setAwardCatalog(const std::vector<formats::AwardEntry>* catalog)
+    {
+        awardCatalog_ = catalog;
+    }
 
     void render(graphics::IRenderer& renderer, const graphics::DebugText& text) override;
     bool handleEvent(const UIEvent& event) override;
@@ -51,7 +62,18 @@ class JournalWidget : public Widget
 
     game::GameWorld* gameWorld_ = nullptr;
     game::QuestLog* questLog_ = nullptr;
+    const std::vector<formats::AutonoteEntry>* autonoteCatalog_ = nullptr;
+    const std::vector<formats::AwardEntry>* awardCatalog_ = nullptr;
     TextureLookup textureLookup_;
+
+    // Active tab: Quests (default), Autonotes, Awards.
+    enum class JournalTab : uint8_t
+    {
+        Quests = 0,
+        Autonotes = 1,
+        Awards = 2
+    };
+    JournalTab activeTab_ = JournalTab::Quests;
 
     std::vector<QuestRow> rows_;
     std::vector<int> rowY_; // screen Y per row for hit-testing

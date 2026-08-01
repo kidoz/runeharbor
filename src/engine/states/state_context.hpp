@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "../../formats/autonote_parser.hpp"
+#include "../../formats/awards_parser.hpp"
 #include "../../formats/two_d_events_parser.hpp"
 #include "../../game/character.hpp"
 
@@ -73,6 +75,9 @@ struct SharedGameData
     game::SpellSystem* spellSystem = nullptr;
     game::Inventory* inventory = nullptr;
     game::QuestLog* questLog = nullptr;
+    // Autonote + award catalogs (for the journal's autonotes/awards tabs).
+    const std::vector<formats::AutonoteEntry>* autonoteCatalog = nullptr;
+    const std::vector<formats::AwardEntry>* awardCatalog = nullptr;
     game::SaveGame* saveGame = nullptr;
     MapScene* mapScene = nullptr;
     std::string newGameStartMapName = "out01.odm";

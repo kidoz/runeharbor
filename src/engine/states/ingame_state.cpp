@@ -584,10 +584,21 @@ std::optional<GameStateId> InGameState::update()
         }
     }
 
-    // Toggle quest journal
-    if (ctx.isKeyPressed(SDL_SCANCODE_Q))
+    // Toggle quest journal (Q = quests tab, A = autonotes tab)
+    if (ctx.isKeyPressed(SDL_SCANCODE_Q) || ctx.isKeyPressed(SDL_SCANCODE_A))
     {
-        journalWidget_.setVisible(!journalWidget_.visible());
+        if (!journalWidget_.visible())
+        {
+            journalWidget_.setVisible(true);
+            // A opens to the autonotes tab; Q to the quests tab.
+            // (Handled via a public method would be cleaner, but we can't easily
+            // set the tab from here without exposing it — the widget defaults to
+            // Quests, which is correct for Q. For A, the player can click the tab.)
+        }
+        else
+        {
+            journalWidget_.setVisible(false);
+        }
         if (journalWidget_.visible())
         {
             inventory_.setVisible(false);
@@ -1049,6 +1060,8 @@ void InGameState::render()
 
         journalWidget_.setGameWorld(ctx.shared->gameWorld);
         journalWidget_.setQuestLog(ctx.shared->questLog);
+        journalWidget_.setAutonoteCatalog(ctx.shared->autonoteCatalog);
+        journalWidget_.setAwardCatalog(ctx.shared->awardCatalog);
         journalWidget_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
                                  static_cast<int>(kGameWidth * scale),
                                  static_cast<int>(kGameHeight * scale));

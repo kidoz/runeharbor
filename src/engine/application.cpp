@@ -14,6 +14,7 @@
 #include <cmath>
 
 #include "../formats/autonote_parser.hpp"
+#include "../formats/awards_parser.hpp"
 #include "../formats/credits_parser.hpp"
 #include "../formats/hostile_parser.hpp"
 #include "../formats/image_lod_archive.hpp"
@@ -302,6 +303,8 @@ void Application::initStates()
     sharedData->spellSystem = spellSystem_.get();
     sharedData->inventory = inventory_.get();
     sharedData->questLog = questLog_.get();
+    sharedData->autonoteCatalog = &autonoteEntries_;
+    sharedData->awardCatalog = &awardEntries_;
     sharedData->saveGame = saveGame_.get();
     sharedData->newGameStartMapName = defaultStartMapName_;
 
@@ -3456,6 +3459,28 @@ void Application::loadDataTables()
                 questLog_->loadQuestData(parser.getQuests());
                 logger.info(std::format("Loaded {} quest definitions", parser.getQuests().size()));
             }
+        }
+    }
+
+    // Autonote + award catalogs (for the journal's autonotes/awards tabs).
+    if (auto autonoteData = readFirstExisting({"autonote.txt", "AUTONOTE.TXT", "Autonote.txt"});
+        autonoteData.has_value())
+    {
+        formats::AutonoteParser parser(logger);
+        if (parser.parse(*autonoteData))
+        {
+            autonoteEntries_ = parser.getAutonoteEntries();
+            logger.info(std::format("Loaded {} autonote entries", autonoteEntries_.size()));
+        }
+    }
+    if (auto awardsData = readFirstExisting({"awards.txt", "AWARDS.TXT", "Awards.txt"});
+        awardsData.has_value())
+    {
+        formats::AwardsParser parser(logger);
+        if (parser.parse(*awardsData))
+        {
+            awardEntries_ = parser.getAwards();
+            logger.info(std::format("Loaded {} award entries", awardEntries_.size()));
         }
     }
 
