@@ -75,6 +75,10 @@ void RestWidget::render(graphics::IRenderer& renderer, const graphics::DebugText
                   "Current Food: " + std::to_string(party.food()));
     textY += 30;
 
+    // TODO: only "Rest 8 hours" is implemented (any click triggers it and
+    // closes the panel). "Wait 5 minutes" / "Wait 1 hour" are drawn but have no
+    // click regions or handlers — either implement them with distinct buttons
+    // or remove the two lines so the panel doesn't advertise actions it lacks.
     text.drawText(sdl, textX, textY, 1, 200, 200, 200, "Rest 8 hours (consume 1 food)");
     textY += 20;
     text.drawText(sdl, textX, textY, 1, 200, 200, 200, "Wait 5 minutes");

@@ -36,6 +36,9 @@ void* CharacterStatsWidget::getCachedTexture(const std::string& name, int& w, in
 
 void CharacterStatsWidget::render(graphics::IRenderer& renderer, const graphics::DebugText& text)
 {
+    // TODO: stub read-only dump. The real MM7 character sheet also shows
+    // resistances, the skills table, equipment summary, conditions, age, and
+    // armor class. handleEvent only swallows clicks (no interaction yet).
     if (!visible_)
         return;
 
