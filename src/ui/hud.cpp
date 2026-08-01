@@ -238,30 +238,52 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
         if (textureLookup_)
         {
             int w, h;
-            int frameIndex = 1; // Default (Healthy)
-
-            if (ch.hasCondition(game::ConditionIndex::Eradicated) ||
-                ch.hasCondition(game::ConditionIndex::Stoned))
+            // Use the canonical worst-condition resolver (Character::
+            // worstActiveCondition, MM7 priority table at 0x4EDDA0) so every
+            // one of the 18 conditions maps to a face frame, not just the 5
+            // the prior cascade covered.
+            const game::ConditionIndex worst = ch.worstActiveCondition();
+            int frameIndex = 1; // Healthy
+            switch (worst)
             {
-                frameIndex = 56; // Eradicated / Stoned / Special dead
-            }
-            else if (ch.hasCondition(game::ConditionIndex::Dead))
-            {
-                frameIndex = 55; // Dead
-            }
-            else if (ch.hasCondition(game::ConditionIndex::Asleep) ||
-                     ch.hasCondition(game::ConditionIndex::Unconscious))
-            {
-                frameIndex = 54; // Unconscious / Asleep (Approximate)
-            }
-            else if (ch.hasCondition(game::ConditionIndex::Poison1) ||
-                     ch.hasCondition(game::ConditionIndex::Poison2) ||
-                     ch.hasCondition(game::ConditionIndex::Poison3) ||
-                     ch.hasCondition(game::ConditionIndex::Disease1) ||
-                     ch.hasCondition(game::ConditionIndex::Disease2) ||
-                     ch.hasCondition(game::ConditionIndex::Disease3))
-            {
-                frameIndex = 47; // Sick / Poisoned (Approximate)
+            case game::ConditionIndex::Eradicated:
+            case game::ConditionIndex::Stoned:
+                frameIndex = 56;
+                break;
+            case game::ConditionIndex::Dead:
+                frameIndex = 55;
+                break;
+            case game::ConditionIndex::Zombie:
+                frameIndex = 54; // share the unconscious frame
+                break;
+            case game::ConditionIndex::Unconscious:
+            case game::ConditionIndex::Asleep:
+                frameIndex = 54;
+                break;
+            case game::ConditionIndex::Paralyzed:
+                frameIndex = 54; // frozen look
+                break;
+            case game::ConditionIndex::Poison1:
+            case game::ConditionIndex::Poison2:
+            case game::ConditionIndex::Poison3:
+            case game::ConditionIndex::Disease1:
+            case game::ConditionIndex::Disease2:
+            case game::ConditionIndex::Disease3:
+                frameIndex = 47; // sick / poisoned
+                break;
+            case game::ConditionIndex::Insane:
+                frameIndex = 47; // distressed look
+                break;
+            case game::ConditionIndex::Drunk:
+            case game::ConditionIndex::Afraid:
+            case game::ConditionIndex::Weak:
+            case game::ConditionIndex::Cursed:
+                // No dedicated MM7 portrait frame; fall through to healthy.
+                frameIndex = 1;
+                break;
+            case game::ConditionIndex::Count:
+                frameIndex = 1; // healthy
+                break;
             }
 
             char buf[16];
