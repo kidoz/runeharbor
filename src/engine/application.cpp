@@ -1314,11 +1314,16 @@ void Application::wireUpMapTextures()
     worldRenderer->setTextureLookup(
         [this](const std::string& name) -> SDL_Texture*
         {
+            const std::string cacheKey = toLower(name);
             // Check cache first
-            auto it = mapTextureCache.find(name);
+            auto it = mapTextureCache.find(cacheKey);
             if (it != mapTextureCache.end())
             {
                 return static_cast<SDL_Texture*>(it->second);
+            }
+            if (missingMapTextures.contains(cacheKey))
+            {
+                return nullptr;
             }
 
             auto loadPaletteById = [this](int paletteId) -> graphics::Palette
@@ -1397,7 +1402,7 @@ void Application::wireUpMapTextures()
                         void* tex = renderer->createTexture(**imageResult);
                         if (tex)
                         {
-                            mapTextureCache[name] = tex;
+                            mapTextureCache[cacheKey] = tex;
                             return static_cast<SDL_Texture*>(tex);
                         }
                     }
@@ -1416,13 +1421,14 @@ void Application::wireUpMapTextures()
                         void* tex = renderer->createTexture(*image);
                         if (tex)
                         {
-                            mapTextureCache[name] = tex;
+                            mapTextureCache[cacheKey] = tex;
                             return static_cast<SDL_Texture*>(tex);
                         }
                     }
                 }
             }
 
+            missingMapTextures.insert(cacheKey);
             return nullptr;
         });
 }
@@ -1437,6 +1443,7 @@ void Application::clearMapTextureCache()
         }
     }
     mapTextureCache.clear();
+    missingMapTextures.clear();
 }
 
 void Application::setGameState(GameState state)

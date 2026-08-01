@@ -362,6 +362,7 @@ class Application
 
     // Map texture cache (face texture name -> GPU texture handle)
     std::unordered_map<std::string, void*> mapTextureCache;
+    std::unordered_set<std::string> missingMapTextures;
 
     struct CachedUiTexture
     {
