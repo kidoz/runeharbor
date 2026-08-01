@@ -13,9 +13,10 @@ layout(set = 1, binding = 0) uniform Uniforms {
 
 void main() {
     vec4 clipPos = ubo.viewProjection * vec4(inPosition, 1.0);
-    // The CPU projection matrix generates OpenGL-style Y-up and Z in [-1, 1].
-    // SDL_GPU/SPIR-V uses Y-down and Z in [0, 1] for screen space.
-    clipPos.y = -clipPos.y;
+    // SDL_GPU handles the backend-specific viewport orientation. Keep the
+    // projection matrix's Y coordinate unchanged so GPU and SDL_RenderGeometry
+    // place positive clip-space Y toward the top of the viewport.
+    // Convert only OpenGL-style Z [-1, 1] to SDL_GPU Z [0, 1].
     clipPos.z = (clipPos.z + clipPos.w) * 0.5;
     gl_Position = clipPos;
     

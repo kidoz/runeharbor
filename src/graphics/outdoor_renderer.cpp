@@ -6,11 +6,14 @@
 #include <algorithm>
 #include <format>
 
+#include <SDL3_shadercross/SDL_shadercross.h>
 #include <cmath>
 
 #include "../game/game_world.hpp"
 #include "billboard.hpp"
 #include "clip_utils.hpp"
+#include "image.hpp"
+#include "shaders_compiled.hpp"
 #include "sprite_facing.hpp"
 #include "texture_coordinates.hpp"
 #include "visibility.hpp"
@@ -353,12 +356,37 @@ SpawnBillboard makeOutdoorDecorationBillboard(const formats::ParsedDecoration& d
 } // namespace detail
 
 OutdoorRenderer::OutdoorRenderer(SDLRenderer& renderer, util::ILogger& logger)
-    : renderer(renderer), logger(logger)
+    : renderer(renderer), logger(logger), gpuDevice_(renderer.getGPUDevice())
 {
-    (void)this->logger;
+    if (gpuDevice_)
+    {
+        initGPUPipeline();
+        Image whitePixel(1, 1);
+        whitePixel.getRGBAData() = {255, 255, 255, 255};
+        fallbackTexture_ = static_cast<SDL_Texture*>(renderer.createTexture(whitePixel));
+    }
 }
 
-OutdoorRenderer::~OutdoorRenderer() {}
+OutdoorRenderer::~OutdoorRenderer()
+{
+    if (fallbackTexture_)
+    {
+        renderer.destroyTexture(fallbackTexture_);
+    }
+    if (gpuDevice_)
+    {
+        if (gpuVertexBuffer_)
+            SDL_ReleaseGPUBuffer(gpuDevice_, gpuVertexBuffer_);
+        if (defaultSampler_)
+            SDL_ReleaseGPUSampler(gpuDevice_, defaultSampler_);
+        if (gpuPipeline_)
+            SDL_ReleaseGPUGraphicsPipeline(gpuDevice_, gpuPipeline_);
+        if (vertexShader_)
+            SDL_ReleaseGPUShader(gpuDevice_, vertexShader_);
+        if (fragmentShader_)
+            SDL_ReleaseGPUShader(gpuDevice_, fragmentShader_);
+    }
+}
 
 void OutdoorRenderer::setTextureLookup(TextureLookup lookup)
 {
@@ -377,7 +405,8 @@ void OutdoorRenderer::setSpriteFrameTable(const formats::SpriteFrameTable* table
 
 void OutdoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                              const game::RuntimeConfig* runtimeConfig, float nightBlend,
-                             const Frustum* frustumOverride)
+                             const Frustum* frustumOverride, SDL_GPUTexture* colorTex,
+                             SDL_GPUTexture* depthTex, SDL_Texture* blitTex)
 {
     lastMapName_ = scene.getName();
     const auto& odmData = scene.getODMData();
@@ -399,10 +428,15 @@ void OutdoorRenderer::render(const engine::MapScene& scene, const Camera& camera
     // Draw the sky via SDL_Renderer (software/2D path)
     renderSky(runtimeConfig, blend);
 
-    renderTerrain(odmData, camera, runtimeConfig, blend, finalFrustum);
-    // Buildings and sprites share one back-to-front pass so that billboards are
-    // occluded by the structures in front of them.
-    renderObjects(odmData, camera, runtimeConfig, blend, finalFrustum);
+    const bool gpuWorldDrawn = renderWorldGPU(odmData, camera, runtimeConfig, blend, finalFrustum,
+                                              colorTex, depthTex, blitTex);
+    if (!gpuWorldDrawn)
+    {
+        renderTerrain(odmData, camera, runtimeConfig, blend, finalFrustum);
+    }
+    // The GPU path depth-tests buildings; billboards remain a transparent
+    // back-to-front overlay. The fallback keeps its combined painter ordering.
+    renderObjects(odmData, camera, runtimeConfig, blend, finalFrustum, gpuWorldDrawn);
 }
 
 void OutdoorRenderer::renderSky(const game::RuntimeConfig* runtimeConfig, float nightBlend)
@@ -441,6 +475,32 @@ void OutdoorRenderer::renderSky(const game::RuntimeConfig* runtimeConfig, float 
     SDL_RenderGeometry(renderer.getSDLRenderer(), nullptr, skyVerts, 4, skyIndices, 6);
 }
 
+void OutdoorRenderer::ensureTerrainCache(const formats::ODMMapData& odmData)
+{
+    constexpr int SIZE = formats::ODMMapData::TERRAIN_SIZE;
+    if (terrainCacheMapName_ == lastMapName_ &&
+        terrainWorldVerts_.size() == static_cast<size_t>(SIZE) * SIZE)
+    {
+        return;
+    }
+
+    terrainCacheMapName_ = lastMapName_;
+    terrainWorldVerts_.resize(static_cast<size_t>(SIZE) * SIZE);
+    for (int gy = 0; gy < SIZE; ++gy)
+    {
+        for (int gx = 0; gx < SIZE; ++gx)
+        {
+            const size_t index = static_cast<size_t>(gy * SIZE + gx);
+            const float height = index < odmData.heightmap.size()
+                                     ? static_cast<float>(odmData.heightmap[index].height)
+                                     : 0.0f;
+            terrainWorldVerts_[index] = gameplayToRenderPosition(
+                formats::outdoorGridToWorldX(static_cast<float>(gx)),
+                formats::outdoorGridToWorldY(static_cast<float>(gy)), height);
+        }
+    }
+}
+
 void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Camera& camera,
                                     const game::RuntimeConfig* runtimeConfig, float nightBlend,
                                     const Frustum* frustumOverride)
@@ -462,31 +522,7 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
         frustum = &localFrustum;
     }
 
-    // Build the camera-independent terrain vertex cache once per map (avoids
-    // per-frame heightmap reads + grid→world conversions for all 128×128
-    // corners). The cache stores render-space positions; the camera-dependent
-    // clip transform and LOD still run per-frame.
-    if (terrainCacheMapName_ != lastMapName_)
-    {
-        terrainCacheMapName_ = lastMapName_;
-        terrainWorldVerts_.clear();
-        terrainWorldVerts_.resize(static_cast<size_t>(SIZE) * SIZE);
-        for (int gy = 0; gy < SIZE; ++gy)
-        {
-            for (int gx = 0; gx < SIZE; ++gx)
-            {
-                float height = 0.0f;
-                size_t idx = static_cast<size_t>(gy * SIZE + gx);
-                if (idx < odmData.heightmap.size())
-                {
-                    height = static_cast<float>(odmData.heightmap[idx].height);
-                }
-                terrainWorldVerts_[idx] = gameplayToRenderPosition(
-                    formats::outdoorGridToWorldX(static_cast<float>(gx)),
-                    formats::outdoorGridToWorldY(static_cast<float>(gy)), height);
-            }
-        }
-    }
+    ensureTerrainCache(odmData);
 
     // Helper: look up a cached world-space position for a grid corner.
     auto worldPos = [&](int gx, int gy) -> Vec3
@@ -740,7 +776,7 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
 
 void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Camera& camera,
                                     const game::RuntimeConfig* runtimeConfig, float nightBlend,
-                                    const Frustum* frustumOverride)
+                                    const Frustum* frustumOverride, bool skipBuildingFaces)
 {
     const auto& viewProjection = camera.getViewProjectionMatrix();
     const Vec3 cameraPos = camera.getPosition();
@@ -773,69 +809,72 @@ void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Ca
 
     std::vector<RenderOp> ops;
 
-    for (const auto& building : odmData.buildings)
+    if (!skipBuildingFaces)
     {
-        // BSP model bounding boxes are in absolute world coordinates (not relative to posX/Y/Z).
-        // Convert from gameplay coords (Z=up) to render coords (Y=up).
-        const float minX = static_cast<float>(building.minX);
-        const float maxX = static_cast<float>(building.maxX);
-        const float minY = static_cast<float>(building.minZ); // gameplay Z → render Y
-        const float maxY = static_cast<float>(building.maxZ);
-        const float minZ = static_cast<float>(building.minY); // gameplay Y → render Z
-        const float maxZ = static_cast<float>(building.maxY);
-
-        if (!frustum->testAABB(minX, minY, minZ, maxX, maxY, maxZ))
+        for (const auto& building : odmData.buildings)
         {
-            continue;
-        }
+            // BSP model bounding boxes are in absolute world coordinates (not relative to
+            // posX/Y/Z). Convert from gameplay coords (Z=up) to render coords (Y=up).
+            const float minX = static_cast<float>(building.minX);
+            const float maxX = static_cast<float>(building.maxX);
+            const float minY = static_cast<float>(building.minZ); // gameplay Z → render Y
+            const float maxY = static_cast<float>(building.maxZ);
+            const float minZ = static_cast<float>(building.minY); // gameplay Y → render Z
+            const float maxZ = static_cast<float>(building.maxY);
 
-        for (uint32_t fi = 0; fi < building.faces.size(); fi++)
-        {
-            const auto& face = building.faces[fi];
-            if (face.numVertices < 3 || face.vertexIndices.empty() || face.isInvisible())
+            if (!frustum->testAABB(minX, minY, minZ, maxX, maxY, maxZ))
             {
                 continue;
             }
 
-            // Face centroid, used for backface culling and depth sorting.
-            float cx = 0, cy = 0, cz = 0;
-            uint32_t valid = 0;
-            for (uint8_t j = 0; j < face.numVertices && j < face.vertexIndices.size(); j++)
+            for (uint32_t fi = 0; fi < building.faces.size(); fi++)
             {
-                uint16_t vi = face.vertexIndices[j];
-                if (vi < building.vertices.size())
+                const auto& face = building.faces[fi];
+                if (face.numVertices < 3 || face.vertexIndices.empty() || face.isInvisible())
                 {
-                    const auto& v = building.vertices[vi];
-                    cx += static_cast<float>(v.x);
-                    cy += static_cast<float>(v.z);
-                    cz += static_cast<float>(v.y);
-                    valid++;
+                    continue;
                 }
-            }
-            if (valid == 0)
-            {
-                continue;
-            }
-            const float inv = 1.0f / static_cast<float>(valid);
-            cx *= inv;
-            cy *= inv;
-            cz *= inv;
 
-            const float viewX = cx - cameraPos.x;
-            const float viewY = cy - cameraPos.y;
-            const float viewZ = cz - cameraPos.z;
-            const Vec3 faceNormal =
-                gameplayToRenderDirection(face.normalFX, face.normalFY, face.normalFZ);
-            if (faceNormal.x * viewX + faceNormal.y * viewY + faceNormal.z * viewZ > 0.0f)
-            {
-                continue;
-            }
+                // Face centroid, used for backface culling and depth sorting.
+                float cx = 0, cy = 0, cz = 0;
+                uint32_t valid = 0;
+                for (uint8_t j = 0; j < face.numVertices && j < face.vertexIndices.size(); j++)
+                {
+                    uint16_t vi = face.vertexIndices[j];
+                    if (vi < building.vertices.size())
+                    {
+                        const auto& v = building.vertices[vi];
+                        cx += static_cast<float>(v.x);
+                        cy += static_cast<float>(v.z);
+                        cz += static_cast<float>(v.y);
+                        valid++;
+                    }
+                }
+                if (valid == 0)
+                {
+                    continue;
+                }
+                const float inv = 1.0f / static_cast<float>(valid);
+                cx *= inv;
+                cy *= inv;
+                cz *= inv;
 
-            RenderOp op;
-            op.building = &building;
-            op.faceIndex = fi;
-            op.distanceSq = viewX * viewX + viewY * viewY + viewZ * viewZ;
-            ops.push_back(std::move(op));
+                const float viewX = cx - cameraPos.x;
+                const float viewY = cy - cameraPos.y;
+                const float viewZ = cz - cameraPos.z;
+                const Vec3 faceNormal =
+                    gameplayToRenderDirection(face.normalFX, face.normalFY, face.normalFZ);
+                if (faceNormal.x * viewX + faceNormal.y * viewY + faceNormal.z * viewZ > 0.0f)
+                {
+                    continue;
+                }
+
+                RenderOp op;
+                op.building = &building;
+                op.faceIndex = fi;
+                op.distanceSq = viewX * viewX + viewY * viewY + viewZ * viewZ;
+                ops.push_back(std::move(op));
+            }
         }
     }
 
@@ -1226,6 +1265,515 @@ void OutdoorRenderer::drawBillboard(const detail::SpawnBillboard& sprite, const 
     SDL_RenderGeometry(renderer.getSDLRenderer(), texture, vertices, 4, indices, 6);
 }
 
-void OutdoorRenderer::invalidateGPUCache() {}
+void OutdoorRenderer::initGPUPipeline()
+{
+    if (!gpuDevice_ || !SDL_ShaderCross_Init())
+    {
+        logger.error("OutdoorRenderer: failed to initialize SDL_shadercross: " +
+                     std::string(SDL_GetError()));
+        return;
+    }
+
+    SDL_ShaderCross_SPIRV_Info vertexSpirv = {};
+    vertexSpirv.bytecode = shaders::world_vert_data;
+    vertexSpirv.bytecode_size = shaders::world_vert_size;
+    vertexSpirv.entrypoint = "main";
+    vertexSpirv.shader_stage = SDL_SHADERCROSS_SHADERSTAGE_VERTEX;
+    SDL_ShaderCross_GraphicsShaderResourceInfo vertexResources = {};
+    vertexResources.num_uniform_buffers = 1;
+    vertexShader_ = SDL_ShaderCross_CompileGraphicsShaderFromSPIRV(gpuDevice_, &vertexSpirv,
+                                                                   &vertexResources, 0);
+
+    SDL_ShaderCross_SPIRV_Info fragmentSpirv = {};
+    fragmentSpirv.bytecode = shaders::world_frag_data;
+    fragmentSpirv.bytecode_size = shaders::world_frag_size;
+    fragmentSpirv.entrypoint = "main";
+    fragmentSpirv.shader_stage = SDL_SHADERCROSS_SHADERSTAGE_FRAGMENT;
+    SDL_ShaderCross_GraphicsShaderResourceInfo fragmentResources = {};
+    fragmentResources.num_samplers = 1;
+    fragmentResources.num_uniform_buffers = 1;
+    fragmentShader_ = SDL_ShaderCross_CompileGraphicsShaderFromSPIRV(gpuDevice_, &fragmentSpirv,
+                                                                     &fragmentResources, 0);
+
+    if (!vertexShader_ || !fragmentShader_)
+    {
+        logger.error("OutdoorRenderer: failed to compile world shaders: " +
+                     std::string(SDL_GetError()));
+        return;
+    }
+
+    SDL_GPUVertexBufferDescription vertexBufferDescription = {};
+    vertexBufferDescription.slot = 0;
+    vertexBufferDescription.pitch = sizeof(GPUVertex);
+    vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+    SDL_GPUVertexAttribute attributes[3] = {};
+    attributes[0].location = 0;
+    attributes[0].buffer_slot = 0;
+    attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+    attributes[0].offset = offsetof(GPUVertex, x);
+    attributes[1].location = 1;
+    attributes[1].buffer_slot = 0;
+    attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+    attributes[1].offset = offsetof(GPUVertex, r);
+    attributes[2].location = 2;
+    attributes[2].buffer_slot = 0;
+    attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+    attributes[2].offset = offsetof(GPUVertex, u);
+
+    SDL_GPUGraphicsPipelineCreateInfo pipelineInfo = {};
+    pipelineInfo.vertex_shader = vertexShader_;
+    pipelineInfo.fragment_shader = fragmentShader_;
+    pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pipelineInfo.vertex_input_state.vertex_buffer_descriptions = &vertexBufferDescription;
+    pipelineInfo.vertex_input_state.num_vertex_buffers = 1;
+    pipelineInfo.vertex_input_state.vertex_attributes = attributes;
+    pipelineInfo.vertex_input_state.num_vertex_attributes = 3;
+    pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    pipelineInfo.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+    pipelineInfo.depth_stencil_state.enable_depth_test = true;
+    pipelineInfo.depth_stencil_state.enable_depth_write = true;
+    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+
+    SDL_GPUColorTargetDescription colorTarget = {};
+    colorTarget.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    colorTarget.blend_state.enable_blend = true;
+    colorTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    colorTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    colorTarget.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+    colorTarget.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    colorTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    colorTarget.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+    pipelineInfo.target_info.color_target_descriptions = &colorTarget;
+    pipelineInfo.target_info.num_color_targets = 1;
+    pipelineInfo.target_info.has_depth_stencil_target = true;
+    pipelineInfo.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
+
+    gpuPipeline_ = SDL_CreateGPUGraphicsPipeline(gpuDevice_, &pipelineInfo);
+    if (!gpuPipeline_)
+    {
+        logger.error("OutdoorRenderer: failed to create GPU pipeline: " +
+                     std::string(SDL_GetError()));
+        return;
+    }
+
+    SDL_GPUSamplerCreateInfo samplerInfo = {};
+    samplerInfo.min_filter = SDL_GPU_FILTER_NEAREST;
+    samplerInfo.mag_filter = SDL_GPU_FILTER_NEAREST;
+    samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    defaultSampler_ = SDL_CreateGPUSampler(gpuDevice_, &samplerInfo);
+    gpuInitialized_ = defaultSampler_ != nullptr;
+}
+
+bool OutdoorRenderer::renderWorldGPU(const formats::ODMMapData& odmData, const Camera& camera,
+                                     const game::RuntimeConfig* runtimeConfig, float nightBlend,
+                                     const Frustum* frustumOverride, SDL_GPUTexture* colorTex,
+                                     SDL_GPUTexture* depthTex, SDL_Texture* blitTex)
+{
+    if (!gpuInitialized_ || !colorTex || !depthTex || !blitTex || !fallbackTexture_)
+    {
+        return false;
+    }
+
+    const Mat4& viewProjection = camera.getViewProjectionMatrix();
+    const Vec3 cameraPos = camera.getPosition();
+    Frustum localFrustum;
+    const Frustum* frustum = frustumOverride;
+    if (!frustum)
+    {
+        localFrustum.extractFromMatrix(viewProjection);
+        frustum = &localFrustum;
+    }
+
+    ensureTerrainCache(odmData);
+    gpuBatchIndices_.clear();
+    for (size_t i = 0; i < gpuBuildBatches_.size(); i++)
+    {
+        gpuBuildBatches_[i].vertices.clear();
+        gpuBatchIndices_.emplace(gpuBuildBatches_[i].texture, i);
+    }
+
+    auto batchFor = [&](SDL_Texture* texture) -> GPUBuildBatch&
+    {
+        const auto [it, inserted] = gpuBatchIndices_.try_emplace(texture, gpuBuildBatches_.size());
+        if (inserted)
+        {
+            gpuBuildBatches_.push_back({texture, {}});
+        }
+        return gpuBuildBatches_[it->second];
+    };
+    auto makeVertex = [](const Vec3& position, const SDL_FColor& color, float u,
+                         float v) -> GPUVertex
+    { return {position.x, position.y, position.z, color.r, color.g, color.b, color.a, u, v}; };
+    auto appendTriangle =
+        [&](SDL_Texture* texture, const GPUVertex& a, const GPUVertex& b, const GPUVertex& c)
+    {
+        auto& vertices = batchFor(texture).vertices;
+        vertices.push_back(a);
+        vertices.push_back(b);
+        vertices.push_back(c);
+    };
+
+    constexpr int SIZE = formats::ODMMapData::TERRAIN_SIZE;
+    constexpr float CELL_SIZE = 512.0f;
+    auto worldPos = [&](int gx, int gy) -> const Vec3&
+    { return terrainWorldVerts_[static_cast<size_t>(gy * SIZE + gx)]; };
+    const detail::OutdoorLightingParams terrainLighting =
+        detail::makeOutdoorLightingParams(runtimeConfig, nightBlend, true);
+    auto heightColor = [](float height) -> SDL_FColor
+    {
+        const float t = std::clamp(height / 8000.0f, 0.0f, 1.0f);
+        return {0.30f + t * 0.35f, 0.45f - t * 0.15f, 0.20f + t * 0.05f, 1.0f};
+    };
+    auto terrainColor = [&](const Vec3& position, bool textured) -> SDL_FColor
+    {
+        const float distance = std::sqrt((position - cameraPos).lengthSquared());
+        const SDL_FColor base =
+            textured ? SDL_FColor{1.0f, 1.0f, 1.0f, 1.0f} : heightColor(position.y);
+        return detail::applyOutdoorLighting(base, distance, terrainLighting);
+    };
+
+    for (int gy = 0; gy < SIZE - 1; gy++)
+    {
+        int gx = 0;
+        while (gx < SIZE - 1)
+        {
+            const Vec3& p00 = worldPos(gx, gy);
+            const Vec3 center = {p00.x + CELL_SIZE * 0.5f, p00.y, p00.z - CELL_SIZE * 0.5f};
+            int step = TerrainLOD::lodStep((center - cameraPos).lengthSquared());
+            if (step <= 0)
+            {
+                gx++;
+                continue;
+            }
+            step = std::min(step, (SIZE - 1) - gx);
+            step = std::min(step, (SIZE - 1) - gy);
+            if (step <= 0)
+            {
+                gx++;
+                continue;
+            }
+
+            const Vec3& p10 = worldPos(gx + step, gy);
+            const Vec3& p01 = worldPos(gx, gy + step);
+            const Vec3& p11 = worldPos(gx + step, gy + step);
+            const float minX = std::min({p00.x, p10.x, p01.x, p11.x});
+            const float minY = std::min({p00.y, p10.y, p01.y, p11.y});
+            const float minZ = std::min({p00.z, p10.z, p01.z, p11.z});
+            const float maxX = std::max({p00.x, p10.x, p01.x, p11.x});
+            const float maxY = std::max({p00.y, p10.y, p01.y, p11.y});
+            const float maxZ = std::max({p00.z, p10.z, p01.z, p11.z});
+            if (!frustum->testAABB(minX, minY, minZ, maxX, maxY, maxZ))
+            {
+                gx += step;
+                continue;
+            }
+
+            SDL_Texture* texture = nullptr;
+            const size_t cellIndex = static_cast<size_t>(gy * SIZE + gx);
+            if (textureLookup && cellIndex < odmData.heightmap.size())
+            {
+                const uint8_t tileIndex = odmData.heightmap[cellIndex].tileIndex;
+                if (tileIndex < odmData.tileTextures.size() &&
+                    !odmData.tileTextures[tileIndex].empty())
+                {
+                    texture = textureLookup(odmData.tileTextures[tileIndex]);
+                }
+            }
+            const bool textured = texture != nullptr;
+            texture = textured ? texture : fallbackTexture_;
+            const GPUVertex v00 = makeVertex(p00, terrainColor(p00, textured), 0.0f, 0.0f);
+            const GPUVertex v10 = makeVertex(p10, terrainColor(p10, textured), 1.0f, 0.0f);
+            const GPUVertex v01 = makeVertex(p01, terrainColor(p01, textured), 0.0f, 1.0f);
+            const GPUVertex v11 = makeVertex(p11, terrainColor(p11, textured), 1.0f, 1.0f);
+            appendTriangle(texture, v00, v10, v01);
+            appendTriangle(texture, v10, v11, v01);
+            gx += step;
+        }
+    }
+
+    const detail::OutdoorLightingParams objectLighting =
+        detail::makeOutdoorLightingParams(runtimeConfig, nightBlend, false);
+    const bool animateWater = (runtimeConfig == nullptr) || !runtimeConfig->noWavyWater;
+    const float waterTimeSeconds = static_cast<float>(SDL_GetTicks()) * 0.001f;
+    std::vector<GPUVertex> faceVertices;
+    for (const auto& building : odmData.buildings)
+    {
+        if (!frustum->testAABB(static_cast<float>(building.minX), static_cast<float>(building.minZ),
+                               static_cast<float>(building.minY), static_cast<float>(building.maxX),
+                               static_cast<float>(building.maxZ),
+                               static_cast<float>(building.maxY)))
+        {
+            continue;
+        }
+
+        for (const auto& face : building.faces)
+        {
+            if (face.numVertices < 3 || face.vertexIndices.empty() || face.isInvisible())
+            {
+                continue;
+            }
+
+            Vec3 centroid;
+            uint32_t validVertices = 0;
+            for (uint8_t i = 0; i < face.numVertices && i < face.vertexIndices.size(); i++)
+            {
+                if (face.vertexIndices[i] < building.vertices.size())
+                {
+                    const auto& vertex = building.vertices[face.vertexIndices[i]];
+                    centroid += gameplayToRenderPosition(static_cast<float>(vertex.x),
+                                                         static_cast<float>(vertex.y),
+                                                         static_cast<float>(vertex.z));
+                    validVertices++;
+                }
+            }
+            if (validVertices < 3)
+            {
+                continue;
+            }
+            centroid = centroid / static_cast<float>(validVertices);
+            const Vec3 faceNormal =
+                gameplayToRenderDirection(face.normalFX, face.normalFY, face.normalFZ);
+            if (faceNormal.dot(centroid - cameraPos) > 0.0f)
+            {
+                continue;
+            }
+
+            SDL_Texture* texture = nullptr;
+            float textureWidth = 256.0f;
+            float textureHeight = 256.0f;
+            if (textureLookup && !face.textureName.empty())
+            {
+                texture = textureLookup(face.textureName);
+                if (texture)
+                {
+                    SDL_GetTextureSize(texture, &textureWidth, &textureHeight);
+                }
+            }
+            const bool textured = texture != nullptr;
+            texture = textured ? texture : fallbackTexture_;
+
+            // Only flowing faces scroll; static faces keep their authored UVs.
+            TextureFlow flow;
+            if (animateWater && face.hasTextureFlow())
+            {
+                flow = textureFlowOffset(faceTextureFlowDirection(face), waterTimeSeconds,
+                                         textureWidth, textureHeight);
+            }
+
+            faceVertices.clear();
+            faceVertices.reserve(validVertices);
+            for (uint8_t i = 0; i < face.numVertices && i < face.vertexIndices.size(); i++)
+            {
+                const uint16_t vertexIndex = face.vertexIndices[i];
+                if (vertexIndex >= building.vertices.size())
+                {
+                    continue;
+                }
+                const auto& source = building.vertices[vertexIndex];
+                const Vec3 position = gameplayToRenderPosition(static_cast<float>(source.x),
+                                                               static_cast<float>(source.y),
+                                                               static_cast<float>(source.z));
+                SDL_FColor color = textured
+                                       ? SDL_FColor{1.0f, 1.0f, 1.0f, face.isWater() ? 0.85f : 1.0f}
+                                       : (face.isFloor()     ? SDL_FColor{0.45f, 0.42f, 0.38f, 1.0f}
+                                          : face.isCeiling() ? SDL_FColor{0.30f, 0.28f, 0.25f, 1.0f}
+                                          : face.isWater() ? SDL_FColor{0.15f, 0.30f, 0.55f, 0.8f}
+                                                           : SDL_FColor{0.55f, 0.50f, 0.42f, 1.0f});
+                color = detail::applyOutdoorLighting(
+                    color, std::sqrt((position - cameraPos).lengthSquared()), objectLighting);
+                if (face.isWater() && animateWater)
+                {
+                    const float wave =
+                        std::sin(waterWavePhase(position.x, position.z, waterTimeSeconds));
+                    color.r = std::clamp(color.r + wave * 0.020f, 0.0f, 1.0f);
+                    color.g = std::clamp(color.g + wave * 0.035f, 0.0f, 1.0f);
+                    color.b = std::clamp(color.b + wave * 0.065f, 0.0f, 1.0f);
+                    color.a = std::clamp(color.a + 0.06f + wave * 0.03f, 0.0f, 1.0f);
+                }
+
+                float u = 0.0f;
+                float v = 0.0f;
+                if (i < face.uCoords.size() && i < face.vCoords.size())
+                {
+                    u = normalizeTextureCoordinate(face.uCoords[i], face.textureDeltaU + flow.u,
+                                                   textureWidth);
+                    v = normalizeTextureCoordinate(face.vCoords[i], face.textureDeltaV + flow.v,
+                                                   textureHeight);
+                }
+                faceVertices.push_back(makeVertex(position, color, u, v));
+            }
+
+            for (size_t i = 1; i + 1 < faceVertices.size(); i++)
+            {
+                appendTriangle(texture, faceVertices[0], faceVertices[i], faceVertices[i + 1]);
+            }
+        }
+    }
+
+    gpuVertices_.clear();
+    gpuDrawCalls_.clear();
+    for (auto& batch : gpuBuildBatches_)
+    {
+        if (batch.vertices.empty())
+        {
+            continue;
+        }
+        const uint32_t firstVertex = static_cast<uint32_t>(gpuVertices_.size());
+        const uint32_t vertexCount = static_cast<uint32_t>(batch.vertices.size());
+        gpuVertices_.insert(gpuVertices_.end(), batch.vertices.begin(), batch.vertices.end());
+        gpuDrawCalls_.push_back({batch.texture, firstVertex, vertexCount});
+    }
+    if (gpuVertices_.empty())
+    {
+        return false;
+    }
+
+    const size_t requiredBytes = gpuVertices_.size() * sizeof(GPUVertex);
+    if (!gpuVertexBuffer_ || requiredBytes > gpuVertexBufferCapacity_)
+    {
+        if (gpuVertexBuffer_)
+        {
+            SDL_ReleaseGPUBuffer(gpuDevice_, gpuVertexBuffer_);
+        }
+        SDL_GPUBufferCreateInfo bufferInfo = {};
+        bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+        bufferInfo.size = static_cast<Uint32>(requiredBytes);
+        gpuVertexBuffer_ = SDL_CreateGPUBuffer(gpuDevice_, &bufferInfo);
+        gpuVertexBufferCapacity_ = gpuVertexBuffer_ ? bufferInfo.size : 0;
+    }
+    if (!gpuVertexBuffer_)
+    {
+        return false;
+    }
+
+    SDL_GPUTransferBufferCreateInfo transferInfo = {};
+    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    transferInfo.size = static_cast<Uint32>(requiredBytes);
+    SDL_GPUTransferBuffer* transferBuffer = SDL_CreateGPUTransferBuffer(gpuDevice_, &transferInfo);
+    if (!transferBuffer)
+    {
+        return false;
+    }
+    void* mapped = SDL_MapGPUTransferBuffer(gpuDevice_, transferBuffer, false);
+    if (!mapped)
+    {
+        SDL_ReleaseGPUTransferBuffer(gpuDevice_, transferBuffer);
+        return false;
+    }
+    std::memcpy(mapped, gpuVertices_.data(), requiredBytes);
+    SDL_UnmapGPUTransferBuffer(gpuDevice_, transferBuffer);
+
+    SDL_FlushRenderer(renderer.getSDLRenderer());
+    SDL_GPUCommandBuffer* commandBuffer = SDL_AcquireGPUCommandBuffer(gpuDevice_);
+    if (!commandBuffer)
+    {
+        SDL_ReleaseGPUTransferBuffer(gpuDevice_, transferBuffer);
+        return false;
+    }
+
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+    if (!copyPass)
+    {
+        SDL_CancelGPUCommandBuffer(commandBuffer);
+        SDL_ReleaseGPUTransferBuffer(gpuDevice_, transferBuffer);
+        return false;
+    }
+    SDL_GPUTransferBufferLocation source = {transferBuffer, 0};
+    SDL_GPUBufferRegion destination = {gpuVertexBuffer_, 0, static_cast<Uint32>(requiredBytes)};
+    SDL_UploadToGPUBuffer(copyPass, &source, &destination, false);
+    SDL_EndGPUCopyPass(copyPass);
+
+    SDL_GPUColorTargetInfo colorTarget = {};
+    colorTarget.texture = colorTex;
+    colorTarget.clear_color = {0.0f, 0.0f, 0.0f, 0.0f};
+    colorTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+    colorTarget.store_op = SDL_GPU_STOREOP_STORE;
+    SDL_GPUDepthStencilTargetInfo depthTarget = {};
+    depthTarget.texture = depthTex;
+    depthTarget.clear_depth = 1.0f;
+    depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+    depthTarget.store_op = SDL_GPU_STOREOP_DONT_CARE;
+    depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+    depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+
+    SDL_GPURenderPass* renderPass =
+        SDL_BeginGPURenderPass(commandBuffer, &colorTarget, 1, &depthTarget);
+    if (!renderPass)
+    {
+        SDL_CancelGPUCommandBuffer(commandBuffer);
+        SDL_ReleaseGPUTransferBuffer(gpuDevice_, transferBuffer);
+        return false;
+    }
+    SDL_GPUViewport viewport = {0.0f,
+                                0.0f,
+                                static_cast<float>(renderer.getViewportWidth()),
+                                static_cast<float>(renderer.getViewportHeight()),
+                                0.0f,
+                                1.0f};
+    SDL_SetGPUViewport(renderPass, &viewport);
+    SDL_BindGPUGraphicsPipeline(renderPass, gpuPipeline_);
+    SDL_GPUBufferBinding vertexBinding = {gpuVertexBuffer_, 0};
+    SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
+    SDL_PushGPUVertexUniformData(commandBuffer, 0, viewProjection.m.data(), sizeof(float) * 16);
+    const float fragmentUniforms[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    SDL_PushGPUFragmentUniformData(commandBuffer, 0, fragmentUniforms, sizeof(fragmentUniforms));
+
+    const SDL_PropertiesID fallbackProperties = SDL_GetTextureProperties(fallbackTexture_);
+    auto* fallbackGpuTexture = static_cast<SDL_GPUTexture*>(
+        SDL_GetPointerProperty(fallbackProperties, SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, nullptr));
+    bool drewGeometry = false;
+    for (const auto& drawCall : gpuDrawCalls_)
+    {
+        const SDL_PropertiesID properties = SDL_GetTextureProperties(drawCall.texture);
+        auto* gpuTexture = static_cast<SDL_GPUTexture*>(
+            SDL_GetPointerProperty(properties, SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, nullptr));
+        if (!gpuTexture)
+        {
+            gpuTexture = fallbackGpuTexture;
+        }
+        if (!gpuTexture)
+        {
+            continue;
+        }
+        SDL_GPUTextureSamplerBinding textureBinding = {gpuTexture, defaultSampler_};
+        SDL_BindGPUFragmentSamplers(renderPass, 0, &textureBinding, 1);
+        SDL_DrawGPUPrimitives(renderPass, drawCall.vertexCount, 1, drawCall.firstVertex, 0);
+        drewGeometry = true;
+    }
+    SDL_EndGPURenderPass(renderPass);
+    const bool submitted = SDL_SubmitGPUCommandBuffer(commandBuffer);
+    SDL_ReleaseGPUTransferBuffer(gpuDevice_, transferBuffer);
+
+    if (!submitted || !drewGeometry)
+    {
+        return false;
+    }
+    SDL_SetTextureBlendMode(blitTex, SDL_BLENDMODE_BLEND);
+    float width = 0.0f;
+    float height = 0.0f;
+    SDL_GetTextureSize(blitTex, &width, &height);
+    renderer.renderTexture(blitTex, 0, 0, static_cast<int>(width), static_cast<int>(height));
+    return true;
+}
+
+void OutdoorRenderer::invalidateGPUCache()
+{
+    terrainCacheMapName_.clear();
+    terrainWorldVerts_.clear();
+    gpuVertices_.clear();
+    gpuDrawCalls_.clear();
+    gpuBuildBatches_.clear();
+    gpuBatchIndices_.clear();
+    if (gpuDevice_ && gpuVertexBuffer_)
+    {
+        SDL_ReleaseGPUBuffer(gpuDevice_, gpuVertexBuffer_);
+        gpuVertexBuffer_ = nullptr;
+        gpuVertexBufferCapacity_ = 0;
+    }
+}
 
 } // namespace runeharbor::graphics

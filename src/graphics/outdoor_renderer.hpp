@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "../engine/map_scene.hpp"
@@ -60,7 +61,8 @@ class OutdoorRenderer
     void setSpriteFrameTable(const formats::SpriteFrameTable* table);
     void render(const engine::MapScene& scene, const Camera& camera,
                 const game::RuntimeConfig* runtimeConfig = nullptr, float nightBlend = 0.0f,
-                const Frustum* frustumOverride = nullptr);
+                const Frustum* frustumOverride = nullptr, SDL_GPUTexture* colorTex = nullptr,
+                SDL_GPUTexture* depthTex = nullptr, SDL_Texture* blitTex = nullptr);
     void invalidateGPUCache();
 
   private:
@@ -71,7 +73,13 @@ class OutdoorRenderer
     /// Draw building faces and sprite billboards in a single back-to-front pass.
     void renderObjects(const formats::ODMMapData& odmData, const Camera& camera,
                        const game::RuntimeConfig* runtimeConfig, float nightBlend,
-                       const Frustum* frustumOverride);
+                       const Frustum* frustumOverride, bool skipBuildingFaces);
+    void ensureTerrainCache(const formats::ODMMapData& odmData);
+    void initGPUPipeline();
+    bool renderWorldGPU(const formats::ODMMapData& odmData, const Camera& camera,
+                        const game::RuntimeConfig* runtimeConfig, float nightBlend,
+                        const Frustum* frustumOverride, SDL_GPUTexture* colorTex,
+                        SDL_GPUTexture* depthTex, SDL_Texture* blitTex);
     void drawBillboard(const detail::SpawnBillboard& sprite, const Camera& camera,
                        const detail::OutdoorLightingParams& lighting, uint32_t ticks);
 
@@ -83,6 +91,40 @@ class OutdoorRenderer
     WorldItemProvider worldItemProvider_;
     WorldItemSpriteLookup worldItemSpriteLookup_;
     const formats::SpriteFrameTable* spriteFrameTable = nullptr;
+
+    struct GPUVertex
+    {
+        float x, y, z;
+        float r, g, b, a;
+        float u, v;
+    };
+
+    struct GPUDrawCall
+    {
+        SDL_Texture* texture = nullptr;
+        uint32_t firstVertex = 0;
+        uint32_t vertexCount = 0;
+    };
+
+    struct GPUBuildBatch
+    {
+        SDL_Texture* texture = nullptr;
+        std::vector<GPUVertex> vertices;
+    };
+
+    SDL_GPUDevice* gpuDevice_ = nullptr;
+    SDL_GPUGraphicsPipeline* gpuPipeline_ = nullptr;
+    SDL_GPUShader* vertexShader_ = nullptr;
+    SDL_GPUShader* fragmentShader_ = nullptr;
+    SDL_GPUBuffer* gpuVertexBuffer_ = nullptr;
+    SDL_GPUSampler* defaultSampler_ = nullptr;
+    SDL_Texture* fallbackTexture_ = nullptr;
+    uint32_t gpuVertexBufferCapacity_ = 0;
+    bool gpuInitialized_ = false;
+    std::vector<GPUVertex> gpuVertices_;
+    std::vector<GPUDrawCall> gpuDrawCalls_;
+    std::vector<GPUBuildBatch> gpuBuildBatches_;
+    std::unordered_map<SDL_Texture*, size_t> gpuBatchIndices_;
 
     // Reused per-frame buffers (avoid heap churn — previously allocated fresh
     // every frame / per-quad, causing up to ~16k allocations/frame for terrain).
