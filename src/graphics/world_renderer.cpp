@@ -137,6 +137,18 @@ void WorldRenderer::setMonsterSpriteLookup(MonsterSpriteLookup lookup)
     }
 }
 
+void WorldRenderer::setLiveActorProvider(LiveActorProvider provider)
+{
+    if (indoorRenderer)
+    {
+        indoorRenderer->setLiveActorProvider(provider);
+    }
+    if (outdoorRenderer)
+    {
+        outdoorRenderer->setLiveActorProvider(std::move(provider));
+    }
+}
+
 void WorldRenderer::setSpriteFrameTable(const formats::SpriteFrameTable* table)
 {
     if (indoorRenderer)

@@ -11,6 +11,7 @@
 #include "../formats/frame_tables.hpp"
 #include "camera.hpp"
 #include "light_stack.hpp"
+#include "live_actors.hpp"
 #include "sdl_renderer.hpp"
 
 struct SDL_Texture;
@@ -33,6 +34,11 @@ class IndoorRenderer
     using MonsterSpriteLookup = std::function<std::string(uint16_t objectType)>;
     void setTextureLookup(TextureLookup lookup);
     void setMonsterSpriteLookup(MonsterSpriteLookup lookup);
+    // Live roaming/combat monsters (see OutdoorRenderer::setLiveActorProvider).
+    void setLiveActorProvider(LiveActorProvider provider)
+    {
+        liveActorProvider_ = std::move(provider);
+    }
     void setSpriteFrameTable(const formats::SpriteFrameTable* table);
     void render(const engine::MapScene& scene, const Camera& camera,
                 const runeharbor::game::RuntimeConfig* runtimeConfig = nullptr,
@@ -71,6 +77,7 @@ class IndoorRenderer
     [[maybe_unused]] util::ILogger& logger;
     TextureLookup textureLookup;
     MonsterSpriteLookup monsterSpriteLookup;
+    LiveActorProvider liveActorProvider_;
     const formats::SpriteFrameTable* spriteFrameTable = nullptr;
 
     LightStack stationaryLights_;

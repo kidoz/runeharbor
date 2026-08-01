@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <format>
 #include <limits>
 #include <string>
 #include <vector>
@@ -335,6 +336,23 @@ bool TextureFrameTable::parseText(std::string_view text)
     }
 
     return !entries_.empty();
+}
+
+std::string animatedTextureName(const std::string& baseName, uint32_t ticks, int frameCount)
+{
+    if (frameCount <= 1 || baseName.empty())
+    {
+        return baseName;
+    }
+    // RE FUN_0044e1c6: frame index = (tick >> 3) % groupLength.
+    const int frame = static_cast<int>((ticks >> 3) % static_cast<uint32_t>(frameCount));
+    // Split off any existing numeric suffix so we don't stack them.
+    size_t baseLen = baseName.size();
+    while (baseLen > 0 && baseName[baseLen - 1] >= '0' && baseName[baseLen - 1] <= '9')
+    {
+        --baseLen;
+    }
+    return std::format("{}{:02d}", baseName.substr(0, baseLen), frame + 1);
 }
 
 } // namespace runeharbor::formats

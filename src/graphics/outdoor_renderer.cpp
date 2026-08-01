@@ -95,6 +95,12 @@ void applyFrameTableEntry(SpawnBillboard& sprite, const formats::SpriteFrameTabl
     }
     sprite.attributes = entry->attributes;
     sprite.scale = entry->scale;
+    // Animation: derive the frame count from the sequence length / duration.
+    if (entry->animLength > 0 && entry->animDuration > 0)
+    {
+        sprite.animFrameCount =
+            std::clamp(entry->animLength / std::max(1, (int)entry->animDuration), 1, 8);
+    }
     if (formats::spriteFrameMirrorsOctant(entry->attributes, octant))
     {
         sprite.flipU = !sprite.flipU;
@@ -238,6 +244,55 @@ SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, co
     else if (spawn.objectType >= 500u)
     {
         sprite.color = {0.60f, 0.82f, 1.0f, 0.76f};
+    }
+
+    const Vec3 delta = sprite.basePos - cameraPos;
+    sprite.distanceSq = delta.lengthSquared();
+    return sprite;
+}
+
+SpawnBillboard makeLiveActorBillboard(const LiveActor& actor, const Vec3& cameraPos,
+                                      const OutdoorRenderer::MonsterSpriteLookup& monsterLookup,
+                                      const formats::SpriteFrameTable* spriteFrameTable)
+{
+    SpawnBillboard sprite;
+    sprite.basePos =
+        gameplayToRenderPosition(actor.x, actor.y, actor.z + (actor.flying ? 256.0f : 0.0f));
+
+    // Real monster dimensions aren't carried on MonsterInstance; use a sensible
+    // default that the draw pass overrides from the resolved texture pixels.
+    sprite.height = 128.0f;
+    sprite.halfWidth = 48.0f;
+
+    if (monsterLookup)
+    {
+        std::string baseName = monsterLookup(actor.monsterId);
+        if (!baseName.empty())
+        {
+            // The actor's real heading drives the facing octant (RE: live actor
+            // table iteration uses the actor's +0x72 facing, not a fixed value).
+            const int octant = cameraRelativeOctant(static_cast<int>(actor.facingAngle), cameraPos,
+                                                    sprite.basePos);
+            const SpriteFacing facing = resolveSpriteFacing(octant);
+            sprite.flipU = facing.flipU;
+            sprite.textureName =
+                std::format("{}{:02d}", baseName.substr(0, std::min<size_t>(baseName.length(), 6)),
+                            facing.frameDirection);
+            applyFrameTableEntry(sprite, spriteFrameTable, octant);
+        }
+    }
+
+    // White tint so the real palette shows through (MM7 uses per-tint lit
+    // palettes, not the random per-spawn tinting the static path used).
+    if (actor.dead)
+    {
+        // Corpse: laid out, dimmed.
+        sprite.color = {0.55f, 0.45f, 0.40f, 0.65f};
+        sprite.height *= 0.5f;
+    }
+    else
+    {
+        sprite.color = {1.0f, 1.0f, 1.0f, 1.0f};
     }
 
     const Vec3 delta = sprite.basePos - cameraPos;
@@ -766,6 +821,21 @@ void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Ca
         }
     }
 
+    // Live roaming/combat monsters (RE: the live actor table). These carry real
+    // heading/position/state from CombatSystem, unlike the static spawn markers.
+    if (liveActorProvider_)
+    {
+        const auto actors = liveActorProvider_();
+        for (const auto& actor : actors)
+        {
+            RenderOp op;
+            op.billboard = detail::makeLiveActorBillboard(actor, cameraPos, monsterSpriteLookup,
+                                                          spriteFrameTable);
+            op.distanceSq = op.billboard.distanceSq;
+            ops.push_back(std::move(op));
+        }
+    }
+
     // Static decorations (trees, rocks, signs, campfires). Sound and party-start
     // markers carry no sprite and drop out when their texture does not resolve.
     if (!(runtimeConfig && runtimeConfig->noDecorations))
@@ -989,7 +1059,19 @@ void OutdoorRenderer::drawBillboard(const detail::SpawnBillboard& sprite, const 
 
     if (textureLookup && !sprite.textureName.empty())
     {
-        texture = textureLookup(sprite.textureName);
+        // Animate: when the frame table marked this sprite as multi-frame, cycle
+        // the texture suffix using (tick>>3) % frameCount (RE: FUN_0044e1c6).
+        std::string texName = sprite.textureName;
+        if (sprite.animFrameCount > 1)
+        {
+            texName =
+                formats::animatedTextureName(sprite.textureName, ticks, sprite.animFrameCount);
+        }
+        texture = textureLookup(texName);
+        if (!texture && sprite.animFrameCount > 1)
+        {
+            texture = textureLookup(sprite.textureName); // fall back to base frame
+        }
         if (texture)
         {
             float texW = 0.0f;

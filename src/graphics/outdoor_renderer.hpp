@@ -9,6 +9,7 @@
 #include "../engine/map_scene.hpp"
 #include "../formats/frame_tables.hpp"
 #include "camera.hpp"
+#include "live_actors.hpp"
 #include "sdl_renderer.hpp"
 #include "visibility.hpp"
 
@@ -39,6 +40,13 @@ class OutdoorRenderer
     using MonsterSpriteLookup = std::function<std::string(uint16_t objectType)>;
     void setTextureLookup(TextureLookup lookup);
     void setMonsterSpriteLookup(MonsterSpriteLookup lookup);
+    // Live roaming/combat monsters (RE: the actor table at 0x5FF06A). When set,
+    // the renderer draws these with their real heading/position/state in
+    // addition to (or instead of) the static map spawn markers.
+    void setLiveActorProvider(LiveActorProvider provider)
+    {
+        liveActorProvider_ = std::move(provider);
+    }
     void setSpriteFrameTable(const formats::SpriteFrameTable* table);
     void render(const engine::MapScene& scene, const Camera& camera,
                 const game::RuntimeConfig* runtimeConfig = nullptr, float nightBlend = 0.0f,
@@ -61,6 +69,7 @@ class OutdoorRenderer
     util::ILogger& logger;
     TextureLookup textureLookup;
     MonsterSpriteLookup monsterSpriteLookup;
+    LiveActorProvider liveActorProvider_;
     const formats::SpriteFrameTable* spriteFrameTable = nullptr;
 };
 
@@ -91,6 +100,7 @@ struct SpawnBillboard
     uint32_t attributes = 0;
     float scale = 1.0f;
     bool flipU = false;
+    int animFrameCount = 1; // >1 => cycle frame suffix via (tick>>3) % count
 };
 
 void applyFrameTableEntry(SpawnBillboard& sprite, const formats::SpriteFrameTable* spriteFrameTable,
@@ -101,6 +111,13 @@ SpawnBillboard makeOutdoorSpawnBillboard(const formats::ODMSpawnPoint& spawn, co
                                          const OutdoorRenderer::MonsterSpriteLookup& monsterLookup,
                                          const formats::SpriteFrameTable* spriteFrameTable,
                                          uint32_t ticks = 0);
+
+// Build a billboard from a live (roaming/combat) monster with its real
+// heading + position + dead/flying state. Replaces the static, fixed-heading
+// spawn-marker rendering for monsters that have been spawned by CombatSystem.
+SpawnBillboard makeLiveActorBillboard(const LiveActor& actor, const Vec3& cameraPos,
+                                      const OutdoorRenderer::MonsterSpriteLookup& monsterLookup,
+                                      const formats::SpriteFrameTable* spriteFrameTable);
 
 SpawnBillboard makeOutdoorDecorationBillboard(const formats::ParsedDecoration& decoration,
                                               const Vec3& cameraPos,

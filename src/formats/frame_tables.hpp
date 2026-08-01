@@ -84,6 +84,16 @@ class SpriteFrameTable
     std::vector<SpriteFrameEntry> entries_;
 };
 
+// Resolves the animated texture name for a billboard. MM7 animates sprites by
+// cycling a numeric frame suffix on the texture name using the time base
+// (tick >> 3) % groupLength (RE: FUN_0044e1c6). When the frame table entry has
+// a positive animLength, this returns the base name with the current frame
+// suffix; otherwise it returns the name unchanged.
+//
+// frameCount: the number of frames in the animation group (typically derived
+//             from animLength / max(1, animDuration), clamped to [1, 8]).
+std::string animatedTextureName(const std::string& baseName, uint32_t ticks, int frameCount);
+
 // ---- Texture Frame Table (dtft.bin) ----
 
 // Raw on-disk layout: 20 bytes per entry

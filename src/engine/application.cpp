@@ -1212,6 +1212,36 @@ void Application::wireUpMapTextures()
             return "";
         });
 
+    // Feed live CombatSystem monsters to the renderers each frame (RE: the live
+    // actor table at 0x5FF06A). Without this only static map spawn markers show.
+    worldRenderer->setLiveActorProvider(
+        [this]() -> std::vector<graphics::LiveActor>
+        {
+            std::vector<graphics::LiveActor> actors;
+            if (!combatSystem_)
+            {
+                return actors;
+            }
+            for (const auto& m : combatSystem_->getMonsters())
+            {
+                // Skip monsters that were never positioned (placeholder entries).
+                if (m.x == 0.0f && m.y == 0.0f && m.z == 0.0f && !m.isAlive())
+                {
+                    continue;
+                }
+                graphics::LiveActor a;
+                a.x = m.x;
+                a.y = m.y;
+                a.z = m.z;
+                a.monsterId = static_cast<uint16_t>(m.monsterId);
+                a.facingAngle = m.facingAngle;
+                a.dead = (m.aiState == game::MonsterInstance::AIState::Dead);
+                a.flying = false; // no fly flag on MonsterInstance yet
+                actors.push_back(a);
+            }
+            return actors;
+        });
+
     worldRenderer->setTextureLookup(
         [this](const std::string& name) -> SDL_Texture*
         {

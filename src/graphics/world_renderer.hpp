@@ -8,6 +8,7 @@
 #include "../engine/map_scene.hpp"
 #include "camera.hpp"
 #include "indoor_renderer.hpp"
+#include "live_actors.hpp"
 #include "outdoor_renderer.hpp"
 #include "sdl_renderer.hpp"
 #include "visibility.hpp"
@@ -32,6 +33,8 @@ class WorldRenderer
     using MonsterSpriteLookup = std::function<std::string(uint16_t objectType)>;
     void setTextureLookup(TextureLookup lookup);
     void setMonsterSpriteLookup(MonsterSpriteLookup lookup);
+    // Forwards to both indoor + outdoor renderers.
+    void setLiveActorProvider(LiveActorProvider provider);
     void setSpriteFrameTable(const formats::SpriteFrameTable* table);
     void setExtraPickCandidates(std::vector<PickCandidate> candidates);
     void clearExtraPickCandidates();

@@ -206,6 +206,7 @@ struct BillboardSprite
     uint32_t attributes = 0;
     float scale = 1.0f;
     bool flipU = false;
+    int animFrameCount = 1;
 };
 
 BillboardSprite makeIndoorDecorationBillboard(const formats::ParsedDecoration& decoration,
@@ -233,6 +234,9 @@ BillboardSprite makeIndoorDecorationBillboard(const formats::ParsedDecoration& d
             sprite.textureName = tn.substr(start);
             sprite.attributes = entry->attributes;
             sprite.scale = entry->scale;
+            if (entry->animLength > 0 && entry->animDuration > 0)
+                sprite.animFrameCount =
+                    std::clamp(entry->animLength / std::max(1, (int)entry->animDuration), 1, 8);
         }
     }
 
@@ -312,6 +316,9 @@ BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, co
                     }
                     sprite.attributes = entry->attributes;
                     sprite.scale = entry->scale;
+                    if (entry->animLength > 0 && entry->animDuration > 0)
+                        sprite.animFrameCount = std::clamp(
+                            entry->animLength / std::max(1, (int)entry->animDuration), 1, 8);
                     if (formats::spriteFrameMirrorsOctant(entry->attributes, octant))
                     {
                         sprite.flipU = !sprite.flipU;
@@ -329,6 +336,70 @@ BillboardSprite makeIndoorSpawnBillboard(const formats::BLVSpawnPoint& spawn, co
     const float b = 0.35f + static_cast<float>((seed >> 6) & 0x7) * 0.06f;
     sprite.color = {std::clamp(r, 0.0f, 1.0f), std::clamp(g, 0.0f, 1.0f), std::clamp(b, 0.0f, 1.0f),
                     0.74f};
+
+    const Vec3 delta = sprite.basePos - cameraPos;
+    sprite.distanceSq = delta.lengthSquared();
+    return sprite;
+}
+
+BillboardSprite
+makeIndoorLiveActorBillboard(const LiveActor& actor, const Vec3& cameraPos,
+                             const IndoorRenderer::MonsterSpriteLookup& monsterLookup,
+                             const formats::SpriteFrameTable* spriteFrameTable)
+{
+    BillboardSprite sprite;
+    sprite.basePos =
+        gameplayToRenderPosition(actor.x, actor.y, actor.z + (actor.flying ? 256.0f : 0.0f));
+    sprite.height = 128.0f;
+    sprite.halfWidth = 48.0f;
+
+    if (monsterLookup)
+    {
+        std::string baseName = monsterLookup(actor.monsterId);
+        if (!baseName.empty())
+        {
+            const int octant = cameraRelativeOctant(static_cast<int>(actor.facingAngle), cameraPos,
+                                                    sprite.basePos);
+            const SpriteFacing facing = resolveSpriteFacing(octant);
+            sprite.flipU = facing.flipU;
+            std::string frameName =
+                std::format("{}{:02d}", baseName.substr(0, std::min<size_t>(baseName.length(), 6)),
+                            facing.frameDirection);
+            sprite.textureName = frameName;
+            if (spriteFrameTable)
+            {
+                auto entry = spriteFrameTable->findEntryByIcon(frameName);
+                if (entry)
+                {
+                    if (!entry->textureName.empty())
+                    {
+                        std::string tn = entry->textureName;
+                        while (!tn.empty() && std::isspace(static_cast<unsigned char>(tn.back())))
+                            tn.pop_back();
+                        size_t start = 0;
+                        while (start < tn.length() &&
+                               std::isspace(static_cast<unsigned char>(tn[start])))
+                            start++;
+                        sprite.textureName = tn.substr(start);
+                    }
+                    sprite.attributes = entry->attributes;
+                    sprite.scale = entry->scale;
+                    if (formats::spriteFrameMirrorsOctant(entry->attributes, octant))
+                        sprite.flipU = !sprite.flipU;
+                }
+            }
+        }
+    }
+
+    if (actor.dead)
+    {
+        sprite.color = {0.55f, 0.45f, 0.40f, 0.65f};
+        sprite.height *= 0.5f;
+    }
+    else
+    {
+        sprite.color = {1.0f, 1.0f, 1.0f, 1.0f};
+    }
 
     const Vec3 delta = sprite.basePos - cameraPos;
     sprite.distanceSq = delta.lengthSquared();
@@ -598,6 +669,22 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         renderOps.push_back(std::move(op));
     }
 
+    // Live roaming/combat monsters (real heading/position/state).
+    if (liveActorProvider_)
+    {
+        const auto actors = liveActorProvider_();
+        for (const auto& actor : actors)
+        {
+            BillboardSprite sprite = makeIndoorLiveActorBillboard(
+                actor, cameraPos, monsterSpriteLookup, spriteFrameTable);
+            RenderOp op;
+            op.type = RenderOpType::Billboard;
+            op.distanceSq = sprite.distanceSq;
+            op.billboard = std::move(sprite);
+            renderOps.push_back(std::move(op));
+        }
+    }
+
     std::sort(renderOps.begin(), renderOps.end(),
               [](const RenderOp& a, const RenderOp& b) { return a.distanceSq > b.distanceSq; });
 
@@ -781,7 +868,18 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
 
             if (textureLookup && !sprite.textureName.empty())
             {
-                texture = textureLookup(sprite.textureName);
+                // Animate: cycle the texture suffix when the frame table marked
+                // this sprite multi-frame (RE: FUN_0044e1c6, (tick>>3) % count).
+                std::string texName = sprite.textureName;
+                const uint32_t ticks = SDL_GetTicks();
+                if (sprite.animFrameCount > 1)
+                {
+                    texName = formats::animatedTextureName(sprite.textureName, ticks,
+                                                           sprite.animFrameCount);
+                }
+                texture = textureLookup(texName);
+                if (!texture && sprite.animFrameCount > 1)
+                    texture = textureLookup(sprite.textureName);
                 if (texture)
                 {
                     float w = 0.0f;
