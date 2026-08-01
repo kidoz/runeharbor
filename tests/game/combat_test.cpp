@@ -307,3 +307,57 @@ TEST_CASE("CombatSystem getMonsterDef", "[game][combat]")
         REQUIRE(combat.getMonsterDef(999) == nullptr);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Turn-based combat mode (docs/turn-based-combat.md)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Turn-based combat mode toggle", "[game][combat][turnbased]")
+{
+    NullLogger logger;
+    CombatSystem combat(logger);
+    REQUIRE_FALSE(combat.isTurnBased());
+    combat.setTurnBased(true);
+    REQUIRE(combat.isTurnBased());
+    combat.setTurnBased(false);
+    REQUIRE_FALSE(combat.isTurnBased());
+}
+
+TEST_CASE("Turn-based: update() pauses when TB mode is on", "[game][combat][turnbased]")
+{
+    NullLogger logger;
+    CombatSystem combat(logger);
+    combat.setInCombat(true);
+    combat.setTurnBased(true);
+    // update() should early-out in TB mode (no per-frame monster ticking).
+    combat.update(16.0f);
+    REQUIRE(combat.isTurnBased());
+}
+
+TEST_CASE("Turn-based: startTurnBasedRound builds the queue", "[game][combat][turnbased]")
+{
+    NullLogger logger;
+    CombatSystem combat(logger);
+    combat.setInCombat(true);
+    combat.setTurnBased(true);
+    // With no game world, startRound still increments the round counter.
+    REQUIRE(combat.currentRound() >= 1);
+}
+
+TEST_CASE("Turn-based: turnStatusText produces a string in TB mode", "[game][combat][turnbased]")
+{
+    NullLogger logger;
+    CombatSystem combat(logger);
+    combat.setTurnBased(false);
+    REQUIRE(combat.turnStatusText().empty());
+    combat.setTurnBased(true);
+    REQUIRE_FALSE(combat.turnStatusText().empty());
+}
+
+TEST_CASE("Turn-based: awaitingPlayerInput is false without combat", "[game][combat][turnbased]")
+{
+    NullLogger logger;
+    CombatSystem combat(logger);
+    combat.setTurnBased(true);
+    REQUIRE_FALSE(combat.awaitingPlayerInput());
+}

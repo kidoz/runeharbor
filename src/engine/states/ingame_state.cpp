@@ -428,7 +428,13 @@ std::optional<GameStateId> InGameState::update()
         return std::nullopt;
     }
 
-    updateCameraInput(deltaMs);
+    // In turn-based combat, pause world exploration while awaiting player input.
+    const bool tbPaused =
+        ctx.shared && ctx.shared->combatSystem && ctx.shared->combatSystem->awaitingPlayerInput();
+    if (!tbPaused)
+    {
+        updateCameraInput(deltaMs);
+    }
     if (ctx.worldRenderer && ctx.shared && ctx.shared->mapScene &&
         ctx.shared->mapScene->isLoaded() && ctx.camera)
     {
@@ -647,6 +653,14 @@ std::optional<GameStateId> InGameState::update()
     {
         showAxes = !showAxes;
     }
+    // Toggle turn-based / real-time combat mode (RE: KEY_COMBAT, default 'X' in
+    // MM7; here bound to 'T' since 'X' is the axes toggle).
+    if (ctx.isKeyPressed(SDL_SCANCODE_T) && ctx.shared && ctx.shared->combatSystem)
+    {
+        auto* cs = ctx.shared->combatSystem;
+        cs->setTurnBased(!cs->isTurnBased());
+        statusLine_ = cs->isTurnBased() ? "Turn-based combat ON" : "Real-time combat";
+    }
     if (ctx.isKeyPressed(SDL_SCANCODE_H))
     {
         showHelpOverlay = !showHelpOverlay;
@@ -824,6 +838,35 @@ std::optional<GameStateId> InGameState::update()
                                       ctx.isKeyPressed(SDL_SCANCODE_A);
     if (ctx.shared && primaryActionPressed)
     {
+        // Turn-based: only act on the active player's turn.
+        if (ctx.shared->combatSystem && ctx.shared->combatSystem->isTurnBased())
+        {
+            auto* cs = ctx.shared->combatSystem;
+            if (!cs->awaitingPlayerInput())
+            {
+                // Not the player's turn — ignore the input.
+                return std::nullopt;
+            }
+            const int currentTurn = cs->currentTurnPlayerIndex();
+            // Space with no monster under cursor = pass.
+            selectedMonsterIndex_ = pickMonsterUnderCursor();
+            if (selectedMonsterIndex_ < 0 && ctx.isKeyPressed(SDL_SCANCODE_SPACE))
+            {
+                cs->completePlayerTurn();
+                statusLine_ = cs->turnStatusText();
+                return std::nullopt;
+            }
+            if (selectedMonsterIndex_ >= 0 && currentTurn >= 0)
+            {
+                cs->setInCombat(true);
+                auto result = cs->playerAttack(currentTurn, selectedMonsterIndex_);
+                statusLine_ = result.description;
+                cs->completePlayerTurn();
+                if (cs->isTurnBased())
+                    statusLine_ = cs->turnStatusText();
+            }
+            return std::nullopt;
+        }
         bool handled = false;
         if (ctx.shared->combatSystem)
         {
@@ -1543,7 +1586,8 @@ void InGameState::renderOverlay()
     lines.push_back("ARROWS MOVE/TURN  PGUP/PGDN LOOK  INS/DEL STRAFE  SHIFT RUN");
     lines.push_back("SPACE/A ACTION  I INV  C CHARS  S SPELLS  R REST  M MAP  Q QUESTS");
     lines.push_back("CLICK PORTRAIT: SELECT MEMBER  S: SPELLBOOK -> CLICK SPELL -> CLICK TARGET");
-    lines.push_back("RMB: QUICK DAMAGE SPELL  (TARGETING: ESC CANCELS)");
+    lines.push_back(
+        "RMB: QUICK DAMAGE SPELL  T: TOGGLE TURN-BASED/REAL-TIME  (TARGETING: ESC CANCELS)");
     lines.push_back(std::format("F FLOORS:{}  V WALLS:{}  C CEIL:{}  P PORTAL:{}",
                                 onOff(renderOptions.showFloors), onOff(renderOptions.showWalls),
                                 onOff(renderOptions.showCeilings),
@@ -1556,6 +1600,10 @@ void InGameState::renderOverlay()
         lines.push_back(std::format("MONSTERS:{}  PICK:{}  F9 EVT#1  F5 SAVE  F8 LOAD",
                                     ctx.shared->combatSystem->aliveMonsterCount(),
                                     selectedMonsterIndex_));
+        if (ctx.shared->combatSystem->isTurnBased())
+        {
+            lines.push_back(ctx.shared->combatSystem->turnStatusText());
+        }
     }
     if (ctx.shared && ctx.shared->gameWorld)
     {

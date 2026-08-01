@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cstdlib>
+#include <format>
 #include <random>
 #include <string_view>
 
@@ -229,6 +230,12 @@ void CombatSystem::update(float deltaMs)
         inCombat_ = false;
         return;
     }
+
+    // Turn-based: the world is paused while awaiting player input. Monster
+    // turns are resolved instantly in processMonsterTurn, not via per-frame
+    // ticking.
+    if (turnBased_)
+        return;
 
     for (auto& monster : monsters_)
     {
@@ -1012,6 +1019,148 @@ void CombatSystem::distributeXP(int xp)
             ch.experience += xpEach;
         }
     }
+}
+
+// -------- Turn-based combat --------
+
+void CombatSystem::setTurnBased(bool tb)
+{
+    if (turnBased_ == tb)
+        return;
+    turnBased_ = tb;
+    if (!tb)
+    {
+        turnQueue_.clear();
+        awaitingPlayerInput_ = false;
+        tbRound_ = 0;
+        return;
+    }
+    if (inCombat_)
+    {
+        startTurnBasedRound();
+    }
+}
+
+void CombatSystem::startTurnBasedRound()
+{
+    ++tbRound_;
+    turnQueue_.clear();
+    tbQueueIdx_ = 0;
+
+    if (!gameWorld_)
+        return;
+
+    auto& party = gameWorld_->party();
+    for (int i = 0; i < kPartySize; i++)
+    {
+        if (party.member(i).isConscious())
+        {
+            TurnActor a;
+            a.type = TurnActor::Type::Player;
+            a.index = i;
+            const int speed = party.member(i).effectiveStat(4); // Speed stat
+            a.initiative = std::max(30, speed * 2 + (randomInt(1, 10)));
+            turnQueue_.push_back(a);
+        }
+    }
+    for (size_t i = 0; i < monsters_.size(); i++)
+    {
+        if (monsters_[i].isAlive() && monsters_[i].hostile)
+        {
+            TurnActor a;
+            a.type = TurnActor::Type::Monster;
+            a.index = static_cast<int>(i);
+            a.initiative = monsters_[i].speed * 2 + randomInt(1, 10);
+            turnQueue_.push_back(a);
+        }
+    }
+    // Sort ascending by initiative; tie-break: monster before player.
+    std::sort(turnQueue_.begin(), turnQueue_.end(),
+              [](const TurnActor& a, const TurnActor& b)
+              {
+                  if (a.initiative != b.initiative)
+                      return a.initiative < b.initiative;
+                  // Same initiative: monster first (a < b if a is monster, b is player).
+                  return a.type == TurnActor::Type::Monster && b.type == TurnActor::Type::Player;
+              });
+
+    // Process any leading monster turns until we reach a player.
+    processMonsterTurn();
+}
+
+int CombatSystem::currentTurnPlayerIndex() const
+{
+    if (!turnBased_ || tbQueueIdx_ >= turnQueue_.size())
+        return -1;
+    const auto& actor = turnQueue_[tbQueueIdx_];
+    return actor.type == TurnActor::Type::Player ? actor.index : -1;
+}
+
+void CombatSystem::processMonsterTurn()
+{
+    while (tbQueueIdx_ < turnQueue_.size())
+    {
+        auto& actor = turnQueue_[tbQueueIdx_];
+        if (actor.type == TurnActor::Type::Player)
+        {
+            // Check the player is still conscious.
+            if (gameWorld_ && gameWorld_->party().member(actor.index).isConscious())
+            {
+                awaitingPlayerInput_ = true;
+                return;
+            }
+            // Skip unconscious player.
+            ++tbQueueIdx_;
+            continue;
+        }
+        // Monster turn: execute one AI step + attack.
+        if (actor.index >= 0 && actor.index < static_cast<int>(monsters_.size()))
+        {
+            auto& m = monsters_[static_cast<size_t>(actor.index)];
+            if (m.isAlive())
+            {
+                updateMonsterAI(m, 100.0f);
+                if (m.aiState == MonsterInstance::AIState::Attacking ||
+                    m.aiState == MonsterInstance::AIState::AttackingMelee2 ||
+                    m.aiState == MonsterInstance::AIState::AttackingRanged)
+                {
+                    monsterAttack(m);
+                }
+            }
+        }
+        ++tbQueueIdx_;
+    }
+    // Queue exhausted — start a new round.
+    startTurnBasedRound();
+}
+
+void CombatSystem::advanceQueue()
+{
+    awaitingPlayerInput_ = false;
+    ++tbQueueIdx_;
+    processMonsterTurn();
+}
+
+void CombatSystem::completePlayerTurn()
+{
+    if (!turnBased_)
+        return;
+    advanceQueue();
+}
+
+std::string CombatSystem::turnStatusText() const
+{
+    if (!turnBased_)
+        return {};
+    if (tbQueueIdx_ >= turnQueue_.size())
+        return std::format("Round {} — starting...", tbRound_);
+    const auto& actor = turnQueue_[tbQueueIdx_];
+    if (actor.type == TurnActor::Type::Player && gameWorld_)
+    {
+        const auto& ch = gameWorld_->party().member(actor.index);
+        return std::format("Round {} — {}'s turn", tbRound_, ch.name);
+    }
+    return std::format("Round {} — Monster turn", tbRound_);
 }
 
 } // namespace runeharbor::game

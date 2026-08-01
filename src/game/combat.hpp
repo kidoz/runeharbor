@@ -265,6 +265,23 @@ class CombatSystem
     bool inCombat() const { return inCombat_; }
     void setInCombat(bool active) { inCombat_ = active; }
 
+    // -------- Turn-based combat (RE: docs/turn-based-combat.md) --------
+    bool isTurnBased() const { return turnBased_; }
+    void setTurnBased(bool tb);
+    bool awaitingPlayerInput() const { return turnBased_ && awaitingPlayerInput_; }
+    int currentRound() const { return tbRound_; }
+    // The character index whose turn it is (−1 if a monster's turn or RT mode).
+    int currentTurnPlayerIndex() const;
+    // Build the initiative queue and start round 1 (call on entering TB or
+    // when combat starts while in TB).
+    void startTurnBasedRound();
+    // Called by InGameState after a player acts (attack/spell/pass). Advances
+    // the queue, processes any consecutive monster turns, then either sets
+    // awaitingPlayerInput_ for the next player or starts a new round.
+    void completePlayerTurn();
+    // Status text for the HUD ("Round 3 — Sir Knight's turn").
+    std::string turnStatusText() const;
+
     // Count alive monsters
     int aliveMonsterCount() const;
 
@@ -293,6 +310,27 @@ class CombatSystem
     std::unordered_map<int, bool> partyHostilityByMonsterId_;
     std::vector<MonsterInstance> monsters_;
     bool inCombat_ = false;
+
+    // Turn-based state.
+    struct TurnActor
+    {
+        enum class Type : uint8_t
+        {
+            Player,
+            Monster
+        };
+        Type type = Type::Player;
+        int index = 0;      // party member index (0–3) or monsters_ index
+        int initiative = 0; // lower = acts first
+    };
+    bool turnBased_ = false;
+    bool awaitingPlayerInput_ = false;
+    int tbRound_ = 0;
+    std::vector<TurnActor> turnQueue_;
+    size_t tbQueueIdx_ = 0;
+
+    void processMonsterTurn();
+    void advanceQueue();
 };
 
 } // namespace runeharbor::game
