@@ -310,7 +310,20 @@ void WorldRenderer::render(const engine::MapScene& scene, const Camera& camera,
     }
 
     refreshVisibilityCache(scene, camera);
-    refreshPickCache(scene, camera);
+
+    // Skip the pick-cache refresh when the camera hasn't moved (it iterates all
+    // faces/decorations/building-faces and allocates vectors — only changes when
+    // the view does). A small epsilon handles float jitter.
+    const Vec3 camPos = camera.getPosition();
+    const float posEps = 0.5f;
+    const bool cameraMoved = std::abs(camPos.x - lastCameraPosition_.x) > posEps ||
+                             std::abs(camPos.y - lastCameraPosition_.y) > posEps ||
+                             std::abs(camPos.z - lastCameraPosition_.z) > posEps;
+    if (cameraMoved || !pickCacheValid_)
+    {
+        lastCameraPosition_ = camPos;
+        refreshPickCache(scene, camera);
+    }
 
     // Check if the scene is indoor (BLV) or outdoor (ODM)
     if (!scene.getBLVData().vertices.empty())

@@ -10,6 +10,7 @@
 #include "../engine/map_scene.hpp"
 #include "../formats/frame_tables.hpp"
 #include "camera.hpp"
+#include "clip_utils.hpp"
 #include "light_stack.hpp"
 #include "live_actors.hpp"
 #include "sdl_renderer.hpp"
@@ -105,6 +106,12 @@ class IndoorRenderer
     uint32_t indoorIndexCount = 0;
     bool gpuInitialized = false;
     std::vector<GPUDrawCall> indoorDrawCalls;
+
+    // Reused per-frame buffers (avoid heap churn — previously allocated fresh
+    // every frame / per-face). ClipVertex/SDL_Vertex only; renderOps uses a
+    // function-local static in the .cpp (its type is anonymous-namespace there).
+    std::vector<ClipVertex> indoorTessellatedVerts_;
+    std::vector<SDL_Vertex> indoorVertices_;
 };
 
 } // namespace runeharbor::graphics

@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 #include "../engine/map_scene.hpp"
 #include "../formats/frame_tables.hpp"
@@ -82,6 +83,25 @@ class OutdoorRenderer
     WorldItemProvider worldItemProvider_;
     WorldItemSpriteLookup worldItemSpriteLookup_;
     const formats::SpriteFrameTable* spriteFrameTable = nullptr;
+
+    // Reused per-frame buffers (avoid heap churn — previously allocated fresh
+    // every frame / per-quad, causing up to ~16k allocations/frame for terrain).
+    struct TerrainQuad
+    {
+        SDL_Texture* texture = nullptr;
+        float distanceSq = 0.0f;
+        uint32_t firstVertex = 0;
+        uint32_t vertexCount = 0;
+    };
+    std::vector<TerrainQuad> terrainQuads_;
+    std::vector<SDL_Vertex> terrainQuadVerts_;
+    std::vector<SDL_Vertex> terrainRunVerts_;
+    // Camera-independent world-space positions for every heightmap grid corner,
+    // precomputed once per map to avoid per-frame heightmap reads + grid→world
+    // conversions in the terrain hot loop. Indexed [gy * TERRAIN_SIZE + gx].
+    std::vector<Vec3> terrainWorldVerts_;
+    std::string terrainCacheMapName_; // which map the cache belongs to
+    std::string lastMapName_;         // current map being rendered
 };
 
 namespace detail

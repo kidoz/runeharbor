@@ -71,6 +71,10 @@ class WorldRenderer
     bool visibilityCacheValid_ = false;
     bool pickCacheValid_ = false;
     std::string lastSceneName_;
+    // Last camera position/yaw for pick-cache skip (refreshPickCache is expensive
+    // and only changes when the view moves).
+    Vec3 lastCameraPosition_ = {1e30f, 1e30f, 1e30f};
+    float lastCameraYaw_ = 1e30f;
 
     SDL_GPUTexture* offscreenGpuTexture_ = nullptr;
     SDL_GPUTexture* offscreenDepthTexture_ = nullptr;

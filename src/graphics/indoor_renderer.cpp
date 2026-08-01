@@ -577,8 +577,11 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         BillboardSprite billboard; // For Billboard
     };
 
-    std::vector<RenderOp> renderOps;
-    renderOps.reserve(blvData.faces.size() + blvData.decorations.size() + blvData.spawns.size());
+    // Function-local static: persists across frames, never reallocates after the
+    // first call. Cleared each frame but capacity is retained (avoids per-frame
+    // heap churn for thousands of render ops).
+    static std::vector<RenderOp> renderOps;
+    renderOps.clear();
 
     for (uint32_t i = 0; i < blvData.faces.size(); i++)
     {
@@ -797,29 +800,12 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                     }
                 }
 
-                // Per-vertex lighting: compute the dynamic light contribution at
-                // each vertex (rather than the centroid) for a smoother gradient.
-                // Falls back to the centroid color when the face has no dynamic
-                // lights or the NoLight bit is set.
+                // Per-face lighting (computed once at the centroid above via
+                // litIndoorFaceColor). Previously this called dynamicLightContribution
+                // per-vertex — an O(faces × vertices × lights) hot loop that was the
+                // biggest indoor bottleneck. The centroid color is reused for all
+                // vertices (flat shading), matching the GPU path.
                 SDL_FColor vertColor = faceColor;
-                if ((face.attributes & kNoLightFaceBit) == 0)
-                {
-                    const SDL_FColor vDyn =
-                        dynamicLightContribution(blvData, face, worldPos.x, worldPos.y, worldPos.z,
-                                                 stationaryLights_, mobileLights_);
-                    const float ambient = sectorAmbientScale(blvData, face);
-                    const SDL_FColor base = surfaceColor(face);
-                    vertColor.r = std::clamp(base.r * ambient + vDyn.r * 0.75f, 0.0f, 1.0f);
-                    vertColor.g = std::clamp(base.g * ambient + vDyn.g * 0.75f, 0.0f, 1.0f);
-                    vertColor.b = std::clamp(base.b * ambient + vDyn.b * 0.75f, 0.0f, 1.0f);
-                    if (nightBlend > 0.0f)
-                    {
-                        const float dim = 1.0f - nightBlend * 0.35f;
-                        vertColor.r *= dim;
-                        vertColor.g *= dim;
-                        vertColor.b *= dim;
-                    }
-                }
 
                 polyIn[polyCount++] = {clip, vertColor, u, uv};
             }
@@ -836,19 +822,21 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                 continue;
             }
 
-            // Tessellate clip-space polygons to minimize affine texture warping
-            std::vector<ClipVertex> tessellatedVerts;
+            // Tessellate clip-space polygons to minimize affine texture warping.
+            // (indoorTessellatedVerts_ is a hoisted member — clear+reuse, no
+            // per-face heap allocation.)
+            indoorTessellatedVerts_.clear();
             for (int i = 1; i + 1 < clippedCount; i++)
             {
-                tessellateTriangle(polyOut[0], polyOut[i], polyOut[i + 1], tessellatedVerts);
+                tessellateTriangle(polyOut[0], polyOut[i], polyOut[i + 1], indoorTessellatedVerts_);
             }
 
-            // Project to screen
-            std::vector<SDL_Vertex> vertices;
-            vertices.reserve(tessellatedVerts.size());
+            // Project to screen (indoorVertices_ hoisted — clear+reuse).
+            indoorVertices_.clear();
+            indoorVertices_.reserve(indoorTessellatedVerts_.size());
             bool anyFailed = false;
 
-            for (const auto& tv : tessellatedVerts)
+            for (const auto& tv : indoorTessellatedVerts_)
             {
                 float sx, sy;
                 if (!projectClipToScreen(tv.clip, vpW, vpH, sx, sy))
@@ -860,17 +848,17 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                 sv.position = {sx, sy};
                 sv.color = tv.color;
                 sv.tex_coord = {tv.u, tv.v};
-                vertices.push_back(sv);
+                indoorVertices_.push_back(sv);
             }
 
-            if (anyFailed || vertices.size() < 3)
+            if (anyFailed || indoorVertices_.size() < 3)
             {
                 continue;
             }
 
             std::vector<int> indices;
-            indices.reserve(vertices.size());
-            for (size_t i = 0; i < vertices.size(); i++)
+            indices.reserve(indoorVertices_.size());
+            for (size_t i = 0; i < indoorVertices_.size(); i++)
             {
                 indices.push_back(static_cast<int>(i));
             }
@@ -884,8 +872,8 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
 
             // Render triangulated polygon (base pass)
             SDL_SetRenderDrawBlendMode(renderer.getSDLRenderer(), SDL_BLENDMODE_BLEND);
-            SDL_RenderGeometry(renderer.getSDLRenderer(), texture, vertices.data(),
-                               static_cast<int>(vertices.size()), indices.data(),
+            SDL_RenderGeometry(renderer.getSDLRenderer(), texture, indoorVertices_.data(),
+                               static_cast<int>(indoorVertices_.size()), indices.data(),
                                static_cast<int>(indices.size()));
 
             // Additive light polygon pass — now redundant: the base pass computes
@@ -900,7 +888,7 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                 // way is to just apply the dynamic light as an additive overlay We need to
                 // re-generate the vertex colors for the additive pass. We'll calculate the dynamic
                 // light contribution (without ambient) and use it.
-                std::vector<SDL_Vertex> lightVertices = vertices;
+                std::vector<SDL_Vertex> lightVertices = indoorVertices_;
                 bool hasLight = false;
                 for (size_t v_idx = 0; v_idx < lightVertices.size(); ++v_idx)
                 {

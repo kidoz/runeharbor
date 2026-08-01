@@ -378,6 +378,7 @@ void OutdoorRenderer::render(const engine::MapScene& scene, const Camera& camera
                              const game::RuntimeConfig* runtimeConfig, float nightBlend,
                              const Frustum* frustumOverride)
 {
+    lastMapName_ = scene.getName();
     const auto& odmData = scene.getODMData();
     if (odmData.heightmap.empty())
     {
@@ -418,19 +419,25 @@ void OutdoorRenderer::renderSky(const game::RuntimeConfig* runtimeConfig, float 
             ? blendRgb(runtimeConfig->skyDayBottom, runtimeConfig->skyNightBottom, nightBlend)
             : std::array<uint8_t, 3>{153, 193, 237};
 
-    const int width = renderer.getViewportWidth();
-    const int height = renderer.getViewportHeight();
-    for (int y = 0; y < height; y++)
-    {
-        const float t = static_cast<float>(y) / static_cast<float>(std::max(1, height - 1));
-        const float r = (1.0f - t) * static_cast<float>(top[0]) + t * static_cast<float>(bottom[0]);
-        const float g = (1.0f - t) * static_cast<float>(top[1]) + t * static_cast<float>(bottom[1]);
-        const float b = (1.0f - t) * static_cast<float>(top[2]) + t * static_cast<float>(bottom[2]);
-        SDL_SetRenderDrawColorFloat(renderer.getSDLRenderer(), r / 255.0f, g / 255.0f, b / 255.0f,
-                                    1.0f);
-        SDL_RenderLine(renderer.getSDLRenderer(), 0.0f, static_cast<float>(y),
-                       static_cast<float>(width), static_cast<float>(y));
-    }
+    // Single gradient quad (2 triangles, 4 verts) instead of one SDL_RenderLine
+    // per scanline (was hundreds of draw calls/frame). Vertex colors interpolate
+    // the top→bottom gradient; no texture needed.
+    const float w = static_cast<float>(renderer.getViewportWidth());
+    const float h = static_cast<float>(renderer.getViewportHeight());
+    const SDL_FColor topCol = {static_cast<float>(top[0]) / 255.0f,
+                               static_cast<float>(top[1]) / 255.0f,
+                               static_cast<float>(top[2]) / 255.0f, 1.0f};
+    const SDL_FColor botCol = {static_cast<float>(bottom[0]) / 255.0f,
+                               static_cast<float>(bottom[1]) / 255.0f,
+                               static_cast<float>(bottom[2]) / 255.0f, 1.0f};
+    const SDL_Vertex skyVerts[4] = {
+        {{0.0f, 0.0f}, topCol, {0.0f, 0.0f}},
+        {{w, 0.0f}, topCol, {1.0f, 0.0f}},
+        {{w, h}, botCol, {1.0f, 1.0f}},
+        {{0.0f, h}, botCol, {0.0f, 1.0f}},
+    };
+    const int skyIndices[6] = {0, 1, 2, 0, 2, 3};
+    SDL_RenderGeometry(renderer.getSDLRenderer(), nullptr, skyVerts, 4, skyIndices, 6);
 }
 
 void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Camera& camera,
@@ -454,21 +461,41 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
         frustum = &localFrustum;
     }
 
-    // Helper: get render-space position for a grid corner.
-    // Render coordinates are Y-up; gameplay X/Y map to render X/Z. Grid Y grows
-    // south, so it has to be mirrored (see formats::outdoorGridToWorldY).
+    // Build the camera-independent terrain vertex cache once per map (avoids
+    // per-frame heightmap reads + grid→world conversions for all 128×128
+    // corners). The cache stores render-space positions; the camera-dependent
+    // clip transform and LOD still run per-frame.
+    if (terrainCacheMapName_ != lastMapName_)
+    {
+        terrainCacheMapName_ = lastMapName_;
+        terrainWorldVerts_.clear();
+        terrainWorldVerts_.resize(static_cast<size_t>(SIZE) * SIZE);
+        for (int gy = 0; gy < SIZE; ++gy)
+        {
+            for (int gx = 0; gx < SIZE; ++gx)
+            {
+                float height = 0.0f;
+                size_t idx = static_cast<size_t>(gy * SIZE + gx);
+                if (idx < odmData.heightmap.size())
+                {
+                    height = static_cast<float>(odmData.heightmap[idx].height);
+                }
+                terrainWorldVerts_[idx] = gameplayToRenderPosition(
+                    formats::outdoorGridToWorldX(static_cast<float>(gx)),
+                    formats::outdoorGridToWorldY(static_cast<float>(gy)), height);
+            }
+        }
+    }
+
+    // Helper: look up a cached world-space position for a grid corner.
     auto worldPos = [&](int gx, int gy) -> Vec3
     {
-        float height = 0.0f;
-        size_t idx = static_cast<size_t>(gy * SIZE + gx);
-        if (idx < odmData.heightmap.size())
+        const size_t idx = static_cast<size_t>(gy * SIZE + gx);
+        if (idx < terrainWorldVerts_.size())
         {
-            height = static_cast<float>(odmData.heightmap[idx].height);
+            return terrainWorldVerts_[idx];
         }
-
-        return gameplayToRenderPosition(formats::outdoorGridToWorldX(static_cast<float>(gx)),
-                                        formats::outdoorGridToWorldY(static_cast<float>(gy)),
-                                        height);
+        return Vec3{};
     };
 
     // Transform world point to clip space (no perspective divide yet)
@@ -499,17 +526,14 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
     // Terrain quads are collected with their depth so the whole field can be drawn
     // back-to-front. SDL_Renderer has no depth buffer, so grouping purely by texture
     // (as an unordered batch) lets far hills paint over near ones.
-    struct TerrainQuad
-    {
-        SDL_Texture* texture;
-        float distanceSq;
-        uint32_t firstVertex;
-        uint32_t vertexCount;
-    };
-    std::vector<TerrainQuad> quads;
-    std::vector<SDL_Vertex> quadVerts;
-    quads.reserve(1024);
-    quadVerts.reserve(8192);
+    // Reused member buffers (cleared, not reallocated, each frame).
+    auto& quads = terrainQuads_;
+    auto& quadVerts = terrainQuadVerts_;
+    quads.clear();
+    quadVerts.clear();
+    // Tessellation scratch — hoisted out of the per-quad loop (was allocated
+    // inside it, up to ~16k allocs/frame).
+    std::vector<ClipVertex> tessellatedVerts;
 
     // Resolve tile texture for a grid cell
     auto getTileTexture = [&](int gx, int gy) -> SDL_Texture*
@@ -626,8 +650,9 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
                     continue;
                 }
 
-                // Tessellate clip-space polygons to minimize affine texture warping
-                std::vector<ClipVertex> tessellatedVerts;
+                // Tessellate clip-space polygons to minimize affine texture warping.
+                // (tessellatedVerts is hoisted outside the loop — clear+reuse.)
+                tessellatedVerts.clear();
                 for (int i = 1; i + 1 < count; i++)
                 {
                     tessellateTriangle(clipped[0], clipped[i], clipped[i + 1], tessellatedVerts);
@@ -678,7 +703,8 @@ void OutdoorRenderer::renderTerrain(const formats::ODMMapData& odmData, const Ca
     std::sort(quads.begin(), quads.end(), [](const TerrainQuad& a, const TerrainQuad& b)
               { return a.distanceSq > b.distanceSq; });
 
-    std::vector<SDL_Vertex> runVerts;
+    auto& runVerts = terrainRunVerts_;
+    runVerts.clear();
     auto flushRun = [&](SDL_Texture* texture)
     {
         if (runVerts.size() < 3)
