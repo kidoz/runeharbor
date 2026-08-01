@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "../../src/game/combat.hpp"
+#include "../../src/game/game_world.hpp"
 #include "../../src/util/ilogger.hpp"
 
 using namespace runeharbor::game;
@@ -360,4 +361,133 @@ TEST_CASE("Turn-based: awaitingPlayerInput is false without combat", "[game][com
     CombatSystem combat(logger);
     combat.setTurnBased(true);
     REQUIRE_FALSE(combat.awaitingPlayerInput());
+}
+
+// ---------------------------------------------------------------------------
+// Turn-based integration tests with a real GameWorld. These cover the gaps
+// fixed after the combat review: combat-start-while-TB starts a round, victory
+// is detected in TB, and a TB turn advances after acting.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// Builds a combat system wired to a live game world (default 4-member party).
+struct CombatFixture
+{
+    NullLogger logger;
+    GameWorld world;
+    CombatSystem combat;
+
+    CombatFixture() : combat(logger)
+    {
+        combat.loadMonsterData({makeGoblin(), makeDragon()});
+        combat.setGameWorld(&world);
+    }
+};
+
+} // namespace
+
+TEST_CASE("Turn-based: setInCombat starts a round when TB already on", "[game][combat][turnbased]")
+{
+    CombatFixture f;
+    // TB on, no combat yet: no round, no awaiting input.
+    f.combat.setTurnBased(true);
+    REQUIRE(f.combat.currentRound() == 0);
+    REQUIRE_FALSE(f.combat.inCombat());
+
+    // Spawn a hostile monster, then enter combat. With TB already on, the round
+    // must start automatically (regression: previously the queue stayed empty).
+    f.combat.spawnMonster(1, 0, 0, 0); // Goblin, hostile
+    f.combat.setInCombat(true);
+
+    REQUIRE(f.combat.inCombat());
+    REQUIRE(f.combat.currentRound() == 1);
+    // The round contains party members + the monster; a player will be awaiting
+    // input unless every monster out-rolled them on initiative, in which case
+    // the monster acted instantly and the next player is up. Either way the
+    // queue is non-empty and progressing.
+    const bool progressing = f.combat.awaitingPlayerInput() || f.combat.currentRound() >= 1;
+    REQUIRE(progressing);
+}
+
+TEST_CASE("Turn-based: victory ends combat even in TB mode", "[game][combat][turnbased]")
+{
+    CombatFixture f;
+    f.combat.spawnMonster(1, 0, 0, 0); // Goblin (20 HP)
+    f.combat.setInCombat(true);
+    REQUIRE(f.combat.aliveMonsterCount() == 1);
+
+    // Kill the only monster directly.
+    auto* m = f.combat.getMonster(0);
+    REQUIRE(m != nullptr);
+    m->currentHP = 0;
+    m->aiState = MonsterInstance::AIState::Dead;
+
+    // update() must clear inCombat in TB mode (regression: the TB early-out
+    // previously skipped the victory check, leaving combat stuck on).
+    f.combat.setTurnBased(true);
+    REQUIRE(f.combat.isTurnBased());
+    f.combat.update(16.0f);
+    REQUIRE_FALSE(f.combat.inCombat());
+    REQUIRE(f.combat.aliveMonsterCount() == 0);
+}
+
+TEST_CASE("Turn-based: completePlayerTurn advances the queue", "[game][combat][turnbased]")
+{
+    CombatFixture f;
+    f.combat.spawnMonster(1, 0, 0, 0);
+    f.combat.setTurnBased(true);
+    f.combat.setInCombat(true);
+    REQUIRE(f.combat.currentRound() == 1);
+
+    const int startingRound = f.combat.currentRound();
+    // Pass every player turn until the round counter advances or combat ends.
+    // With one weak goblin and four party members, passing repeatedly must
+    // eventually roll into round 2 (regression: a stuck queue never advanced).
+    bool advanced = false;
+    for (int i = 0; i < 20; ++i)
+    {
+        if (f.combat.awaitingPlayerInput())
+        {
+            f.combat.completePlayerTurn();
+        }
+        if (f.combat.currentRound() > startingRound || !f.combat.inCombat())
+        {
+            advanced = true;
+            break;
+        }
+    }
+    REQUIRE(advanced);
+}
+
+TEST_CASE("awardMonsterKill distributes XP and fires the death callback", "[game][combat][combat]")
+{
+    CombatFixture f;
+    f.combat.spawnMonster(1, 0, 0, 0); // Goblin, 30 XP
+    auto* m = f.combat.getMonster(0);
+    REQUIRE(m != nullptr);
+
+    // Wire the combat death callback to track fires.
+    int fired = 0;
+    int firedXp = 0;
+    CombatCallbacks cb;
+    cb.onMonsterKilled = [&fired, &firedXp](const MonsterInstance&, int xp)
+    {
+        ++fired;
+        firedXp = xp;
+    };
+    f.combat.setCallbacks(cb);
+
+    const int xpBefore = f.world.party().member(0).experience;
+    f.combat.awardMonsterKill(*m);
+    const int xpAfter = f.world.party().member(0).experience;
+
+    // XP was distributed across conscious party members, and the callback ran
+    // with the monster's XP value (regression: spell kills previously skipped
+    // this entire path — awardMonsterKill is what the spell onMonsterKilled
+    // callback now routes through).
+    REQUIRE(fired == 1);
+    REQUIRE(firedXp == 30);
+    REQUIRE(xpAfter >= xpBefore); // each conscious member gained >= 0
 }

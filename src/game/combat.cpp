@@ -233,7 +233,24 @@ void CombatSystem::update(float deltaMs)
 
     // Turn-based: the world is paused while awaiting player input. Monster
     // turns are resolved instantly in processMonsterTurn, not via per-frame
-    // ticking.
+    // Victory check runs every frame in both modes. In turn-based mode the
+    // monster-tick loop below is skipped, but combat must still end when the
+    // last monster dies — otherwise the round loop rebuilds empty queues
+    // forever and the player can never leave combat.
+    if (inCombat_ && aliveMonsterCount() == 0)
+    {
+        inCombat_ = false;
+        if (turnBased_)
+        {
+            // Tear down the queue so any stale turn state is cleared.
+            turnQueue_.clear();
+            awaitingPlayerInput_ = false;
+        }
+        return;
+    }
+
+    // Turn-based mode: monster turns are resolved synchronously in
+    // processMonsterTurn, not via per-frame ticking.
     if (turnBased_)
         return;
 
@@ -1021,6 +1038,17 @@ void CombatSystem::distributeXP(int xp)
     }
 }
 
+void CombatSystem::awardMonsterKill(MonsterInstance& monster)
+{
+    // Mirror the kill-handling in playerAttack() so spell kills (resolved by
+    // SpellSystem) and melee kills share the same XP + death-callback path.
+    distributeXP(monster.experience);
+    if (callbacks_.onMonsterKilled)
+    {
+        callbacks_.onMonsterKilled(monster, monster.experience);
+    }
+}
+
 // -------- Turn-based combat --------
 
 void CombatSystem::setTurnBased(bool tb)
@@ -1043,6 +1071,14 @@ void CombatSystem::setTurnBased(bool tb)
 
 void CombatSystem::startTurnBasedRound()
 {
+    // NOTE: this initiative model is a simplification of the RE design in
+    // docs/turn-based-combat.md §4. RuneHarbor computes initiative once per
+    // round (speed*2 + randomInt(1,10), min 30 for players) and does a flat
+    // ascending sort. The original uses a continuous-initiative countdown
+    // (RecomputeInit fcn.0040652a / QueueAdvance fcn.00406457) that re-sorts
+    // after each action, a per-monster-type TB recovery from the 0x5ccd10
+    // table, a 32/15 (~2.13) recovery multiplier, and a haste-doubles-
+    // initiative branch. Porting the full countdown model is a follow-up.
     ++tbRound_;
     turnQueue_.clear();
     tbQueueIdx_ = 0;

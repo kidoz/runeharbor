@@ -100,6 +100,11 @@ struct SpellCallbacks
 {
     std::function<void(int spellId, int casterIndex, const SpellResult& result)> onSpellCast;
     std::function<void(int spellId, const std::string& reason)> onSpellFailed;
+    // Fired when a damage spell kills a monster, so the host (CombatSystem) can
+    // award XP and run the same death pipeline as a melee kill. Without this,
+    // spell kills would set the monster Dead but grant no XP and skip the
+    // onMonsterKilled UI callback.
+    std::function<void(MonsterInstance& monster, int xp)> onMonsterKilled;
 };
 
 class SpellSystem

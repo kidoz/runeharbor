@@ -245,6 +245,13 @@ SpellResult SpellSystem::castDamageSpell(int characterIndex, int spellId, Monste
 
         result.description = ch.name + " casts " + spell->name + " killing " + target->name + " (" +
                              std::to_string(result.damage) + " damage)";
+
+        // Route the kill through the host so XP is awarded and the death UI
+        // callback fires — melee kills do this in CombatSystem::playerAttack.
+        if (callbacks_.onMonsterKilled)
+        {
+            callbacks_.onMonsterKilled(*target, target->experience);
+        }
     }
     else
     {

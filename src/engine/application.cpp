@@ -3361,6 +3361,15 @@ void Application::configureGameplayCallbacks()
         };
         callbacks.onSpellFailed = [this](int spellId, const std::string& reason)
         { logger.debug(std::format("Spell #{} failed: {}", spellId, reason)); };
+        // Route spell kills through CombatSystem so they award XP and fire the
+        // death UI callback, matching melee kills.
+        callbacks.onMonsterKilled = [this](game::MonsterInstance& monster, int /*xp*/)
+        {
+            if (combatSystem_)
+            {
+                combatSystem_->awardMonsterKill(monster);
+            }
+        };
         spellSystem_->setCallbacks(callbacks);
     }
 }

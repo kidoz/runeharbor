@@ -263,7 +263,35 @@ class CombatSystem
 
     // Is combat active?
     bool inCombat() const { return inCombat_; }
-    void setInCombat(bool active) { inCombat_ = active; }
+    void setInCombat(bool active)
+    {
+        // When combat begins (or ends) while turn-based mode is on, keep the
+        // turn queue in sync: start a round on entry, tear it down on exit.
+        // Without this, an ambush or hostility trigger that fires while TB is
+        // already on would leave the queue empty and no turn would ever run.
+        if (active && !inCombat_ && turnBased_)
+        {
+            inCombat_ = true;
+            startTurnBasedRound();
+        }
+        else if (!active && turnBased_)
+        {
+            inCombat_ = false;
+            turnQueue_.clear();
+            awaitingPlayerInput_ = false;
+        }
+        else
+        {
+            inCombat_ = active;
+        }
+    }
+
+    // Award XP for a monster killed by an external system (e.g. a spell kill
+    // resolved by SpellSystem): distributes experience across conscious party
+    // members and fires the onMonsterKilled UI callback, exactly as a melee
+    // kill in playerAttack does. Public so SpellSystem's onMonsterKilled spell
+    // callback can route through it without needing access to distributeXP.
+    void awardMonsterKill(MonsterInstance& monster);
 
     // -------- Turn-based combat (RE: docs/turn-based-combat.md) --------
     bool isTurnBased() const { return turnBased_; }

@@ -820,6 +820,15 @@ std::optional<GameStateId> InGameState::update()
             {
                 statusLine_ = "No valid target.";
             }
+            // In turn-based mode, a successful cast consumes the player's turn —
+            // without this the queue stays stuck on the caster (melee attacks
+            // advance via completePlayerTurn in the action handler below).
+            if (resolved && ctx.shared->combatSystem && ctx.shared->combatSystem->isTurnBased() &&
+                ctx.shared->combatSystem->awaitingPlayerInput())
+            {
+                ctx.shared->combatSystem->completePlayerTurn();
+                statusLine_ = ctx.shared->combatSystem->turnStatusText();
+            }
             targetingActive_ = false;
         }
         return std::nullopt; // swallow input while targeting
@@ -1007,7 +1016,11 @@ std::optional<GameStateId> InGameState::update()
         if (selectedMonsterIndex_ >= 0)
         {
             auto* target = ctx.shared->combatSystem->getMonster(selectedMonsterIndex_);
-            const int caster = findActivePartyMember();
+            // In turn-based mode the current turn's character acts (not the
+            // HUD-selected active member); in real-time, the active member does.
+            const int caster = ctx.shared->combatSystem->isTurnBased()
+                                   ? ctx.shared->combatSystem->currentTurnPlayerIndex()
+                                   : findActivePartyMember();
             if (caster >= 0 && target && target->isAlive())
             {
                 const int spellId = findFirstDamageSpell(caster);
@@ -1016,6 +1029,14 @@ std::optional<GameStateId> InGameState::update()
                     ctx.shared->combatSystem->setInCombat(true);
                     auto result = ctx.shared->spellSystem->castDamageSpell(caster, spellId, target);
                     statusLine_ = result.description;
+                    // A quick-cast consumes the turn in TB mode, same as a
+                    // targeted cast or melee attack.
+                    if (ctx.shared->combatSystem->isTurnBased() &&
+                        ctx.shared->combatSystem->awaitingPlayerInput())
+                    {
+                        ctx.shared->combatSystem->completePlayerTurn();
+                        statusLine_ = ctx.shared->combatSystem->turnStatusText();
+                    }
                 }
             }
         }
