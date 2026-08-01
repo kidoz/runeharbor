@@ -340,6 +340,17 @@ class CombatSystem
     bool inCombat_ = false;
 
     // Turn-based state.
+    // RE: docs/turn-based-combat.md §3-§5. RuneHarbor uses a round-bounded
+    // variant of MM7's continuous-initiative queue: each entry carries a
+    // remaining `initiative` countdown (lower = acts sooner) derived from the RE
+    // sources (player action-speed min 30, per-monster-type recovery * 32/15),
+    // and after each action the queue is re-sorted so order reflects remaining
+    // initiative. To prevent an infinite loop when no conscious player can take
+    // a turn (all-downed party), each monster acts at most once per round and
+    // the round ends when all alive hostile monsters have acted — so the
+    // continuous-initiative *ordering* is RE-faithful, but each actor acts once
+    // per round rather than the unbounded multi-action-per-round the original
+    // permits (its rounds are bounded by the party always being present).
     struct TurnActor
     {
         enum class Type : uint8_t
@@ -348,14 +359,41 @@ class CombatSystem
             Monster
         };
         Type type = Type::Player;
-        int index = 0;      // party member index (0–3) or monsters_ index
-        int initiative = 0; // lower = acts first
+        int index = 0;        // party member index (0–3) or monsters_ index
+        int initiative = 0;   // remaining countdown; lower = acts first
+        int baseRecovery = 0; // per-action recovery cost (re-added on recompute)
+        bool hasted = false;  // active haste timer doubles recovery (delays actor)
     };
+
+    // TB constants ported from the RE binary (docs/turn-based-combat.md §9,
+    // "Constants to port"). kRoundStartCounter has no consumer yet — RuneHarbor
+    // resolves TB turns synchronously, so the per-frame action counter MM7
+    // decrements (§5) is inert here; kept for parity/future porting.
+    static constexpr float kTbRecoveryMul = 32.0f / 15.0f; // ≈2.1333 (0x4d8438)
+    static constexpr int kMinPlayerInitiative = 30;        // 0x1e
+    static constexpr int kRoundStartCounter = 64;          // 0x40
+
     bool turnBased_ = false;
     bool awaitingPlayerInput_ = false;
     int tbRound_ = 0;
     std::vector<TurnActor> turnQueue_;
-    size_t tbQueueIdx_ = 0;
+    // Monster indices that have already acted this round. Bounds the monster
+    // turn loop so a fast monster can't spin forever when no conscious player
+    // can take a turn (all-downed party, or every player skipped). Cleared on
+    // each startTurnBasedRound.
+    std::unordered_set<int> tbActedThisRound_;
+
+    // Player action-speed used as initiative (RE: Player_CalculateSpellDamage
+    // reused as a generic speed computer, min 30). Approximated from Speed.
+    int playerActionSpeed(int charIdx) const;
+    // Per-monster-type TB recovery (RE: 0x5ccd10 table); reads the monster
+    // definition's recovery field, with a fallback for unknown ids.
+    int monsterTypeRecovery(int monsterIdx) const;
+    // Remove dead/unconscious/fled entries from the queue.
+    void pruneQueue();
+    // RE QueueSort comparator: ascending initiative, tie-break monster before
+    // player, then by index.
+    static bool turnActorLess(const TurnActor& a, const TurnActor& b);
 
     void processMonsterTurn();
     void advanceQueue();

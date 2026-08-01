@@ -1076,19 +1076,76 @@ void CombatSystem::setTurnBased(bool tb)
     }
 }
 
+int CombatSystem::playerActionSpeed(int charIdx) const
+{
+    // RE uses Player_CalculateSpellDamage (fcn.0048e19b) as a generic player
+    // action-speed computer, clamped to a minimum of 30 (docs/turn-based-
+    // combat.md §4/§6). That function folds in weapon speed, mastery, and the
+    // Speed stat; RuneHarbor doesn't yet model weapon/mastery speed, so this
+    // approximates it from the Speed stat alone. Porting the full pipeline is
+    // a follow-up.
+    if (!gameWorld_ || charIdx < 0 || charIdx >= kPartySize)
+        return kMinPlayerInitiative;
+    const int speed = gameWorld_->party().member(charIdx).effectiveStat(4); // Speed
+    return std::max(kMinPlayerInitiative, speed * 2);
+}
+
+int CombatSystem::monsterTypeRecovery(int monsterIdx) const
+{
+    // RE: per-monster-type TB recovery from the 0x5ccd10 table (stride 0x58),
+    // accessed via the actor's type field. RuneHarbor stores this as the
+    // MonsterEntry.recovery field; fall back to a mid-range default for
+    // unknown ids so they still get a sane schedule slot.
+    if (monsterIdx < 0 || monsterIdx >= static_cast<int>(monsters_.size()))
+        return 30;
+    const auto it = monsterDefs_.find(monsters_[static_cast<size_t>(monsterIdx)].monsterId);
+    if (it == monsterDefs_.end())
+        return 30;
+    return std::max(1, it->second.recovery);
+}
+
+bool CombatSystem::turnActorLess(const TurnActor& a, const TurnActor& b)
+{
+    // RE QueueSort (fcn.00404544): ascending by initiative; on a tie, a monster
+    // (type 3 in the binary) sorts before a player (type 4); otherwise by index.
+    if (a.initiative != b.initiative)
+        return a.initiative < b.initiative;
+    if (a.type != b.type)
+        return a.type == TurnActor::Type::Monster && b.type == TurnActor::Type::Player;
+    return a.index < b.index;
+}
+
+void CombatSystem::pruneQueue()
+{
+    // Drop actors that can no longer act. The queue is the live schedule, so
+    // dead/fled/unconscious entries are removed rather than skipped by index.
+    auto canAct = [&](const TurnActor& actor) -> bool
+    {
+        if (actor.type == TurnActor::Type::Player)
+        {
+            return gameWorld_ && gameWorld_->party().member(actor.index).isConscious();
+        }
+        if (actor.index >= 0 && actor.index < static_cast<int>(monsters_.size()))
+        {
+            const auto& m = monsters_[static_cast<size_t>(actor.index)];
+            return m.isAlive() && m.hostile;
+        }
+        return false;
+    };
+    std::erase_if(turnQueue_, [&](const TurnActor& a) { return !canAct(a); });
+}
+
 void CombatSystem::startTurnBasedRound()
 {
-    // NOTE: this initiative model is a simplification of the RE design in
-    // docs/turn-based-combat.md §4. RuneHarbor computes initiative once per
-    // round (speed*2 + randomInt(1,10), min 30 for players) and does a flat
-    // ascending sort. The original uses a continuous-initiative countdown
-    // (RecomputeInit fcn.0040652a / QueueAdvance fcn.00406457) that re-sorts
-    // after each action, a per-monster-type TB recovery from the 0x5ccd10
-    // table, a 32/15 (~2.13) recovery multiplier, and a haste-doubles-
-    // initiative branch. Porting the full countdown model is a follow-up.
+    // Builds a fresh continuous-initiative queue for the round. Unlike a flat
+    // one-action-per-actor schedule, this queue persists across actions: after
+    // each action advanceQueue() recomputes the actor's initiative and re-sorts,
+    // so faster actors surface again within the same round (docs/turn-based-
+    // combat.md §4 "continuous-initiative flavour").
     ++tbRound_;
     turnQueue_.clear();
-    tbQueueIdx_ = 0;
+    tbActedThisRound_.clear();
+    awaitingPlayerInput_ = false;
 
     if (!gameWorld_)
         return;
@@ -1101,62 +1158,110 @@ void CombatSystem::startTurnBasedRound()
             TurnActor a;
             a.type = TurnActor::Type::Player;
             a.index = i;
-            const int speed = party.member(i).effectiveStat(4); // Speed stat
-            a.initiative = std::max(30, speed * 2 + (randomInt(1, 10)));
+            a.baseRecovery = playerActionSpeed(i);
+            // TODO(characters-buffs): set a.hasted from an active haste timer
+            // once the buff/condition system exposes one. RE: an active timer
+            // doubles recovery (delays the actor) per RecomputeInit (§4).
+            a.hasted = false;
+            a.initiative = a.baseRecovery * (a.hasted ? 2 : 1) + randomInt(1, 10);
             turnQueue_.push_back(a);
         }
     }
-    for (size_t i = 0; i < monsters_.size(); i++)
+    for (int i = 0; i < static_cast<int>(monsters_.size()); i++)
     {
-        if (monsters_[i].isAlive() && monsters_[i].hostile)
+        if (monsters_[static_cast<size_t>(i)].isAlive() &&
+            monsters_[static_cast<size_t>(i)].hostile)
         {
             TurnActor a;
             a.type = TurnActor::Type::Monster;
-            a.index = static_cast<int>(i);
-            a.initiative = monsters_[i].speed * 2 + randomInt(1, 10);
+            a.index = i;
+            // Per-type recovery scaled by the TB multiplier (32/15 ≈ 2.1333).
+            a.baseRecovery = std::max(1, static_cast<int>(monsterTypeRecovery(i) * kTbRecoveryMul));
+            // TODO(monsters-buffs): haste flag, as above.
+            a.hasted = false;
+            a.initiative = a.baseRecovery * (a.hasted ? 2 : 1) + randomInt(1, 10);
             turnQueue_.push_back(a);
         }
     }
-    // Sort ascending by initiative; tie-break: monster before player.
-    std::sort(turnQueue_.begin(), turnQueue_.end(),
-              [](const TurnActor& a, const TurnActor& b)
-              {
-                  if (a.initiative != b.initiative)
-                      return a.initiative < b.initiative;
-                  // Same initiative: monster first (a < b if a is monster, b is player).
-                  return a.type == TurnActor::Type::Monster && b.type == TurnActor::Type::Player;
-              });
+    std::sort(turnQueue_.begin(), turnQueue_.end(), turnActorLess);
 
-    // Process any leading monster turns until we reach a player.
+    // Resolve any leading monster turns until a player is up.
     processMonsterTurn();
 }
 
 int CombatSystem::currentTurnPlayerIndex() const
 {
-    if (!turnBased_ || tbQueueIdx_ >= turnQueue_.size())
+    // The head of the sorted queue is the current actor.
+    if (!turnBased_ || turnQueue_.empty())
         return -1;
-    const auto& actor = turnQueue_[tbQueueIdx_];
+    const auto& actor = turnQueue_.front();
     return actor.type == TurnActor::Type::Player ? actor.index : -1;
 }
 
 void CombatSystem::processMonsterTurn()
 {
-    while (tbQueueIdx_ < turnQueue_.size())
+    // Head-driven loop: the front of the sorted queue is whoever acts now. Run
+    // consecutive monster turns; stop at the first conscious player (await
+    // input). Dead/fled entries that surface at the head are pruned.
+    while (!turnQueue_.empty())
     {
-        auto& actor = turnQueue_[tbQueueIdx_];
+        pruneQueue();
+        if (turnQueue_.empty())
+            break;
+
+        TurnActor& actor = turnQueue_.front();
         if (actor.type == TurnActor::Type::Player)
         {
-            // Check the player is still conscious.
             if (gameWorld_ && gameWorld_->party().member(actor.index).isConscious())
             {
                 awaitingPlayerInput_ = true;
                 return;
             }
-            // Skip unconscious player.
-            ++tbQueueIdx_;
+            // Unconscious player: drop and continue.
+            turnQueue_.erase(turnQueue_.begin());
             continue;
         }
-        // Monster turn: execute one AI step + attack.
+
+        // Defeat guard: if no conscious party member remains, monsters have no
+        // one left to fight — stop the turn loop (the RT path mirrors this in
+        // updateMonsterAI). Without this, a fully-downed party would spin here
+        // forever since no player will ever take the turn.
+        if (gameWorld_ && gameWorld_->party().consciousCount() <= 0)
+        {
+            awaitingPlayerInput_ = false;
+            return;
+        }
+
+        // Round bound: each monster acts at most once per round. Once every
+        // alive hostile monster has acted, the round ends — this keeps the
+        // "fast actor may act again" property across rounds while preventing an
+        // infinite same-round loop when, e.g., every player is skipped.
+        if (tbActedThisRound_.count(actor.index))
+        {
+            // All monsters have acted if the set covers every alive hostile one.
+            bool allMonstersActed = true;
+            for (int i = 0; i < static_cast<int>(monsters_.size()); ++i)
+            {
+                if (monsters_[static_cast<size_t>(i)].isAlive() &&
+                    monsters_[static_cast<size_t>(i)].hostile && !tbActedThisRound_.count(i))
+                {
+                    allMonstersActed = false;
+                    break;
+                }
+            }
+            if (allMonstersActed)
+            {
+                // Round complete — start the next.
+                startTurnBasedRound();
+                return;
+            }
+            // Otherwise this monster already acted but others haven't; advance
+            // past it so a waiting monster (or the next player) surfaces.
+            advanceQueue();
+            continue;
+        }
+
+        // Monster turn: one AI step + attack, then mark acted and advance.
         if (actor.index >= 0 && actor.index < static_cast<int>(monsters_.size()))
         {
             auto& m = monsters_[static_cast<size_t>(actor.index)];
@@ -1171,33 +1276,57 @@ void CombatSystem::processMonsterTurn()
                 }
             }
         }
-        ++tbQueueIdx_;
+        tbActedThisRound_.insert(actor.index);
+        advanceQueue();
     }
-    // Queue exhausted — start a new round.
+    // Queue exhausted (all actors dead/fled/unconscious) — start a new round.
     startTurnBasedRound();
 }
 
 void CombatSystem::advanceQueue()
 {
+    // RE QueueAdvance (fcn.00406457): the head just acted. Recompute its
+    // initiative from base recovery, run a countdown pass that subtracts the
+    // elapsed initiative from every entry (so the next-lowest becomes ready),
+    // then re-sort. Pruning happens in processMonsterTurn on the next pass.
     awaitingPlayerInput_ = false;
-    ++tbQueueIdx_;
-    processMonsterTurn();
+    if (turnQueue_.empty())
+    {
+        startTurnBasedRound();
+        return;
+    }
+
+    TurnActor& head = turnQueue_.front();
+    const int elapsed = head.initiative;
+    head.initiative = head.baseRecovery * (head.hasted ? 2 : 1) + randomInt(1, 10);
+
+    // Countdown: every other entry's remaining initiative drops by `elapsed`,
+    // clamped at 0 (an actor at 0 initiative is ready now). This is what lets a
+    // fast actor whose initiative fell below others' act again this round.
+    for (size_t i = 1; i < turnQueue_.size(); ++i)
+    {
+        turnQueue_[i].initiative = std::max(0, turnQueue_[i].initiative - elapsed);
+    }
+    std::sort(turnQueue_.begin(), turnQueue_.end(), turnActorLess);
 }
 
 void CombatSystem::completePlayerTurn()
 {
     if (!turnBased_)
         return;
+    // The player's action is resolved by the caller (playerAttack/spell/pass);
+    // here we just advance the queue, which runs subsequent monster turns.
     advanceQueue();
+    processMonsterTurn();
 }
 
 std::string CombatSystem::turnStatusText() const
 {
     if (!turnBased_)
         return {};
-    if (tbQueueIdx_ >= turnQueue_.size())
+    if (turnQueue_.empty())
         return std::format("Round {} — starting...", tbRound_);
-    const auto& actor = turnQueue_[tbQueueIdx_];
+    const auto& actor = turnQueue_.front();
     if (actor.type == TurnActor::Type::Player && gameWorld_)
     {
         const auto& ch = gameWorld_->party().member(actor.index);
