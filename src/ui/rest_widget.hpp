@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "../game/combat.hpp"
 #include "../game/game_world.hpp"
 #include "widgets.hpp"
 
@@ -20,6 +21,11 @@ class RestWidget : public Widget
     void setTextureLookup(TextureLookup lookup) { textureLookup_ = lookup; }
 
     void setGameWorld(game::GameWorld* world) { gameWorld_ = world; }
+    void setCombatSystem(game::CombatSystem* combat) { combatSystem_ = combat; }
+    void setStatusCallback(std::function<void(const std::string&)> cb)
+    {
+        onStatus_ = std::move(cb);
+    }
 
     void render(graphics::IRenderer& renderer, const graphics::DebugText& text) override;
     bool handleEvent(const UIEvent& event) override;
@@ -35,6 +41,8 @@ class RestWidget : public Widget
     void* getCachedTexture(const std::string& name, int& w, int& h);
 
     game::GameWorld* gameWorld_ = nullptr;
+    game::CombatSystem* combatSystem_ = nullptr;
+    std::function<void(const std::string&)> onStatus_;
     TextureLookup textureLookup_;
 
     struct CachedTexture

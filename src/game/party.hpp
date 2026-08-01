@@ -98,6 +98,10 @@ class Party
     void awardExperience(int amount);
     bool rest(int hours);
 
+    // Random encounter check (called after rest or while traveling). Returns
+    // true if an ambush should occur (~15% chance).
+    bool checkRandomEncounter();
+
   private:
     std::array<Character, kPartySize> members_;
     int gold_ = 200;

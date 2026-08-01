@@ -1027,6 +1027,14 @@ void InGameState::render()
         spellbook_.render(*ctx.renderer, *ctx.debugText);
 
         restWidget_.setGameWorld(ctx.shared->gameWorld);
+        restWidget_.setCombatSystem(ctx.shared->combatSystem);
+        restWidget_.setStatusCallback(
+            [this](const std::string& msg)
+            {
+                statusLine_ = msg;
+                if (ctx.shared)
+                    ctx.shared->statusMessage = msg;
+            });
         restWidget_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
                               static_cast<int>(kGameWidth * scale),
                               static_cast<int>(kGameHeight * scale));

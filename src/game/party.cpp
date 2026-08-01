@@ -2,6 +2,7 @@
 #include "party.hpp"
 
 #include <algorithm>
+#include <random>
 
 #include <cassert>
 
@@ -223,6 +224,17 @@ bool Party::rest(int hours)
     advanceTime(hours * ticksPerHour);
 
     return true;
+}
+
+bool Party::checkRandomEncounter()
+{
+    // MM7 random encounters: ~15% chance per rest while outdoors/at risk.
+    // Returns true if an ambush occurs (the caller should spawn monsters +
+    // surface a warning). The encounter table would key off the current map's
+    // difficulty; for now it's a flat roll.
+    static std::mt19937 rng{std::random_device{}()};
+    std::uniform_int_distribution<int> dist(1, 100);
+    return dist(rng) <= 15;
 }
 
 } // namespace runeharbor::game

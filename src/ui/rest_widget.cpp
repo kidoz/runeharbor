@@ -90,7 +90,37 @@ bool RestWidget::handleEvent(const UIEvent& event)
 
     if (event.type == UIEventType::MouseDown && bounds_.contains(event.mouseX, event.mouseY))
     {
-        // Add actual rest logic here later
+        // Rest 8 hours + random encounter check.
+        if (gameWorld_)
+        {
+            auto& party = gameWorld_->party();
+            if (party.rest(8))
+            {
+                if (party.checkRandomEncounter())
+                {
+                    if (onStatus_)
+                        onStatus_("Ambush! Monsters attack during your rest!");
+                    // Spawn a random monster near the party.
+                    if (combatSystem_)
+                    {
+                        combatSystem_->spawnMonster(1, // basic monster id
+                                                    party.worldX() + 512.0f,
+                                                    party.worldY() + 512.0f, party.worldZ());
+                        combatSystem_->setInCombat(true);
+                    }
+                }
+                else
+                {
+                    if (onStatus_)
+                        onStatus_("You rest peacefully. Party fully restored.");
+                }
+            }
+            else if (onStatus_)
+            {
+                onStatus_("Not enough food to rest.");
+            }
+        }
+        setVisible(false);
         return true;
     }
     return false;
