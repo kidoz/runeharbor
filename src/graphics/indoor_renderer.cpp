@@ -205,6 +205,7 @@ struct BillboardSprite
     std::string textureName;
     uint32_t attributes = 0;
     float scale = 1.0f;
+    float heightScale = 1.0f;
     bool flipU = false;
     int animFrameCount = 1;
 };
@@ -394,7 +395,7 @@ makeIndoorLiveActorBillboard(const LiveActor& actor, const Vec3& cameraPos,
     if (actor.dead)
     {
         sprite.color = {0.55f, 0.45f, 0.40f, 0.65f};
-        sprite.height *= 0.5f;
+        sprite.heightScale = 0.5f;
     }
     else
     {
@@ -926,8 +927,8 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
             SDL_SetRenderDrawBlendMode(renderer.getSDLRenderer(), SDL_BLENDMODE_BLEND);
 
             SDL_Texture* texture = nullptr;
-            float actualHalfWidth = sprite.halfWidth;
-            float actualHeight = sprite.height;
+            float textureWidth = 0.0f;
+            float textureHeight = 0.0f;
 
             if (textureLookup && !sprite.textureName.empty())
             {
@@ -945,17 +946,19 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
                     texture = textureLookup(sprite.textureName);
                 if (texture)
                 {
-                    float w = 0.0f;
-                    float h = 0.0f;
-                    if (SDL_GetTextureSize(texture, &w, &h) && w > 0.0f && h > 0.0f)
+                    if (!SDL_GetTextureSize(texture, &textureWidth, &textureHeight))
                     {
-                        // MM7 sprites are authored at one texel per world unit; the
-                        // frame table's scale is the only per-sprite adjustment.
-                        actualHalfWidth = w * sprite.scale * 0.5f;
-                        actualHeight = h * sprite.scale;
+                        textureWidth = 0.0f;
+                        textureHeight = 0.0f;
                     }
                 }
             }
+
+            const BillboardDimensions dimensions =
+                resolveBillboardDimensions(sprite.halfWidth, sprite.height, textureWidth,
+                                           textureHeight, sprite.scale, sprite.heightScale);
+            const float actualHalfWidth = dimensions.halfWidth;
+            const float actualHeight = dimensions.height;
 
             Vec3 drawPos = sprite.basePos;
             SDL_FColor drawColor = sprite.color;

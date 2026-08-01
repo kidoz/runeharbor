@@ -130,6 +130,7 @@ struct SpawnBillboard
     std::string textureName;
     uint32_t attributes = 0;
     float scale = 1.0f;
+    float heightScale = 1.0f;
     bool flipU = false;
     int animFrameCount = 1; // >1 => cycle frame suffix via (tick>>3) % count
 };

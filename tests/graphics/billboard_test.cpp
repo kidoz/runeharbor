@@ -97,3 +97,16 @@ TEST_CASE("computeBillboardQuad - flipU mirrors horizontal texcoords", "[billboa
     REQUIRE_THAT(flipped.uvBottomLeft.v, WithinAbs(1.0f, kEps));
     REQUIRE_THAT(flipped.uvTopLeft.v, WithinAbs(0.0f, kEps));
 }
+
+TEST_CASE("resolveBillboardDimensions preserves gameplay height scaling", "[billboard]")
+{
+    const BillboardDimensions fallback =
+        resolveBillboardDimensions(24.0f, 80.0f, 0.0f, 0.0f, 1.0f, 0.5f);
+    CHECK_THAT(fallback.halfWidth, WithinAbs(24.0f, kEps));
+    CHECK_THAT(fallback.height, WithinAbs(40.0f, kEps));
+
+    const BillboardDimensions textured =
+        resolveBillboardDimensions(24.0f, 80.0f, 64.0f, 120.0f, 1.5f, 0.5f);
+    CHECK_THAT(textured.halfWidth, WithinAbs(48.0f, kEps));
+    CHECK_THAT(textured.height, WithinAbs(90.0f, kEps));
+}

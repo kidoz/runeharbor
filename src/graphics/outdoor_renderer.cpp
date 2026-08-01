@@ -288,7 +288,7 @@ SpawnBillboard makeLiveActorBillboard(const LiveActor& actor, const Vec3& camera
     {
         // Corpse: laid out, dimmed.
         sprite.color = {0.55f, 0.45f, 0.40f, 0.65f};
-        sprite.height *= 0.5f;
+        sprite.heightScale = 0.5f;
     }
     else
     {
@@ -1123,8 +1123,8 @@ void OutdoorRenderer::drawBillboard(const detail::SpawnBillboard& sprite, const 
     const float vpH = static_cast<float>(renderer.getViewportHeight());
 
     SDL_Texture* texture = nullptr;
-    float halfWidth = sprite.halfWidth;
-    float height = sprite.height;
+    float textureWidth = 0.0f;
+    float textureHeight = 0.0f;
 
     if (textureLookup && !sprite.textureName.empty())
     {
@@ -1143,17 +1143,19 @@ void OutdoorRenderer::drawBillboard(const detail::SpawnBillboard& sprite, const 
         }
         if (texture)
         {
-            float texW = 0.0f;
-            float texH = 0.0f;
-            if (SDL_GetTextureSize(texture, &texW, &texH) && texW > 0.0f && texH > 0.0f)
+            if (!SDL_GetTextureSize(texture, &textureWidth, &textureHeight))
             {
-                // MM7 sprites are authored at one texel per world unit; the frame
-                // table's scale is the only per-sprite adjustment.
-                halfWidth = texW * sprite.scale * 0.5f;
-                height = texH * sprite.scale;
+                textureWidth = 0.0f;
+                textureHeight = 0.0f;
             }
         }
     }
+
+    const BillboardDimensions dimensions =
+        resolveBillboardDimensions(sprite.halfWidth, sprite.height, textureWidth, textureHeight,
+                                   sprite.scale, sprite.heightScale);
+    const float halfWidth = dimensions.halfWidth;
+    const float height = dimensions.height;
 
     const float distance = std::sqrt(sprite.distanceSq);
     SDL_FColor drawColor = (sprite.attributes & formats::kSpriteFrameLit)

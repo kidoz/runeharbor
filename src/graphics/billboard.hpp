@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <algorithm>
+
 #include "math3d.hpp"
 
 namespace runeharbor::graphics
@@ -31,6 +33,27 @@ struct BillboardQuad
     BillboardUV uvTopLeft{0.0f, 0.0f};
     BillboardUV uvTopRight{1.0f, 0.0f};
 };
+
+struct BillboardDimensions
+{
+    float halfWidth = 0.0f;
+    float height = 0.0f;
+};
+
+/// Resolve a billboard's final dimensions while preserving gameplay height modifiers.
+inline BillboardDimensions resolveBillboardDimensions(float fallbackHalfWidth, float fallbackHeight,
+                                                      float textureWidth, float textureHeight,
+                                                      float textureScale, float heightScale = 1.0f)
+{
+    BillboardDimensions result{fallbackHalfWidth, fallbackHeight};
+    if (textureWidth > 0.0f && textureHeight > 0.0f)
+    {
+        result.halfWidth = textureWidth * textureScale * 0.5f;
+        result.height = textureHeight * textureScale;
+    }
+    result.height *= std::max(0.0f, heightScale);
+    return result;
+}
 
 /// Build a screen-facing billboard quad.
 ///

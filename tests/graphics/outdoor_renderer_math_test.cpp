@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include "../../src/formats/odm_map.hpp"
+#include "../../src/graphics/billboard.hpp"
 #include "../../src/graphics/outdoor_renderer.hpp"
 
 using namespace runeharbor;
@@ -154,4 +155,22 @@ TEST_CASE("Outdoor terrain grid mirrors the Y axis against world space", "[outdo
         CHECK(formats::outdoorWorldToGridY(formats::outdoorGridToWorldY(grid)) ==
               Catch::Approx(grid));
     }
+}
+
+TEST_CASE("Dead live actors preserve their corpse height modifier", "[outdoor_renderer]")
+{
+    LiveActor actor;
+    actor.monsterId = 1;
+    actor.dead = true;
+    const Vec3 cameraPos = {0.0f, 0.0f, -100.0f};
+    OutdoorRenderer::MonsterSpriteLookup lookup = [](uint16_t) { return "Goblin"; };
+
+    const detail::SpawnBillboard billboard =
+        detail::makeLiveActorBillboard(actor, cameraPos, lookup, nullptr);
+
+    CHECK(billboard.heightScale == Catch::Approx(0.5f));
+    const BillboardDimensions dimensions =
+        resolveBillboardDimensions(billboard.halfWidth, billboard.height, 64.0f, 128.0f,
+                                   billboard.scale, billboard.heightScale);
+    CHECK(dimensions.height == Catch::Approx(64.0f));
 }
