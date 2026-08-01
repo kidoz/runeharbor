@@ -55,7 +55,7 @@ class CharacterCreationState : public IGameState
     static constexpr int kMaxExtraSkills = 2;
     struct AvailableSkill
     {
-        const char* name;
+        game::SkillId id;
         bool selected;
     };
     std::vector<AvailableSkill> availableSkills; // for active character's class

@@ -4,9 +4,11 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <array>
 #include <format>
 
 #include <cctype>
+#include <climits>
 
 #include "../../graphics/bitmap_font.hpp"
 #include "../../graphics/debug_text.hpp"
@@ -106,55 +108,160 @@ std::string getLowerExtension(const std::string& filename)
     return ext;
 }
 
+// Display names for every skill, indexed by SkillId. Magic schools use the
+// full "<School> Magic" form and BodyBuilding its full name so that every entry
+// is unique — the skill resolver (game::skillIdFromName) normalizes case and
+// strips non-alphanumerics, so bare "Fire" and "Fire Magic" both resolve to
+// SkillId::Fire, but a duplicate bare "Body" collapsed BodyBuilding onto Body
+// Magic and made BodyBuilding unlearnable. Keeping names unique avoids that and
+// keeps the creation UI display consistent with the spellbook.
+// clang-format off
+constexpr std::array<const char*, static_cast<size_t>(game::SkillId::Count)> kSkillDisplayNames = {
+    "Staff",         // Staff
+    "Sword",         // Sword
+    "Dagger",        // Dagger
+    "Axe",           // Axe
+    "Spear",         // Spear
+    "Bow",           // Bow
+    "Mace",          // Mace
+    "Blaster",       // Blaster
+    "Shield",        // Shield
+    "Leather",       // Leather
+    "Chain",         // Chain
+    "Plate",         // Plate
+    "Fire Magic",    // Fire
+    "Air Magic",     // Air
+    "Water Magic",   // Water
+    "Earth Magic",   // Earth
+    "Spirit Magic",  // Spirit
+    "Mind Magic",    // Mind
+    "Body Magic",    // Body
+    "Light Magic",   // Light
+    "Dark Magic",    // Dark
+    "Identify Item", // ItemId
+    "Merchant",      // Merchant
+    "Repair",        // Repair
+    "Bodybuilding",  // BodyBuilding
+    "Meditation",    // Meditation
+    "Perception",    // Perception
+    "Diplomacy",     // Diplomacy
+    "Thievery",      // Thievery
+    "Disarm Trap",   // DisarmTrap
+    "Dodging",       // Dodging
+    "Unarmed",       // Unarmed
+    "Monster Lore",  // MonsterLore
+    "Armsmaster",    // Armsmaster
+    "Stealing",      // Stealing
+    "Alchemy",       // Alchemy
+    "Learning",      // Learning
+};
+// clang-format on
+static_assert(kSkillDisplayNames.size() == static_cast<size_t>(game::SkillId::Count),
+              "kSkillDisplayNames must cover every SkillId");
+
+// Shorthand for indexing the display-name table by SkillId.
+constexpr const char* skillDisplayName(game::SkillId id)
+{
+    return kSkillDisplayNames[static_cast<size_t>(id)];
+}
+
+// Pick a starter weapon itemId for a character from the loaded item table.
+// Returns the lowest-value weapon whose skillGroup matches the character's first
+// starting skill, or 0 if the table is empty / has no matching weapon.
+// `firstStartingSkill` is the SkillId of the class's first starting skill
+// (kClassStartingSkills[baseClassIndex].skill1).
+int pickStarterWeaponItemId(const game::Inventory& inventory, game::SkillId firstStartingSkill)
+{
+    const std::string_view wanted = skillDisplayName(firstStartingSkill);
+    // The item table's skillGroup uses the bare family name ("Sword", "Dagger",
+    // "Axe", "Spear", "Staff", "Mace"), so compare against the first token.
+    // "Fire Magic" -> "Fire" is never a weapon; weapons are single-word, and
+    // the starting-skill first slot is always a weapon family for the 9 base
+    // classes, so taking up to the first space is safe here.
+    auto space = wanted.find(' ');
+    std::string_view familyName =
+        space == std::string_view::npos ? wanted : wanted.substr(0, space);
+
+    int bestId = 0;
+    int bestValue = INT_MAX;
+    for (const auto& entry : inventory.itemTable())
+    {
+        if (entry.skillGroup != familyName)
+        {
+            continue;
+        }
+        // Cheapest matching weapon = basic starter tier; tie-break on lowest id.
+        if (entry.value < bestValue || (entry.value == bestValue && bestId == 0))
+        {
+            bestValue = entry.value;
+            bestId = entry.id;
+        }
+    }
+    return bestId;
+}
+
 struct ClassSkills
 {
-    const char* skill1;
-    const char* skill2;
+    game::SkillId skill1;
+    game::SkillId skill2;
 };
 
+// Two starting skills per base class (indexed by baseClassIndex 0-8).
 constexpr ClassSkills kClassStartingSkills[] = {
-    {"Sword", "Leather"},      // Knight (base 0)
-    {"Dagger", "Stealing"},    // Thief (base 1)
-    {"Dodging", "Unarmed"},    // Monk (base 2)
-    {"Mace", "Spirit Magic"},  // Paladin (base 3)
-    {"Bow", "Air Magic"},      // Archer (base 4)
-    {"Axe", "Perception"},     // Ranger (base 5)
-    {"Mace", "Body Magic"},    // Cleric (base 6)
-    {"Dagger", "Earth Magic"}, // Druid (base 7)
-    {"Staff", "Fire Magic"},   // Sorcerer (base 8)
+    {game::SkillId::Sword, game::SkillId::Leather},   // Knight (base 0)
+    {game::SkillId::Dagger, game::SkillId::Stealing}, // Thief (base 1)
+    {game::SkillId::Dodging, game::SkillId::Unarmed}, // Monk (base 2)
+    {game::SkillId::Mace, game::SkillId::Spirit},     // Paladin (base 3)
+    {game::SkillId::Bow, game::SkillId::Air},         // Archer (base 4)
+    {game::SkillId::Axe, game::SkillId::Perception},  // Ranger (base 5)
+    {game::SkillId::Mace, game::SkillId::Body},       // Cleric (base 6)
+    {game::SkillId::Dagger, game::SkillId::Earth},    // Druid (base 7)
+    {game::SkillId::Staff, game::SkillId::Fire},      // Sorcerer (base 8)
 };
 
-// Skill display names (indexed by SkillId-like order)
-const char* kSkillNames[] = {
-    "Staff",    "Sword",    "Dagger",  "Axe",     "Spear",      "Bow",        "Mace",
-    "Blaster",  "Shield",   "Leather", "Chain",   "Plate",      "Fire",       "Air",
-    "Water",    "Earth",    "Spirit",  "Mind",    "Body",       "Light",      "Dark",
-    "Identify", "Merchant", "Repair",  "Body",    "Meditation", "Perception", "Diplomacy",
-    "Thievery", "Disarm",   "Dodging", "Unarmed", "Mon. Lore",  "Armsmaster", "Stealing",
-    "Alchemy",  "Learning",
-};
-
-// Available additional skills per base class (indices into kSkillNames)
-// These are the skills each class CAN learn, minus their 2 starting skills.
-const std::vector<std::vector<int>> kClassAvailableSkills = {
-    // Knight(0): Axe, Spear, Bow, Mace, Shield, Chain, Body, Perception, Armsmaster
-    {3, 4, 5, 6, 8, 10, 24, 26, 33},
-    // Thief(1): Sword, Bow, Mace, Leather, Shield, DisarmTrap, Perception, Merchant, Dodging
-    {1, 5, 6, 9, 8, 29, 26, 22, 30},
-    // Monk(2): Staff, Mace, Leather, BodyBld, Meditation, Spirit, Mind, Body, Perception, Learning
-    {0, 6, 9, 24, 25, 16, 17, 18, 26, 36},
-    // Paladin(3): Sword, Shield, Leather, Chain, Plate, Mind, Body, BodyBld, Diplomacy, Repair
-    {1, 8, 9, 10, 11, 17, 18, 24, 27, 23},
-    // Archer(4): Dagger, Mace, Leather, Chain, Fire, Water, Earth, Perception, DisarmTrap
-    {2, 6, 9, 10, 12, 14, 15, 26, 29},
+// Available additional skills per base class (SkillId values). These are the
+// skills each class CAN learn, minus their 2 starting skills. Expressed as
+// SkillId rather than a raw int index so the mapping cannot silently drift
+// from the display-name table above.
+const std::vector<std::vector<game::SkillId>> kClassAvailableSkills = {
+    // Knight(0): Axe, Spear, Bow, Mace, Shield, Chain, Bodybuilding, Perception, Armsmaster
+    {game::SkillId::Axe, game::SkillId::Spear, game::SkillId::Bow, game::SkillId::Mace,
+     game::SkillId::Shield, game::SkillId::Chain, game::SkillId::BodyBuilding,
+     game::SkillId::Perception, game::SkillId::Armsmaster},
+    // Thief(1): Sword, Bow, Mace, Leather, Shield, Disarm Trap, Perception, Merchant, Dodging
+    {game::SkillId::Sword, game::SkillId::Bow, game::SkillId::Mace, game::SkillId::Leather,
+     game::SkillId::Shield, game::SkillId::DisarmTrap, game::SkillId::Perception,
+     game::SkillId::Merchant, game::SkillId::Dodging},
+    // Monk(2): Staff, Mace, Leather, Bodybuilding, Meditation, Spirit, Mind, Body, Perception,
+    // Learning
+    {game::SkillId::Staff, game::SkillId::Mace, game::SkillId::Leather, game::SkillId::BodyBuilding,
+     game::SkillId::Meditation, game::SkillId::Spirit, game::SkillId::Mind, game::SkillId::Body,
+     game::SkillId::Perception, game::SkillId::Learning},
+    // Paladin(3): Sword, Shield, Leather, Chain, Plate, Mind, Body, Bodybuilding, Diplomacy, Repair
+    {game::SkillId::Sword, game::SkillId::Shield, game::SkillId::Leather, game::SkillId::Chain,
+     game::SkillId::Plate, game::SkillId::Mind, game::SkillId::Body, game::SkillId::BodyBuilding,
+     game::SkillId::Diplomacy, game::SkillId::Repair},
+    // Archer(4): Dagger, Mace, Leather, Chain, Fire, Water, Earth, Perception, Disarm Trap
+    {game::SkillId::Dagger, game::SkillId::Mace, game::SkillId::Leather, game::SkillId::Chain,
+     game::SkillId::Fire, game::SkillId::Water, game::SkillId::Earth, game::SkillId::Perception,
+     game::SkillId::DisarmTrap},
     // Ranger(5): Sword, Mace, Bow, Shield, Leather, Chain, Earth, Water, Alchemy, Dodging
-    {1, 6, 5, 8, 9, 10, 15, 14, 35, 30},
-    // Cleric(6): Shield, Leather, Chain, Spirit, Mind, Light, Dark, BodyBld, Meditation, Diplomacy
-    {8, 9, 10, 16, 17, 19, 20, 24, 25, 27},
+    {game::SkillId::Sword, game::SkillId::Mace, game::SkillId::Bow, game::SkillId::Shield,
+     game::SkillId::Leather, game::SkillId::Chain, game::SkillId::Earth, game::SkillId::Water,
+     game::SkillId::Alchemy, game::SkillId::Dodging},
+    // Cleric(6): Shield, Leather, Chain, Spirit, Mind, Light, Dark, Bodybuilding, Meditation,
+    // Diplomacy
+    {game::SkillId::Shield, game::SkillId::Leather, game::SkillId::Chain, game::SkillId::Spirit,
+     game::SkillId::Mind, game::SkillId::Light, game::SkillId::Dark, game::SkillId::BodyBuilding,
+     game::SkillId::Meditation, game::SkillId::Diplomacy},
     // Druid(7): Mace, Staff, Leather, Fire, Air, Water, Meditation, Alchemy, Learning, Dodging
-    {6, 0, 9, 12, 13, 14, 25, 35, 36, 30},
+    {game::SkillId::Mace, game::SkillId::Staff, game::SkillId::Leather, game::SkillId::Fire,
+     game::SkillId::Air, game::SkillId::Water, game::SkillId::Meditation, game::SkillId::Alchemy,
+     game::SkillId::Learning, game::SkillId::Dodging},
     // Sorcerer(8): Dagger, Leather, Air, Water, Earth, Light, Dark, Meditation, Learning, Alchemy
-    {2, 9, 13, 14, 15, 19, 20, 25, 36, 35},
+    {game::SkillId::Dagger, game::SkillId::Leather, game::SkillId::Air, game::SkillId::Water,
+     game::SkillId::Earth, game::SkillId::Light, game::SkillId::Dark, game::SkillId::Meditation,
+     game::SkillId::Learning, game::SkillId::Alchemy},
 };
 
 void syncCreationSkills(Character& ch)
@@ -327,23 +434,22 @@ void CharacterCreationState::rebuildAvailableSkills()
     {
         return;
     }
-    const auto& skillIndices = kClassAvailableSkills[classIdx];
-    for (int idx : skillIndices)
+    const auto& classSkills = kClassAvailableSkills[classIdx];
+    for (game::SkillId id : classSkills)
     {
-        if (idx >= 0 && idx < static_cast<int>(std::size(kSkillNames)))
+        // Check if already selected by this character (the two starting skills
+        // occupy slots 0-1; extra selections are in slots 2+).
+        const char* displayName = skillDisplayName(id);
+        bool sel = false;
+        for (size_t s = 2; s < ch.skills.size(); s++)
         {
-            // Check if already selected by this character
-            bool sel = false;
-            for (size_t s = 2; s < ch.skills.size(); s++)
+            if (ch.skills[s] == displayName)
             {
-                if (ch.skills[s] == kSkillNames[idx])
-                {
-                    sel = true;
-                    break;
-                }
+                sel = true;
+                break;
             }
-            availableSkills.push_back({kSkillNames[idx], sel});
         }
+        availableSkills.push_back({id, sel});
     }
 }
 
@@ -437,7 +543,6 @@ std::optional<GameStateId> CharacterCreationState::update()
 
         Character& ch = party[activeCharacterIndex];
         const int panelX = colX[activeCharacterIndex];
-        const int panelCenterX = panelX + colWidth / 2;
         bool handledPanelClick = false;
 
         if (inRect(gameX, gameY, panelX, 120, colWidth, 22))
@@ -457,11 +562,19 @@ std::optional<GameStateId> CharacterCreationState::update()
         if (!handledPanelClick && inRect(gameX, gameY, panelX, 35, colWidth, 82))
         {
             menuRowIndex = 1;
-            if (gameX < panelCenterX - 20)
+            // Split prev/next on the drawn portrait center, not the panel center:
+            // portraits are drawn at portraitX (17/176/335/494, ~9px right of the
+            // panel left edge) and may be narrower than the panel, so the panel
+            // center biases the split toward "previous".
+            constexpr int portraitX[] = {17, 176, 335, 494};
+            const int faceId = std::clamp(ch.faceId, 0, kPortraitCount - 1);
+            const int pw = portraitWidths[faceId] > 0 ? portraitWidths[faceId] : colWidth;
+            const int portraitCenterX = portraitX[activeCharacterIndex] + pw / 2;
+            if (gameX < portraitCenterX - 20)
             {
                 changeFace(ch, -1);
             }
-            else if (gameX > panelCenterX + 20)
+            else if (gameX > portraitCenterX + 20)
             {
                 changeFace(ch, 1);
             }
@@ -549,7 +662,7 @@ std::optional<GameStateId> CharacterCreationState::update()
                     {
                         // Deselect
                         sk.selected = false;
-                        std::erase(ch.skills, std::string(sk.name));
+                        std::erase(ch.skills, std::string(skillDisplayName(sk.id)));
                         syncCreationSkills(ch);
                         if (ctx.playUiSound)
                             ctx.playUiSound("ClickSkill");
@@ -558,7 +671,7 @@ std::optional<GameStateId> CharacterCreationState::update()
                     {
                         // Select
                         sk.selected = true;
-                        ch.skills.push_back(sk.name);
+                        ch.skills.push_back(skillDisplayName(sk.id));
                         syncCreationSkills(ch);
                         if (ctx.playUiSound)
                             ctx.playUiSound("ClickSkill");
@@ -573,6 +686,11 @@ std::optional<GameStateId> CharacterCreationState::update()
         const int okH = okButton.h > 0 ? okButton.h : 34;
         if (inRect(gameX, gameY, 580, 431, okW, okH))
         {
+            // Finalize each member on the Application-side party vector. The
+            // CharacterCreation->Loading transition also calls
+            // Application::commitPartyToGameWorld(), which re-runs this same
+            // finalize on its own copy; the two are redundant but idempotent,
+            // and we keep this one so the data is consistent immediately.
             for (auto& ch : party)
             {
                 finalizeCreationCharacter(ch);
@@ -607,13 +725,23 @@ std::optional<GameStateId> CharacterCreationState::update()
                 party.setFood(std::max(party.food(), 7));
                 if (ctx.shared->inventory)
                 {
-                    // Per RE FUN_00491375: a starting item per learned skill.
-                    // Grant a simple dagger (itemId 15) to each character so
-                    // the party isn't unarmed.
+                    // Per RE FUN_00491375: a starting weapon per character from
+                    // their first starting skill. Pick the cheapest weapon in the
+                    // loaded item table whose skill family matches that skill; if
+                    // the table has no match, fall back to itemId 0 (empty slot)
+                    // rather than handing every class the same hardcoded weapon.
                     for (int i = 0; i < game::kPartySize; i++)
                     {
+                        const game::SkillId firstSkill =
+                            kClassStartingSkills[baseClassIndex(party[i].charClass)].skill1;
+                        const int starterId =
+                            pickStarterWeaponItemId(*ctx.shared->inventory, firstSkill);
+                        if (starterId <= 0)
+                        {
+                            continue;
+                        }
                         game::Item starter;
-                        starter.itemId = 1; // basic sword
+                        starter.itemId = starterId;
                         starter.identified = true;
                         ctx.shared->inventory->addToBackpack(i, starter);
                     }
@@ -632,18 +760,31 @@ std::optional<GameStateId> CharacterCreationState::update()
             ctx.shared->startupPreferOutdoor = (ext == ".odm");
             return GameStateId::Loading;
         }
-        // CLEAR button
+        // CLEAR button: reset the active character's allocation — bonus-point
+        // stat changes are reverted to base and any extra skills chosen beyond
+        // the two starting ones are dropped. The two starting skills stay (they
+        // are determined by class, not by player choice).
         const int clearW = clearButton.w > 0 ? clearButton.w : 52;
         const int clearH = clearButton.h > 0 ? clearButton.h : 34;
         if (inRect(gameX, gameY, 527, 431, clearW, clearH))
         {
             ch.stats = ch.baseStats;
+            if (ch.skills.size() > 2)
+            {
+                ch.skills.resize(2);
+                syncCreationSkills(ch);
+            }
+            rebuildAvailableSkills();
         }
     }
 
     Character& activeChar = party[activeCharacterIndex];
 
-    // Naming mode: capture text input
+    // Naming mode: capture text input. Deliberately restricted to uppercase
+    // A-Z plus Backspace/Enter/Escape: create.fnt's glyph range does not cover
+    // lowercase or digits, so those keys are ignored to avoid writing characters
+    // the font cannot render. Spaces and numbers are also dropped for the same
+    // reason. Names are capped at 15 characters (MM7's name field width).
     if (isNaming)
     {
         if (ctx.isKeyPressed(SDL_SCANCODE_BACKSPACE) && !activeChar.name.empty())
@@ -745,7 +886,10 @@ void CharacterCreationState::render()
     SDL_SetRenderDrawBlendMode(sdlRenderer, SDL_BLENDMODE_BLEND);
 
     // create.fnt is the compact body font designed for this screen. cchar.fnt is
-    // reserved for the large, widely spaced title.
+    // reserved for the large, widely spaced title. The original engine used
+    // arrus.fnt for stat/label rows and smallnum.fnt for numbers; RuneHarbor
+    // currently uses create.fnt for all body text, so statSpacing below is a
+    // fixed literal rather than derived from a loaded font's height.
     auto* nameFont = ctx.createFont;
     auto* labelFont = ctx.createFont;
     auto* numFont = ctx.createFont;
@@ -809,10 +953,11 @@ void CharacterCreationState::render()
     constexpr int colX[] = {8, 166, 324, 482}; // stride 158 (0x9E)
     constexpr int colWidth = 153;              // 0x99
 
-    constexpr int portraitY = 35;      // 0x23 from Ghidra
-    constexpr int nameY = 124;         // 0x7C from Ghidra
-    constexpr int statsStartY = 169;   // 0xA9 from Ghidra
-    constexpr int statSpacing = 17;    // fontHeight(arrus=19) - 2, matching original formula
+    constexpr int portraitY = 35;    // 0x23 from Ghidra
+    constexpr int nameY = 124;       // 0x7C from Ghidra
+    constexpr int statsStartY = 169; // 0xA9 from Ghidra
+    constexpr int statSpacing =
+        17; // Matches original row pitch (arrus.fnt height 19 - 2); see font note above.
     constexpr int skillsHeaderY = 291; // Original labels this region "Skills"
     constexpr int skillsStartY = 311;  // 0x137 — per-char skills below header
     constexpr int skillSpacing = 17;   // same as statSpacing
@@ -1092,7 +1237,7 @@ void CharacterCreationState::render()
                 sg = 120;
                 sb = 120;
             }
-            drawText(bx + 2, by + 1, sk.name, skillBtnFont, sr, sg, sb);
+            drawText(bx + 2, by + 1, skillDisplayName(sk.id), skillBtnFont, sr, sg, sb);
         }
     }
 
@@ -1185,8 +1330,8 @@ void CharacterCreationState::updateSkillsForClass(Character& ch)
 {
     int classIdx = baseClassIndex(ch.charClass);
     ch.skills.clear();
-    ch.skills.push_back(kClassStartingSkills[classIdx].skill1);
-    ch.skills.push_back(kClassStartingSkills[classIdx].skill2);
+    ch.skills.push_back(skillDisplayName(kClassStartingSkills[classIdx].skill1));
+    ch.skills.push_back(skillDisplayName(kClassStartingSkills[classIdx].skill2));
     syncCreationSkills(ch);
 }
 
