@@ -35,6 +35,20 @@ bool Party::spendGold(int amount)
     return true;
 }
 
+void Party::depositGold(int amount)
+{
+    amount = std::min(amount, gold_);
+    gold_ -= amount;
+    bankGold_ += amount;
+}
+
+void Party::withdrawGold(int amount)
+{
+    amount = std::min(amount, bankGold_);
+    bankGold_ -= amount;
+    gold_ += amount;
+}
+
 bool Party::consumeFood(int amount)
 {
     if (amount > food_)

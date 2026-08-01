@@ -161,6 +161,21 @@ class ShopSystem
     // Flat per-trip cost: (Stables?50:25) * shopMult, then the finalizer.
     static int travelCost(BuildingType type, float shopMult, int discountPct);
 
+    // -------- Bank service --------
+    std::expected<ShopReceipt, ShopError> depositGold(const ShopContext& ctx, int amount) const;
+    std::expected<ShopReceipt, ShopError> withdrawGold(const ShopContext& ctx, int amount) const;
+
+    // -------- Tavern service (rest + food rental) --------
+    // Rest the party (advances time, restores HP/SP, consumes food). Cost is
+    // a flat fee based on the building's buyMultiplier.
+    std::expected<ShopReceipt, ShopError> restAtInn(const ShopContext& ctx) const;
+
+    // -------- Guild service (learn a spell for gold) --------
+    // Teach the active member a spell if they know the school. Cost scales with
+    // the spell level and the building's buyMultiplier.
+    std::expected<ShopReceipt, ShopError> learnGuildSpell(const ShopContext& ctx,
+                                                          int spellId) const;
+
   private:
     // Resolves the active character for merchant-skill purposes: the party's
     // active member, clamped.

@@ -263,6 +263,29 @@ bool ShopWindow::handleClick(int mouseX, int mouseY)
                 else if (btn.label == "Close" || btn.label == "Exit")
                     close();
             }
+            else if (family_ == game::ShopFamily::Bank)
+            {
+                if (btn.label == "Deposit 100")
+                    doDeposit();
+                else if (btn.label == "Withdraw 100")
+                    doWithdraw();
+                else if (btn.label == "Close" || btn.label == "Exit")
+                    close();
+            }
+            else if (family_ == game::ShopFamily::Tavern)
+            {
+                if (btn.label == "Rest")
+                    doRestInn();
+                else if (btn.label == "Close" || btn.label == "Exit")
+                    close();
+            }
+            else if (family_ == game::ShopFamily::Guild)
+            {
+                if (btn.label == "Learn Spell")
+                    doLearnSpell();
+                else if (btn.label == "Close" || btn.label == "Exit")
+                    close();
+            }
             else
             {
                 if (btn.label == "Buy/Do")
@@ -645,6 +668,12 @@ void ShopWindow::render(graphics::IRenderer& renderer, const graphics::DebugText
     if (family_ == game::ShopFamily::Travel)
     {
         renderTravel(renderer, debugText);
+        return;
+    }
+    if (family_ == game::ShopFamily::Bank || family_ == game::ShopFamily::Tavern ||
+        family_ == game::ShopFamily::Guild)
+    {
+        renderSimpleService(renderer, debugText);
         return;
     }
 
@@ -1056,6 +1085,150 @@ void ShopWindow::renderTravel(graphics::IRenderer& renderer, const graphics::Deb
     const int hintY = kWindowY + kWindowH - kPadding - debugText.lineHeight(kTextScale);
     debugText.drawText(sdl, kWindowX + kPadding, hintY, kTextScale, 160, 160, 170,
                        "Up/Dn: select destination   Enter: travel   Esc: close");
+}
+
+void ShopWindow::renderSimpleService(graphics::IRenderer& renderer,
+                                     const graphics::DebugText& debugText)
+{
+    const int viewportW = 640;
+    const int viewportH = 480;
+    renderer.drawFilledRect(0, 0, viewportW, viewportH, 0, 0, 0, 140);
+    renderer.drawFilledRect(kWindowX, kWindowY, kWindowW, kWindowH, 26, 24, 30, 235);
+    renderer.drawRect(kWindowX, kWindowY, kWindowW, kWindowH, 130, 108, 60, 255);
+    renderer.drawRect(kWindowX + 1, kWindowY + 1, kWindowW - 2, kWindowH - 2, 90, 78, 44, 210);
+
+    SDL_Renderer* sdl = renderer.getSDLRenderer();
+    if (sdl == nullptr)
+        return;
+
+    int y = kWindowY + kPadding;
+    if (!shopName_.empty())
+    {
+        debugText.drawText(sdl, kWindowX + kPadding, y, kTitleScale, 255, 220, 120, shopName_);
+        y += debugText.lineHeight(kTitleScale) + 2;
+    }
+    if (party_ != nullptr)
+    {
+        const std::string gold =
+            std::format("Gold: {}   Bank: {}", party_->gold(), party_->bankGold());
+        debugText.drawText(sdl, kWindowX + kWindowW - kPadding - 180, kWindowY + kPadding,
+                           kTextScale, 255, 215, 0, gold);
+    }
+    y += kPadding;
+    renderer.drawFilledRect(kWindowX + kPadding, y, kWindowW - kPadding * 2, 1, 110, 90, 50, 220);
+    y += kPadding;
+
+    buttonRects_.clear();
+    const int by = y;
+    auto addBtn = [&](int x, int w, std::string label, uint8_t r, uint8_t g, uint8_t b)
+    {
+        renderer.drawFilledRect(x, by, w, kButtonHeight, r, g, b, 220);
+        renderer.drawRect(x, by, w, kButtonHeight, 210, 200, 160, 255);
+        debugText.drawText(sdl, x + 6, by + 4, kTextScale, 240, 240, 240, label);
+        buttonRects_.push_back({x, by, w, kButtonHeight, std::move(label)});
+    };
+
+    int bx = kWindowX + kPadding;
+    if (family_ == game::ShopFamily::Bank)
+    {
+        debugText.drawText(sdl, kWindowX + kPadding, y + kButtonHeight + kPadding, kTextScale, 200,
+                           200, 200, "Deposit 100 gold or withdraw 100 gold from the bank vault.");
+        addBtn(bx, kButtonWidth, "Deposit 100", 70, 120, 70);
+        bx += kButtonWidth + kPadding;
+        addBtn(bx, kButtonWidth, "Withdraw 100", 70, 100, 130);
+    }
+    else if (family_ == game::ShopFamily::Tavern)
+    {
+        const int cost = std::max(1, static_cast<int>(buyMultiplier_ * 10));
+        debugText.drawText(sdl, kWindowX + kPadding, y + kButtonHeight + kPadding, kTextScale, 200,
+                           200, 200,
+                           std::format("Rest for the night ({} gold). Restores HP and SP.", cost));
+        addBtn(bx, kButtonWidth, "Rest", 70, 110, 70);
+    }
+    else // Guild
+    {
+        const int cost = std::max(1, static_cast<int>(buyMultiplier_ * 100));
+        debugText.drawText(
+            sdl, kWindowX + kPadding, y + kButtonHeight + kPadding, kTextScale, 200, 200, 200,
+            std::format("Learn a spell ({} gold). Requires the matching school skill.", cost));
+        addBtn(bx, kButtonWidth, "Learn Spell", 90, 70, 130);
+    }
+    addBtn(kWindowX + kWindowW - kPadding - kButtonWidth, kButtonWidth, "Close", 90, 40, 40);
+
+    const int hintY = kWindowY + kWindowH - kPadding - debugText.lineHeight(kTextScale);
+    debugText.drawText(sdl, kWindowX + kPadding, hintY, kTextScale, 160, 160, 170,
+                       "Click a button   Esc: close");
+}
+
+void ShopWindow::doDeposit()
+{
+    if (party_ == nullptr)
+        return;
+    formats::TwoDEventEntry building;
+    building.buildingType = game::BuildingType::Bank;
+    game::ShopContext ctx{&building, party_, nullptr};
+    auto r = shop_.depositGold(ctx, 100);
+    if (onStatus_)
+        onStatus_(r.has_value()
+                      ? "Deposited 100 gold."
+                      : std::format("Cannot deposit: {}.", game::shopErrorText(r.error())));
+}
+
+void ShopWindow::doWithdraw()
+{
+    if (party_ == nullptr)
+        return;
+    formats::TwoDEventEntry building;
+    building.buildingType = game::BuildingType::Bank;
+    game::ShopContext ctx{&building, party_, nullptr};
+    auto r = shop_.withdrawGold(ctx, 100);
+    if (onStatus_)
+        onStatus_(r.has_value()
+                      ? "Withdrew 100 gold."
+                      : std::format("Cannot withdraw: {}.", game::shopErrorText(r.error())));
+}
+
+void ShopWindow::doRestInn()
+{
+    if (party_ == nullptr)
+        return;
+    formats::TwoDEventEntry building;
+    building.buildingType = game::BuildingType::Tavern;
+    building.buyMultiplier = buyMultiplier_;
+    game::ShopContext ctx{&building, party_, nullptr};
+    auto r = shop_.restAtInn(ctx);
+    if (onStatus_)
+        onStatus_(r.has_value()
+                      ? std::format("Rested for {} gold. Party fully restored.", r->goldSpent)
+                      : std::format("Cannot rest: {}.", game::shopErrorText(r.error())));
+}
+
+void ShopWindow::doLearnSpell()
+{
+    if (party_ == nullptr)
+        return;
+    formats::TwoDEventEntry building;
+    building.buildingType = buildingType_;
+    building.buyMultiplier = buyMultiplier_;
+    game::ShopContext ctx{&building, party_, nullptr};
+    // Try to learn the first available spell the active member doesn't know.
+    const int member = std::clamp(party_->activeMemberIndex(), 0, 3);
+    for (int spellId = 1; spellId < 100; spellId++)
+    {
+        if (!party_->member(member).knowsSpell(spellId))
+        {
+            auto r = shop_.learnGuildSpell(ctx, spellId);
+            if (onStatus_)
+            {
+                onStatus_(r.has_value()
+                              ? std::format("Learned spell #{} for {} gold.", spellId, r->goldSpent)
+                              : std::format("Cannot learn: {}.", game::shopErrorText(r.error())));
+            }
+            return;
+        }
+    }
+    if (onStatus_)
+        onStatus_("All spells already known.");
 }
 
 } // namespace runeharbor::ui

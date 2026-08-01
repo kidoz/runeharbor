@@ -65,8 +65,11 @@ enum class ShopFamily
     None,     // not a shop UI
     ItemShop, // Weapon/Armor/Magic/Alchemist — buy/sell/identify/repair
     Temple,   // heal / cure / resurrect
-    Training, // spend gold for experience
+    Training, // spend gold for experience (level-up)
     Travel,   // stables / boats -> map transitions
+    Bank,     // deposit / withdraw gold
+    Tavern,   // rest / food rental
+    Guild,    // learn spells for gold
 };
 
 ShopFamily shopFamily(BuildingType type);

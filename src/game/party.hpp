@@ -37,6 +37,12 @@ class Party
     void addGold(int amount) { gold_ += amount; }
     bool spendGold(int amount);
 
+    // Bank: gold stored separately (safe from loss on death).
+    int bankGold() const { return bankGold_; }
+    void setBankGold(int amount) { bankGold_ = amount; }
+    void depositGold(int amount);
+    void withdrawGold(int amount);
+
     int food() const { return food_; }
     void setFood(int amount) { food_ = amount; }
     void addFood(int amount) { food_ += amount; }
@@ -95,6 +101,7 @@ class Party
   private:
     std::array<Character, kPartySize> members_;
     int gold_ = 200;
+    int bankGold_ = 0;
     int food_ = 7;
     Alignment alignment_ = Alignment::Neutral;
     int reputation_ = 0;

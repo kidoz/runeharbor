@@ -617,6 +617,85 @@ int ShopSystem::travelCost(BuildingType type, float shopMult, int discountPct)
     return std::max(result, 1);
 }
 
+// -------- Bank service --------
+
+std::expected<ShopReceipt, ShopError> ShopSystem::depositGold(const ShopContext& ctx,
+                                                              int amount) const
+{
+    if (ctx.party == nullptr || amount <= 0)
+        return std::unexpected(ShopError::InvalidArgument);
+    if (amount > ctx.party->gold())
+        return std::unexpected(ShopError::InsufficientGold);
+    ctx.party->depositGold(amount);
+    ShopReceipt r;
+    r.goldSpent = amount;
+    r.building = BuildingType::Bank;
+    return r;
+}
+
+std::expected<ShopReceipt, ShopError> ShopSystem::withdrawGold(const ShopContext& ctx,
+                                                               int amount) const
+{
+    if (ctx.party == nullptr || amount <= 0)
+        return std::unexpected(ShopError::InvalidArgument);
+    if (amount > ctx.party->bankGold())
+        return std::unexpected(ShopError::InsufficientGold);
+    ctx.party->withdrawGold(amount);
+    ShopReceipt r;
+    r.goldGained = amount;
+    r.building = BuildingType::Bank;
+    return r;
+}
+
+// -------- Tavern service --------
+
+std::expected<ShopReceipt, ShopError> ShopSystem::restAtInn(const ShopContext& ctx) const
+{
+    if (ctx.party == nullptr || ctx.building == nullptr)
+        return std::unexpected(ShopError::InvalidArgument);
+    const int cost = std::max(1, floorToInt(ctx.building->buyMultiplier * 10));
+    if (ctx.party->gold() < cost)
+        return std::unexpected(ShopError::InsufficientGold);
+    (void)ctx.party->spendGold(cost);
+    // Rest 8 hours: full HP/SP restoration.
+    ctx.party->rest(8);
+    ShopReceipt r;
+    r.goldSpent = cost;
+    r.building = BuildingType::Tavern;
+    return r;
+}
+
+// -------- Guild service --------
+
+std::expected<ShopReceipt, ShopError> ShopSystem::learnGuildSpell(const ShopContext& ctx,
+                                                                  int spellId) const
+{
+    if (ctx.party == nullptr || ctx.building == nullptr)
+        return std::unexpected(ShopError::InvalidArgument);
+    Character& member = ctx.party->member(std::clamp(ctx.party->activeMemberIndex(), 0, 3));
+    if (member.knowsSpell(spellId))
+        return std::unexpected(ShopError::ItemAlreadyIdentified); // already known
+    // Cost scales with the building's multiplier (a flat guild fee).
+    const int cost = std::max(1, floorToInt(ctx.building->buyMultiplier * 100));
+    if (ctx.party->gold() < cost)
+        return std::unexpected(ShopError::InsufficientGold);
+    // Gate: must know the spell's school. Map spell id to a school skill.
+    const int schoolBase = ((spellId - 1) / 11); // 0=Fire..10=Dark
+    static constexpr SkillId kSchoolSkills[] = {SkillId::Fire,  SkillId::Air,    SkillId::Water,
+                                                SkillId::Earth, SkillId::Fire, // 4 unused
+                                                SkillId::Fire,  SkillId::Spirit, SkillId::Mind,
+                                                SkillId::Body,  SkillId::Light,  SkillId::Dark};
+    const SkillId school = kSchoolSkills[std::clamp(schoolBase, 0, 10)];
+    if (!member.learnSpell(spellId, school))
+        return std::unexpected(ShopError::NothingToLearn);
+    (void)ctx.party->spendGold(cost);
+    ShopReceipt r;
+    r.goldSpent = cost;
+    r.characterIndex = std::clamp(ctx.party->activeMemberIndex(), 0, 3);
+    r.building = ctx.building->buildingType;
+    return r;
+}
+
 const Character& ShopSystem::activeCharacter(const Party& party)
 {
     int idx = party.activeMemberIndex();

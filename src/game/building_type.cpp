@@ -98,9 +98,10 @@ ShopFamily shopFamily(BuildingType type)
     case BuildingType::Stables:
     case BuildingType::Boat:
         return ShopFamily::Travel;
-    // Guilds/Tavern/Bank/TownHall are out of scope for the first playable
-    // economy pass (see docs/re/29-shops-and-economy.md, "Out of scope").
-    case BuildingType::None:
+    case BuildingType::Bank:
+        return ShopFamily::Bank;
+    case BuildingType::Tavern:
+        return ShopFamily::Tavern;
     case BuildingType::FireGuild:
     case BuildingType::AirGuild:
     case BuildingType::WaterGuild:
@@ -110,9 +111,10 @@ ShopFamily shopFamily(BuildingType type)
     case BuildingType::BodyGuild:
     case BuildingType::LightGuild:
     case BuildingType::DarkGuild:
+        return ShopFamily::Guild;
+    // TownHall has no standard service UI yet.
+    case BuildingType::None:
     case BuildingType::TownHall:
-    case BuildingType::Tavern:
-    case BuildingType::Bank:
         return ShopFamily::None;
     }
     return ShopFamily::None;

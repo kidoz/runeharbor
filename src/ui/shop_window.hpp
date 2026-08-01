@@ -154,6 +154,11 @@ class ShopWindow
     void renderTemple(graphics::IRenderer& renderer, const graphics::DebugText& debugText);
     void renderTraining(graphics::IRenderer& renderer, const graphics::DebugText& debugText);
     void renderTravel(graphics::IRenderer& renderer, const graphics::DebugText& debugText);
+    void renderSimpleService(graphics::IRenderer& renderer, const graphics::DebugText& debugText);
+    void doDeposit();
+    void doWithdraw();
+    void doRestInn();
+    void doLearnSpell();
 
     // Travel destinations offered by the current building (built on show()).
     std::vector<game::TravelDestination> travelDestinations_;
