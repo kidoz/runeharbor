@@ -535,7 +535,10 @@ int CombatSystem::calculateMonsterDamage(int baseDamage, DamageElement type,
 
 int CombatSystem::hitChance(int attackerLevel, int attackerAccuracy, int defenderAC) const
 {
-    // Base hit chance: 50% + (accuracy - AC) * 2 + level * 2
+    // RuneHarbor approximation, NOT the RE pipeline. The original hit model
+    // (DamageMonsterFromParty 0x00439463, see docs/combat-system.md) folds in
+    // weapon skill, mastery, and knockback; this simplified formula captures
+    // the accuracy-vs-AC tradeoff and level advantage with a 5-95% clamp.
     int chance = 50 + (attackerAccuracy - defenderAC) * 2 + attackerLevel * 2;
     return std::clamp(chance, 5, 95); // Always 5-95% chance
 }
