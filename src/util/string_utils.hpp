@@ -22,4 +22,11 @@ bool equalsIgnoreCase(std::string_view a, std::string_view b);
 // Function to convert a string to lowercase.
 std::string toLower(std::string_view s);
 
+/// Word-wrap `text` into lines of at most `maxWidthChars` characters.
+/// Breaks at word boundaries (spaces); a single word longer than the width is
+/// hard-broken across lines so output never overflows the column. Newlines in
+/// the input start a new line. Empty input returns an empty vector. Shared by
+/// the dialogue and journal UIs so they wrap identically.
+std::vector<std::string> wordWrap(const std::string& text, int maxWidthChars);
+
 } // namespace runeharbor::util

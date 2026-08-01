@@ -5,6 +5,7 @@
 
 #include "../graphics/debug_text.hpp"
 #include "../graphics/irenderer.hpp"
+#include "../util/string_utils.hpp"
 
 namespace runeharbor::ui
 {
@@ -19,43 +20,6 @@ constexpr int kPortraitSize = 64;
 constexpr int kTextScale = 1;
 constexpr int kNameScale = 2;
 constexpr int kChoiceScale = 1;
-
-// Word-wrap text into lines of maxWidth pixels
-std::vector<std::string> wordWrap(const std::string& text, int maxWidthChars)
-{
-    std::vector<std::string> lines;
-    if (text.empty() || maxWidthChars <= 0)
-        return lines;
-
-    std::string current;
-    int col = 0;
-
-    for (size_t i = 0; i < text.size(); i++)
-    {
-        char c = text[i];
-        if (c == '\n')
-        {
-            lines.push_back(current);
-            current.clear();
-            col = 0;
-            continue;
-        }
-
-        current += c;
-        col++;
-
-        if (col >= maxWidthChars && c == ' ')
-        {
-            lines.push_back(current);
-            current.clear();
-            col = 0;
-        }
-    }
-    if (!current.empty())
-        lines.push_back(current);
-
-    return lines;
-}
 } // namespace
 
 void DialogueWindow::show(const std::string& npcName, const std::string& text,
@@ -172,6 +136,9 @@ bool DialogueWindow::handleKey(int scancode)
 
 void DialogueWindow::setPortraitTexture(void* tex, int w, int h)
 {
+    // TODO: no caller currently wires a real NPC portrait (SharedGameData has
+    // no portrait field), so every dialogue shows the "NPC" placeholder. Wire
+    // this from the NPC/event data once a portrait source exists.
     portrait_ = tex;
     portraitW_ = w;
     portraitH_ = h;
@@ -232,10 +199,9 @@ void DialogueWindow::render(graphics::IRenderer& renderer, const graphics::Debug
         contentY += kPortraitSize + kPadding;
     }
 
-    // Separator line
-    int sepY = contentY + (portrait_ ? 0 : 0);
-    if (portrait_)
-        sepY = winY + kPadding + kPortraitSize + kPadding / 2;
+    // Separator line: with a portrait, draw it just below the portrait box;
+    // otherwise just below the NPC name.
+    const int sepY = portrait_ ? (winY + kPadding + kPortraitSize + kPadding / 2) : contentY;
     renderer.drawFilledRect(winX + kPadding, sepY, winW - kPadding * 2, 1, 80, 70, 40, 200);
     contentY = sepY + kPadding / 2;
 
@@ -243,7 +209,7 @@ void DialogueWindow::render(graphics::IRenderer& renderer, const graphics::Debug
     int textAreaW = winW - kPadding * 2;
     int charW = debugText.charWidth(kTextScale);
     int maxChars = charW > 0 ? textAreaW / charW : 80;
-    auto lines = wordWrap(text_, maxChars);
+    auto lines = util::wordWrap(text_, maxChars);
 
     for (const auto& line : lines)
     {

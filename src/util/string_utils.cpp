@@ -99,4 +99,67 @@ std::string toLower(std::string_view s)
     return result;
 }
 
+std::vector<std::string> wordWrap(const std::string& text, int maxWidthChars)
+{
+    std::vector<std::string> lines;
+    if (text.empty() || maxWidthChars <= 0)
+        return lines;
+
+    auto pushLine = [&](std::string line)
+    {
+        // Hard-break any single word longer than the column so output never
+        // overflows; the rest of the line is then split at maxWidthChars.
+        while (static_cast<int>(line.size()) > maxWidthChars)
+        {
+            lines.push_back(line.substr(0, static_cast<size_t>(maxWidthChars)));
+            line = line.substr(static_cast<size_t>(maxWidthChars));
+        }
+        if (!line.empty())
+            lines.push_back(std::move(line));
+    };
+
+    std::string word;
+    std::string line;
+    for (char c : text)
+    {
+        if (c == ' ' || c == '\n')
+        {
+            // Would adding `word` (plus a separating space) overflow the line?
+            if (!line.empty() && static_cast<int>(line.size() + word.size() + 1) > maxWidthChars)
+            {
+                pushLine(std::move(line));
+                line.clear();
+            }
+            if (!line.empty())
+                line += ' ';
+            line += word;
+            word.clear();
+            if (c == '\n')
+            {
+                pushLine(std::move(line));
+                line.clear();
+            }
+        }
+        else
+        {
+            word += c;
+        }
+    }
+    // Flush the trailing word.
+    if (!word.empty())
+    {
+        if (!line.empty() && static_cast<int>(line.size() + word.size() + 1) > maxWidthChars)
+        {
+            pushLine(std::move(line));
+            line.clear();
+        }
+        if (!line.empty())
+            line += ' ';
+        line += word;
+    }
+    if (!line.empty())
+        pushLine(std::move(line));
+    return lines;
+}
+
 } // namespace runeharbor::util

@@ -24,6 +24,14 @@ class JournalWidget : public Widget
   public:
     JournalWidget();
 
+    // Active tab: Quests (default), Autonotes, Awards.
+    enum class JournalTab : uint8_t
+    {
+        Quests = 0,
+        Autonotes = 1,
+        Awards = 2
+    };
+
     using TextureLookup = std::function<void*(const std::string&, int& w, int& h)>;
     void setTextureLookup(TextureLookup lookup) { textureLookup_ = lookup; }
 
@@ -36,6 +44,13 @@ class JournalWidget : public Widget
     void setAwardCatalog(const std::vector<formats::AwardEntry>* catalog)
     {
         awardCatalog_ = catalog;
+    }
+
+    // Open to a specific tab (e.g. the A key opens straight to Autonotes).
+    void setActiveTab(JournalTab tab)
+    {
+        activeTab_ = tab;
+        selected_ = 0;
     }
 
     void render(graphics::IRenderer& renderer, const graphics::DebugText& text) override;
@@ -59,6 +74,10 @@ class JournalWidget : public Widget
 
     void rebuildRows();
     std::string statusLabel(game::QuestState state) const;
+    // Row count of the active tab's list (Quests -> rows_, Autonotes ->
+    // autonoteCatalog_, Awards -> awardCatalog_). Used so keyboard navigation
+    // and render clamping agree on how far the selection can move.
+    int currentListSize() const;
 
     game::GameWorld* gameWorld_ = nullptr;
     game::QuestLog* questLog_ = nullptr;
@@ -66,13 +85,6 @@ class JournalWidget : public Widget
     const std::vector<formats::AwardEntry>* awardCatalog_ = nullptr;
     TextureLookup textureLookup_;
 
-    // Active tab: Quests (default), Autonotes, Awards.
-    enum class JournalTab : uint8_t
-    {
-        Quests = 0,
-        Autonotes = 1,
-        Awards = 2
-    };
     JournalTab activeTab_ = JournalTab::Quests;
 
     std::vector<QuestRow> rows_;

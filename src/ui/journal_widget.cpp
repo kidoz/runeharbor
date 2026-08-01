@@ -9,60 +9,12 @@
 #include "../graphics/debug_text.hpp"
 #include "../graphics/irenderer.hpp"
 #include "../graphics/primitives.hpp"
+#include "../util/string_utils.hpp"
 
 namespace runeharbor::ui
 {
 
 JournalWidget::JournalWidget() {}
-
-namespace
-{
-// Word-wrap a string to a max character width (mirrors the dialogue helper).
-std::vector<std::string> wrapText(const std::string& text, int maxWidthChars)
-{
-    std::vector<std::string> lines;
-    std::string word;
-    std::string line;
-    for (char c : text)
-    {
-        if (c == ' ' || c == '\n')
-        {
-            if (!line.empty() && static_cast<int>(line.size() + word.size() + 1) > maxWidthChars)
-            {
-                lines.push_back(line);
-                line.clear();
-            }
-            if (!line.empty())
-                line += ' ';
-            line += word;
-            word.clear();
-            if (c == '\n')
-            {
-                lines.push_back(line);
-                line.clear();
-            }
-        }
-        else
-        {
-            word += c;
-        }
-    }
-    if (!word.empty())
-    {
-        if (!line.empty() && static_cast<int>(line.size() + word.size() + 1) > maxWidthChars)
-        {
-            lines.push_back(line);
-            line.clear();
-        }
-        if (!line.empty())
-            line += ' ';
-        line += word;
-    }
-    if (!line.empty())
-        lines.push_back(line);
-    return lines;
-}
-} // namespace
 
 std::string JournalWidget::statusLabel(game::QuestState state) const
 {
@@ -78,6 +30,20 @@ std::string JournalWidget::statusLabel(game::QuestState state) const
         return "";
     }
     return "";
+}
+
+int JournalWidget::currentListSize() const
+{
+    switch (activeTab_)
+    {
+    case JournalTab::Quests:
+        return static_cast<int>(rows_.size());
+    case JournalTab::Autonotes:
+        return autonoteCatalog_ ? static_cast<int>(autonoteCatalog_->size()) : 0;
+    case JournalTab::Awards:
+        return awardCatalog_ ? static_cast<int>(awardCatalog_->size()) : 0;
+    }
+    return 0;
 }
 
 void JournalWidget::rebuildRows()
@@ -169,6 +135,9 @@ void JournalWidget::render(graphics::IRenderer& renderer, const graphics::DebugT
     const int listW = bounds_.width * 2 / 5;
     const int detailX = bounds_.x + listW + 32;
     const int detailW = bounds_.width - listW - 60;
+    // Wrap width in characters for the detail pane (charWidth(1) = font advance).
+    const int detailCharW = text.charWidth(1);
+    const int detailChars = detailCharW > 0 ? detailW / detailCharW : detailW / 8;
     const int maxListY = bounds_.y + bounds_.height - 30;
 
     if (activeTab_ == JournalTab::Quests)
@@ -213,7 +182,7 @@ void JournalWidget::render(graphics::IRenderer& renderer, const graphics::DebugT
                 int dy = bounds_.y + 72;
                 const std::string heading =
                     std::format("{} {}", row.entry->text, statusLabel(row.entry->state));
-                for (const auto& ln : wrapText(heading, detailW / 8))
+                for (const auto& ln : util::wordWrap(heading, detailChars))
                 {
                     text.drawText(sdl, detailX, dy, 1, 230, 230, 230, ln);
                     dy += rowHeight_;
@@ -259,7 +228,7 @@ void JournalWidget::render(graphics::IRenderer& renderer, const graphics::DebugT
             {
                 int dy = bounds_.y + 72;
                 for (const auto& ln :
-                     wrapText((*autonoteCatalog_)[selected_].autonoteText, detailW / 8))
+                     util::wordWrap((*autonoteCatalog_)[selected_].autonoteText, detailChars))
                 {
                     text.drawText(sdl, detailX, dy, 1, 230, 230, 230, ln);
                     dy += rowHeight_;
@@ -298,7 +267,8 @@ void JournalWidget::render(graphics::IRenderer& renderer, const graphics::DebugT
             if (selected_ >= 0 && selected_ < static_cast<int>(awardCatalog_->size()))
             {
                 int dy = bounds_.y + 72;
-                for (const auto& ln : wrapText((*awardCatalog_)[selected_].awardText, detailW / 8))
+                for (const auto& ln :
+                     util::wordWrap((*awardCatalog_)[selected_].awardText, detailChars))
                 {
                     text.drawText(sdl, detailX, dy, 1, 230, 230, 230, ln);
                     dy += rowHeight_;
@@ -306,7 +276,8 @@ void JournalWidget::render(graphics::IRenderer& renderer, const graphics::DebugT
                 if (!(*awardCatalog_)[selected_].notes.empty())
                 {
                     dy += 4;
-                    for (const auto& ln : wrapText((*awardCatalog_)[selected_].notes, detailW / 8))
+                    for (const auto& ln :
+                         util::wordWrap((*awardCatalog_)[selected_].notes, detailChars))
                     {
                         text.drawText(sdl, detailX, dy, 1, 200, 200, 170, ln);
                         dy += rowHeight_;
@@ -363,7 +334,9 @@ bool JournalWidget::handleEvent(const UIEvent& event)
         }
         if (event.scancode == SDL_SCANCODE_DOWN)
         {
-            if (selected_ < static_cast<int>(rows_.size()) - 1)
+            // Clamp against the active tab's list size, not rows_ (which is
+            // Quests-only) — otherwise Down is dead on Autonotes/Awards.
+            if (selected_ < currentListSize() - 1)
                 selected_++;
             return true;
         }

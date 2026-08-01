@@ -602,10 +602,15 @@ std::optional<GameStateId> InGameState::update()
         if (!journalWidget_.visible())
         {
             journalWidget_.setVisible(true);
-            // A opens to the autonotes tab; Q to the quests tab.
-            // (Handled via a public method would be cleaner, but we can't easily
-            // set the tab from here without exposing it — the widget defaults to
-            // Quests, which is correct for Q. For A, the player can click the tab.)
+            // A opens straight to the Autonotes tab; Q to the default Quests tab.
+            if (ctx.isKeyPressed(SDL_SCANCODE_A))
+            {
+                journalWidget_.setActiveTab(ui::JournalWidget::JournalTab::Autonotes);
+            }
+            else
+            {
+                journalWidget_.setActiveTab(ui::JournalWidget::JournalTab::Quests);
+            }
         }
         else
         {
