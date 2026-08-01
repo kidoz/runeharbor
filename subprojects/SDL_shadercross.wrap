@@ -1,7 +1,7 @@
 [wrap-git]
 directory = SDL_shadercross
 url = https://github.com/libsdl-org/SDL_shadercross.git
-revision = 3a314481ede01f5d966f0e834019942e34c02b82
+revision = e55cf5e31ced6f3d1be5cc6d0c50e99384f9f4ba
 depth = 1
 method = cmake
 
