@@ -40,6 +40,7 @@ endif
 test_sources = files(
     'test_main.cpp',
     'util/console_logger_test.cpp',
+    'util/string_utils_test.cpp',
     'platform/window_test.cpp',
     'formats/lod_archive_test.cpp',
     'formats/image_lod_archive_test.cpp',
