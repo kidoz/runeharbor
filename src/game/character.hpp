@@ -289,6 +289,16 @@ struct Character
     // Normal mastery (the gate from the book branch), true on success.
     bool learnSpell(int spellId, SkillId schoolSkill);
 
+    // Spell quickbar: 2 assignable spell slots (RE: per-character bytes at
+    // +0x1A4E / +0x1A4F). 0 = empty.
+    static constexpr int kQuickbarSlots = 2;
+    std::array<int, kQuickbarSlots> quickbarSpells = {0, 0};
+    void setQuickbarSpell(int slot, int spellId)
+    {
+        if (slot >= 0 && slot < kQuickbarSlots)
+            quickbarSpells[static_cast<size_t>(slot)] = spellId;
+    }
+
     // Equipment
     std::array<ItemSlot, static_cast<size_t>(EquipSlot::Count)> equipment = {};
 

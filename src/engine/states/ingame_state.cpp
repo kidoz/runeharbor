@@ -545,8 +545,9 @@ std::optional<GameStateId> InGameState::update()
     // Spellbook keyboard navigation (Up/Down/Enter/Esc) when open.
     if (spellbook_.visible())
     {
-        for (const SDL_Scancode key : {SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_RETURN,
-                                       SDL_SCANCODE_SPACE, SDL_SCANCODE_ESCAPE})
+        for (const SDL_Scancode key :
+             {SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_RETURN, SDL_SCANCODE_SPACE,
+              SDL_SCANCODE_ESCAPE, SDL_SCANCODE_1, SDL_SCANCODE_2})
         {
             if (ctx.isKeyPressed(key))
             {

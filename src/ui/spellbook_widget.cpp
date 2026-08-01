@@ -207,6 +207,22 @@ bool SpellbookWidget::handleEvent(const UIEvent& event)
             setVisible(false);
             return true;
         }
+        // Assign selected spell to quickbar slot 1 or 2 (RE: per-character
+        // quickbar bytes +0x1A4E/+0x1A4F).
+        if ((event.scancode == SDL_SCANCODE_1 || event.scancode == SDL_SCANCODE_2) &&
+            selected_ >= 0 && selected_ < static_cast<int>(rows_.size()) && gameWorld_)
+        {
+            const int slot = (event.scancode == SDL_SCANCODE_1) ? 0 : 1;
+            gameWorld_->party()
+                .member(activeCharacterIndex_)
+                .setQuickbarSpell(slot, rows_[selected_].id);
+            if (onStatus_)
+            {
+                onStatus_(std::format("Assigned {} to quickbar slot {}.", rows_[selected_].name,
+                                      slot + 1));
+            }
+            return true;
+        }
     }
     return false;
 }

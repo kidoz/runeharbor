@@ -438,9 +438,9 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
                 const int slotX = sx(baseX + slot * (slotSize + 2), scale, offsetX);
                 // Frame
                 renderer.drawRect(slotX, qbarY, slotSize, slotSize, 90, 80, 50, 200);
-                // Filled if the character knows at least (slot+1) spells.
-                const bool filled =
-                    (slot == 0 && ch.knownSpells[1]) || (slot == 1 && ch.knownSpells[2]);
+                // Filled if the character has a spell assigned to this slot.
+                const bool filled = (slot < game::Character::kQuickbarSlots &&
+                                     ch.quickbarSpells[static_cast<size_t>(slot)] > 0);
                 if (filled)
                 {
                     renderer.drawFilledRect(slotX + 1, qbarY + 1, slotSize - 2, slotSize - 2, 80,
