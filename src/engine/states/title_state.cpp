@@ -34,7 +34,7 @@ void TitleState::setButtonTextures(int index, void* tex, int w, int h)
 
 void TitleState::enter()
 {
-    selectedIndex = 0;
+    selectedIndex = -1;
     statusMessage.clear();
     buttons.clear(); // Force re-layout on first frame
 }
@@ -52,28 +52,15 @@ std::optional<GameStateId> TitleState::update()
         lastViewportHeight = ctx.viewportHeight;
     }
 
-    int oldSelected = selectedIndex;
+    // The original title screen has no keyboard menu navigation: the loop only
+    // hit-tests the mouse against the four button rects and dispatches the
+    // per-button hotkeys (MM7-Rel.exe 0x462A2B-0x462C6B). Selection therefore
+    // follows the cursor and nothing else.
     updateHover();
 
-    // Keyboard navigation
-    int count = static_cast<int>(kMenuItems.size());
-    if (ctx.isKeyPressed(SDL_SCANCODE_UP))
-    {
-        selectedIndex = (selectedIndex + count - 1) % count;
-    }
-    if (ctx.isKeyPressed(SDL_SCANCODE_DOWN))
-    {
-        selectedIndex = (selectedIndex + 1) % count;
-    }
-
-    if (selectedIndex != oldSelected && ctx.playUiSound)
-    {
-        ctx.playUiSound("ClickMovingSelector");
-    }
-
-    // Activation (Enter or mouse click)
-    bool activated = ctx.isKeyPressed(SDL_SCANCODE_RETURN);
-    if (!activated && ctx.window.wasMousePressed(platform::MouseButton::Left))
+    // Activation is a left click on a hovered button.
+    bool activated = false;
+    if (ctx.window.wasMousePressed(platform::MouseButton::Left))
     {
         for (size_t i = 0; i < buttons.size(); i++)
         {
@@ -107,10 +94,10 @@ std::optional<GameStateId> TitleState::update()
         }
     }
 
-    // Single-key shortcuts (matches the original title screen). Note these fire
-    // unconditionally on key press with no modifier gating, so e.g. Q or E exits
-    // the game immediately — there is intentionally no confirmation dialog and
-    // no ESC handler on this screen.
+    // Button hotkeys, registered by the original when it builds the menu:
+    // 'N' (0x4E) for NEW, 'L' (0x4C) for LOAD and 'C' (0x43) for CREDITS. EXIT
+    // is created with hotkey 0 (MM7-Rel.exe 0x4629BC), so there is deliberately
+    // no keyboard shortcut for quitting, and no ESC handler on this screen.
     if (ctx.isKeyPressed(SDL_SCANCODE_N))
     {
         return GameStateId::CharacterCreation;
@@ -119,13 +106,9 @@ std::optional<GameStateId> TitleState::update()
     {
         return GameStateId::LoadGame;
     }
-    else if (ctx.isKeyPressed(SDL_SCANCODE_C))
+    if (ctx.isKeyPressed(SDL_SCANCODE_C))
     {
         return GameStateId::Credits;
-    }
-    else if (ctx.isKeyPressed(SDL_SCANCODE_Q) || ctx.isKeyPressed(SDL_SCANCODE_E))
-    {
-        return GameStateId::Quit;
     }
 
     return std::nullopt;
@@ -199,15 +182,17 @@ void TitleState::layoutButtons()
 
 void TitleState::updateHover()
 {
+    // The original blits a button's highlight texture only while the cursor is
+    // inside that button's rect (MM7-Rel.exe 0x462BA8-0x462C0D) — there is no
+    // persistent "selected" item, so nothing is lit when the mouse is elsewhere.
     for (size_t i = 0; i < buttons.size(); ++i)
     {
         auto& button = buttons[i];
-        bool mouseOver = ctx.isMouseOver(button.bounds);
-        if (mouseOver)
+        button.isHovered = ctx.isMouseOver(button.bounds);
+        if (button.isHovered)
         {
             selectedIndex = static_cast<int>(i);
         }
-        button.isHovered = (mouseOver || (static_cast<int>(i) == selectedIndex));
     }
 }
 
