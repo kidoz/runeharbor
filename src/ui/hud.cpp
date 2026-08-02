@@ -18,23 +18,52 @@ namespace runeharbor::ui
 // MM7 HUD layout constants (in 640x480 game coordinates)
 namespace
 {
-// Party bar at bottom of screen: 4 portrait slots
-constexpr int kPartyBarY = 359;
-constexpr int kPartyBarH = 121;
-constexpr int kPortraitW = 59;
-constexpr int kPortraitH = 79;
-constexpr int kPortraitStartX = 124;
-constexpr int kPortraitSpacing = 72;
+// The 3D view occupies the inclusive rect (8,8)-(468,351) (mm7.ini vx1/vy1/
+// vx2/vy2 defaults, MM7-Rel.exe 0x4660C7-0x466103), so the frame panels tile
+// around it: top strip 8px, left strip 8px, right panel from x=469 and bottom
+// panel from y=352.
+constexpr int kViewLeft = 8;
+constexpr int kViewTop = 8;
+constexpr int kViewRight = 468;  // inclusive
+constexpr int kViewBottom = 351; // inclusive
+constexpr int kRightPanelX = kViewRight + 1;
+constexpr int kRightPanelW = 640 - kRightPanelX;
 
-// HP/SP bar dimensions (within each portrait slot)
-constexpr int kBarW = 4;
-constexpr int kBarH = 79;
+// Party bar at the bottom of the screen.
+constexpr int kPartyBarY = kViewBottom + 1;
+constexpr int kPartyBarH = 480 - kPartyBarY;
+
+// Portrait art. X array at 0x4ED5F0, drawn at y=385 at the face texture's
+// native 63x73 (fcn.004921b9).
+constexpr int kPortraitX[] = {34, 149, 264, 379};
+constexpr int kPortraitY = 385;
+constexpr int kPortraitW = 63;
+constexpr int kPortraitH = 73;
+
+// Character-select hotspots (fcn.0041b639 @ 0x41B8FD-0x41B96E). Deliberately
+// smaller than the portrait art: the original registers a 31x40 button per
+// character, with '1'-'4' as hotkeys.
+constexpr int kSelectX[] = {61, 177, 292, 407};
+constexpr int kSelectY = 424;
+constexpr int kSelectW = 31;
+constexpr int kSelectH = 40;
+
+// HP / SP indicator strips. X arrays at 0x4E2A98 and 0x4E2AA8 with a shared
+// base y of 402 (fcn.0041b072); the hover hotspots registered alongside them
+// at 0x41B98E-0x41BA8A are 5x49.
+constexpr int kHpBarX[] = {22, 137, 251, 366};
+constexpr int kSpBarX[] = {102, 217, 331, 447};
+constexpr int kBarY = 402;
+constexpr int kBarW = 5;
+constexpr int kBarH = 49;
 
 // Resource bar (gold/food) at bottom-right
 constexpr int kResourceX = 500;
 constexpr int kResourceY = 456;
 
-// Minimap placeholder at top-right
+// Minimap placeholder at top-right. Sits above the original's zoom-out/zoom-in
+// buttons at (519,136) and (574,136) (0x41BD6C / 0x41BD10); the exact art rect
+// has not been transcribed from the original yet.
 constexpr int kMinimapX = 520;
 constexpr int kMinimapY = 8;
 constexpr int kMinimapW = 112;
@@ -182,16 +211,15 @@ int HUD::portraitAt(float scale, float offsetX, float offsetY, int screenX, int 
     const float gameX = (static_cast<float>(screenX) - offsetX) / scale;
     const float gameY = (static_cast<float>(screenY) - offsetY) / scale;
 
-    // Portraits share Y range [kPartyBarY+14, kPartyBarY+14+kPortraitH].
-    const int portraitY = kPartyBarY + 14;
-    if (gameY < portraitY || gameY >= portraitY + kPortraitH)
+    // Hit-test against the original's character-select buttons rather than the
+    // full portrait art, matching MM7's clickable region.
+    if (gameY < kSelectY || gameY >= kSelectY + kSelectH)
     {
         return -1;
     }
     for (int i = 0; i < game::kPartySize; i++)
     {
-        const int baseX = kPortraitStartX + i * kPortraitSpacing;
-        if (gameX >= baseX && gameX < baseX + kPortraitW)
+        if (gameX >= kSelectX[i] && gameX < kSelectX[i] + kSelectW)
         {
             return i;
         }
@@ -211,26 +239,26 @@ void HUD::render(graphics::IRenderer& renderer, const graphics::DebugText& debug
         // Right panel
         void* tex_r = lookupCached("ib-r-A", w, h);
         if (tex_r)
-            renderer.renderTexture(tex_r, sx(476, scale, offsetX), sy(0, scale, offsetY),
-                                   sw(164, scale), sh(480, scale));
+            renderer.renderTexture(tex_r, sx(kRightPanelX, scale, offsetX), sy(0, scale, offsetY),
+                                   sw(kRightPanelW, scale), sh(480, scale));
 
         // Bottom panel
         void* tex_b = lookupCached("ib-b-A", w, h);
         if (tex_b)
-            renderer.renderTexture(tex_b, sx(0, scale, offsetX), sy(359, scale, offsetY),
-                                   sw(476, scale), sh(121, scale));
+            renderer.renderTexture(tex_b, sx(0, scale, offsetX), sy(kPartyBarY, scale, offsetY),
+                                   sw(kRightPanelX, scale), sh(kPartyBarH, scale));
 
         // Top border
         void* tex_t = lookupCached("ib-t-A", w, h);
         if (tex_t)
             renderer.renderTexture(tex_t, sx(0, scale, offsetX), sy(0, scale, offsetY),
-                                   sw(476, scale), sh(8, scale));
+                                   sw(kRightPanelX, scale), sh(kViewTop, scale));
 
         // Left border
         void* tex_l = lookupCached("ib-l-A", w, h);
         if (tex_l)
-            renderer.renderTexture(tex_l, sx(0, scale, offsetX), sy(8, scale, offsetY),
-                                   sw(8, scale), sh(351, scale));
+            renderer.renderTexture(tex_l, sx(0, scale, offsetX), sy(kViewTop, scale, offsetY),
+                                   sw(kViewLeft, scale), sh(kViewBottom - kViewTop + 1, scale));
     }
 
     renderPartyBar(renderer, debugText, scale, offsetX, offsetY);
@@ -251,7 +279,7 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
     for (int i = 0; i < game::kPartySize; i++)
     {
         const auto& ch = party.member(i);
-        int baseX = kPortraitStartX + i * kPortraitSpacing;
+        const int baseX = kPortraitX[i];
 
         // Portrait rendering
         void* portraitTex = nullptr;
@@ -327,13 +355,14 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
 
         if (portraitTex)
         {
-            // Center the portrait at its natural size inside the 59x79 slot.
-            // Face textures are not 59x79, so stretching to the slot distorts
-            // them; centering preserves aspect and seats them correctly.
+            // Center the portrait at its natural size inside the 63x73 slot.
+            // Face textures vary slightly in size, so stretching to the slot
+            // distorts them; centering preserves aspect and seats them
+            // correctly.
             const int natW = portraitW > 0 ? portraitW : kPortraitW;
             const int natH = portraitH > 0 ? portraitH : kPortraitH;
             const int slotX = baseX + (kPortraitW - natW) / 2;
-            const int slotY = kPartyBarY + 14 + (kPortraitH - natH) / 2;
+            const int slotY = kPortraitY + (kPortraitH - natH) / 2;
             renderer.renderTexture(portraitTex, sx(slotX, scale, offsetX),
                                    sy(slotY, scale, offsetY), sw(natW, scale), sh(natH, scale));
         }
@@ -342,7 +371,7 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
             // Portrait placeholder (colored rectangle based on class)
             uint8_t classHue =
                 static_cast<uint8_t>((static_cast<int>(ch.charClass) * 37 + 60) % 200 + 55);
-            renderer.drawFilledRect(sx(baseX, scale, offsetX), sy(kPartyBarY + 14, scale, offsetY),
+            renderer.drawFilledRect(sx(baseX, scale, offsetX), sy(kPortraitY, scale, offsetY),
                                     sw(kPortraitW, scale), sh(kPortraitH, scale), classHue,
                                     static_cast<uint8_t>(classHue / 2), 40, 180);
         }
@@ -350,7 +379,7 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
         // Highlight the active party member (selected via portrait click).
         if (party.activeMemberIndex() == i)
         {
-            renderer.drawRect(sx(baseX - 2, scale, offsetX), sy(kPartyBarY + 12, scale, offsetY),
+            renderer.drawRect(sx(baseX - 2, scale, offsetX), sy(kPortraitY - 2, scale, offsetY),
                               sw(kPortraitW + 4, scale), sh(kPortraitH + 4, scale), 255, 220, 80,
                               255);
         }
@@ -359,7 +388,7 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
         SDL_Renderer* sdl = renderer.getSDLRenderer();
         if (sdl)
         {
-            int nameY = sy(kPartyBarY + 98, scale, offsetY);
+            int nameY = sy(kPortraitY + kPortraitH + 2, scale, offsetY);
             debugText.drawText(sdl, sx(baseX - 4, scale, offsetX), nameY, 1, 255, 255, 255,
                                ch.name);
 
@@ -369,9 +398,9 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
                                100, lvlStr);
         }
 
-        // HP bar (Left of portrait)
-        int hpBarX = sx(baseX - 6, scale, offsetX);
-        int hpBarY = sy(kPartyBarY + 14, scale, offsetY);
+        // HP bar, left of the portrait (0x4E2A98 / y=402).
+        int hpBarX = sx(kHpBarX[i], scale, offsetX);
+        int hpBarY = sy(kBarY, scale, offsetY);
         int hpBarW = sw(kBarW, scale);
         int hpBarH = sh(kBarH, scale);
 
@@ -397,8 +426,8 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
         }
         renderer.drawRect(hpBarX, hpBarY, hpBarW, hpBarH, 80, 80, 80, 255);
 
-        // SP bar (Right of portrait)
-        int spBarX = sx(baseX + kPortraitW + 2, scale, offsetX);
+        // SP bar, right of the portrait (0x4E2AA8 / y=402).
+        int spBarX = sx(kSpBarX[i], scale, offsetX);
         int spBarY = hpBarY;
         int spBarW = sw(kBarW, scale);
         int spBarH = sh(kBarH, scale);
@@ -427,12 +456,12 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
         // Condition indicator
         if (!ch.isConscious())
         {
-            renderer.drawFilledRect(sx(baseX, scale, offsetX), sy(kPartyBarY + 4, scale, offsetY),
+            renderer.drawFilledRect(sx(baseX, scale, offsetX), sy(kPortraitY, scale, offsetY),
                                     sw(kPortraitW, scale), sh(kPortraitH, scale), 0, 0, 0, 150);
             if (sdl)
             {
                 const char* status = ch.isAlive() ? "UNCONSCIOUS" : "DEAD";
-                int txtY = sy(kPartyBarY + 24, scale, offsetY);
+                int txtY = sy(kPortraitY + 20, scale, offsetY);
                 debugText.drawText(sdl, sx(baseX + 10, scale, offsetX), txtY, 1, 255, 60, 60,
                                    status);
             }
@@ -443,7 +472,7 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
         // for now show the first 2 known spells as a read-only indicator.
         if (sdl)
         {
-            const int qbarY = sy(kPartyBarY + 110, scale, offsetY);
+            const int qbarY = sy(kPortraitY + kPortraitH + 12, scale, offsetY);
             const int slotSize = sw(10, scale);
             for (int slot = 0; slot < 2; slot++)
             {
