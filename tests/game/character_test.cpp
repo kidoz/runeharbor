@@ -343,3 +343,141 @@ TEST_CASE("baseClassIndex", "[game][character]")
     REQUIRE(baseClassIndex(CharacterClass::Paladin) == 3);
     REQUIRE(baseClassIndex(CharacterClass::Cleric) == 6);
 }
+
+TEST_CASE("Face id maps to the original's race groups", "[game][character][creation]")
+{
+    // fcn.00490101: 0-7 -> human, 8-11 -> elf, 12-15 -> dwarf, 16-19 -> goblin.
+    CHECK(faceGroupFromFaceId(0) == 0);
+    CHECK(faceGroupFromFaceId(7) == 0);
+    CHECK(faceGroupFromFaceId(8) == 1);
+    CHECK(faceGroupFromFaceId(11) == 1);
+    CHECK(faceGroupFromFaceId(12) == 2);
+    CHECK(faceGroupFromFaceId(15) == 2);
+    CHECK(faceGroupFromFaceId(16) == 3);
+    CHECK(faceGroupFromFaceId(19) == 3);
+}
+
+TEST_CASE("Attribute base/max table matches MM7-Rel.exe 0x4ED658", "[game][character][creation]")
+{
+    // Stat index order: 0=Might 1=Intellect 2=Personality 3=Endurance
+    //                   4=Accuracy 5=Speed 6=Luck
+    SECTION("humans are uniform 11/25 apart from endurance and luck")
+    {
+        const int expectedBase[] = {11, 11, 11, 9, 11, 11, 9};
+        for (int i = 0; i < Stats::kCount; i++)
+        {
+            CHECK(attributeRule(0, i).base == expectedBase[i]);
+            CHECK(attributeRule(0, i).max == 25);
+        }
+    }
+
+    SECTION("elves are accurate, not fast")
+    {
+        // The distinguishing pair: Accuracy 14/30, Speed 11/25 (not the reverse).
+        CHECK(attributeRule(1, 4).base == 14);
+        CHECK(attributeRule(1, 4).max == 30);
+        CHECK(attributeRule(1, 5).base == 11);
+        CHECK(attributeRule(1, 5).max == 25);
+    }
+
+    SECTION("dwarves (faces 12-15) are strong and tough but slow")
+    {
+        const int expectedBase[] = {14, 11, 11, 14, 7, 7, 9};
+        const int expectedMax[] = {30, 25, 25, 30, 15, 15, 20};
+        for (int i = 0; i < Stats::kCount; i++)
+        {
+            CHECK(attributeRule(2, i).base == expectedBase[i]);
+            CHECK(attributeRule(2, i).max == expectedMax[i]);
+        }
+    }
+
+    SECTION("goblins (faces 16-19) are fast, not accurate")
+    {
+        const int expectedBase[] = {14, 7, 7, 11, 11, 14, 9};
+        const int expectedMax[] = {30, 15, 15, 25, 25, 30, 20};
+        for (int i = 0; i < Stats::kCount; i++)
+        {
+            CHECK(attributeRule(3, i).base == expectedBase[i]);
+            CHECK(attributeRule(3, i).max == expectedMax[i]);
+        }
+    }
+
+    SECTION("out-of-range indices clamp rather than read past the table")
+    {
+        CHECK(attributeRule(-1, 0).base == attributeRule(0, 0).base);
+        CHECK(attributeRule(99, 0).base == attributeRule(3, 0).base);
+        CHECK(attributeRule(0, -1).base == attributeRule(0, 0).base);
+        CHECK(attributeRule(0, 99).base == attributeRule(0, Stats::kCount - 1).base);
+    }
+}
+
+TEST_CASE("Attribute buy/sell rates follow the original's asymmetry", "[game][character][creation]")
+{
+    SECTION("humans pay one point per point, both directions")
+    {
+        const AttributeRule& might = attributeRule(0, 0); // {11, 25, 1, 1}
+        CHECK(attributeIncreaseStep(might, 11) == 1);
+        CHECK(attributeIncreaseCost(might, 11) == 1);
+        CHECK(attributeDecreaseStep(might, 11) == 1);
+        CHECK(attributePointsSpent(might, 11) == 0);
+        CHECK(attributePointsSpent(might, 15) == 4);
+        CHECK(attributePointsSpent(might, 9) == -2); // refunds below base
+    }
+
+    SECTION("a favoured attribute gains +2 per point spent")
+    {
+        const AttributeRule& intellect = attributeRule(1, 1); // elf {14, 30, 1, 2}
+        CHECK(attributeIncreaseStep(intellect, 14) == 2);
+        CHECK(attributeIncreaseCost(intellect, 14) == 1);
+        // 14 -> 18 is four points of stat for two points of budget.
+        CHECK(attributePointsSpent(intellect, 18) == 2);
+    }
+
+    SECTION("a weak attribute costs 2 points per +1")
+    {
+        const AttributeRule& might = attributeRule(1, 0); // elf {7, 15, 2, 1}
+        CHECK(attributeIncreaseStep(might, 7) == 1);
+        CHECK(attributeIncreaseCost(might, 7) == 2);
+        CHECK(attributePointsSpent(might, 9) == 4);
+    }
+
+    SECTION("below the base the rates invert, matching the decrease step")
+    {
+        const AttributeRule& intellect = attributeRule(1, 1); // elf {14, 30, 1, 2}
+        // Dropping below base moves in 1s and refunds 2 per point.
+        CHECK(attributeDecreaseStep(intellect, 14) == 1);
+        CHECK(attributeIncreaseStep(intellect, 13) == 1);
+        CHECK(attributeIncreaseCost(intellect, 13) == 2);
+        CHECK(attributePointsSpent(intellect, 13) == -2);
+        CHECK(attributePointsSpent(intellect, 12) == -4);
+
+        const AttributeRule& might = attributeRule(1, 0); // elf {7, 15, 2, 1}
+        CHECK(attributeDecreaseStep(might, 7) == 2);
+        CHECK(attributePointsSpent(might, 5) == -1); // -2 stat refunds 1 point
+    }
+
+    SECTION("decrease step above the base mirrors the increase step")
+    {
+        const AttributeRule& intellect = attributeRule(1, 1);
+        CHECK(attributeDecreaseStep(intellect, 18) == 2);
+        const AttributeRule& might = attributeRule(1, 0);
+        CHECK(attributeDecreaseStep(might, 9) == 1);
+    }
+}
+
+TEST_CASE("A default party spends none of its 50 creation points", "[game][character][creation]")
+{
+    // Every member sitting at its racial base should leave the pool untouched.
+    int spent = 0;
+    for (int faceId : {0, 8, 12, 16})
+    {
+        const int group = faceGroupFromFaceId(faceId);
+        for (int i = 0; i < Stats::kCount; i++)
+        {
+            const AttributeRule& rule = attributeRule(group, i);
+            spent += attributePointsSpent(rule, rule.base);
+        }
+    }
+    CHECK(spent == 0);
+    CHECK(kCreationBonusPoints - spent == 50);
+}

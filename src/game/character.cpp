@@ -370,4 +370,93 @@ void syncSkillLevelsFromDisplaySkills(Character& character)
     }
 }
 
+namespace
+{
+// [face group][attribute] = {base, max, lowRate, highRate}, from MM7-Rel.exe
+// 0x4ED658. Rows are ordered by face range, so rows 2 and 3 correspond to the
+// original's race ids 3 and 2 respectively (see faceGroupFromFaceId).
+constexpr AttributeRule kAttributeRules[4][Stats::kCount] = {
+    // Faces 0-7 (Human) — original race 0
+    {{11, 25, 1, 1},
+     {11, 25, 1, 1},
+     {11, 25, 1, 1},
+     {9, 25, 1, 1},
+     {11, 25, 1, 1},
+     {11, 25, 1, 1},
+     {9, 25, 1, 1}},
+    // Faces 8-11 (Elf) — original race 1
+    {{7, 15, 2, 1},
+     {14, 30, 1, 2},
+     {11, 25, 1, 1},
+     {7, 15, 2, 1},
+     {14, 30, 1, 2},
+     {11, 25, 1, 1},
+     {9, 20, 1, 1}},
+    // Faces 12-15 (Dwarf) — original race 3
+    {{14, 30, 1, 2},
+     {11, 25, 1, 1},
+     {11, 25, 1, 1},
+     {14, 30, 1, 2},
+     {7, 15, 2, 1},
+     {7, 15, 2, 1},
+     {9, 20, 1, 1}},
+    // Faces 16-19 (Goblin) — original race 2
+    {{14, 30, 1, 2},
+     {7, 15, 2, 1},
+     {7, 15, 2, 1},
+     {11, 25, 1, 1},
+     {11, 25, 1, 1},
+     {14, 30, 1, 2},
+     {9, 20, 1, 1}},
+};
+} // namespace
+
+int faceGroupFromFaceId(int faceId)
+{
+    if (faceId < 8)
+    {
+        return 0;
+    }
+    if (faceId < 12)
+    {
+        return 1;
+    }
+    if (faceId < 16)
+    {
+        return 2;
+    }
+    return 3;
+}
+
+const AttributeRule& attributeRule(int faceGroup, int statIndex)
+{
+    const int group = std::clamp(faceGroup, 0, 3);
+    const int stat = std::clamp(statIndex, 0, Stats::kCount - 1);
+    return kAttributeRules[group][stat];
+}
+
+int attributePointsSpent(const AttributeRule& rule, int value)
+{
+    // Mirrors fcn.0049090b: (base - value) * a / b with a/b swapping at the
+    // base, and C-style truncating division matching the original's idiv.
+    const int numerator = (value >= rule.base) ? rule.lowRate : rule.highRate;
+    const int denominator = (value >= rule.base) ? rule.highRate : rule.lowRate;
+    return -((rule.base - value) * numerator / denominator);
+}
+
+int attributeIncreaseStep(const AttributeRule& rule, int value)
+{
+    return (value >= rule.base) ? rule.highRate : rule.lowRate;
+}
+
+int attributeDecreaseStep(const AttributeRule& rule, int value)
+{
+    return (value > rule.base) ? rule.highRate : rule.lowRate;
+}
+
+int attributeIncreaseCost(const AttributeRule& rule, int value)
+{
+    return (value >= rule.base) ? rule.lowRate : rule.highRate;
+}
+
 } // namespace runeharbor::game

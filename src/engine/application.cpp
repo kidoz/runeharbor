@@ -159,27 +159,6 @@ const char* directionName(int direction)
     }
 }
 
-// Base stats per face group (indexed by faceId ranges)
-// MM7 has no character races; base stats are determined by face/portrait
-constexpr int kFaceBaseStats[4][7] = {
-    {11, 11, 11, 9, 11, 11, 9}, // Faces 0-7
-    {7, 14, 11, 7, 11, 14, 9},  // Faces 8-11
-    {14, 11, 11, 14, 7, 7, 9},  // Faces 12-15
-    {14, 7, 7, 11, 11, 14, 9},  // Faces 16-19
-};
-
-// Face group index from faceId
-int faceGroupFromId(int faceId)
-{
-    if (faceId < 8)
-        return 0;
-    if (faceId < 12)
-        return 1;
-    if (faceId < 16)
-        return 2;
-    return 3;
-}
-
 // Starting skills per base class (indexed by baseClassIndex)
 struct ClassSkills
 {
@@ -2839,10 +2818,10 @@ void Application::initDefaultParty()
 
 void Application::updateCharacterForFace(Character& ch)
 {
-    int groupIdx = faceGroupFromId(ch.faceId);
+    const int groupIdx = game::faceGroupFromFaceId(ch.faceId);
     for (int i = 0; i < 7; i++)
     {
-        ch.baseStats.byIndex(i) = kFaceBaseStats[groupIdx][i];
+        ch.baseStats.byIndex(i) = game::attributeRule(groupIdx, i).base;
     }
     ch.stats = ch.baseStats;
 }

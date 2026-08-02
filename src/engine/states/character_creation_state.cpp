@@ -53,44 +53,42 @@ int baseClassDisplayIndex(CharacterClass c)
 const std::vector<std::string> kStatNames = {"Might",    "Intellect", "Personality", "Endurance",
                                              "Accuracy", "Speed",     "Luck"};
 
-// Bonus-panel geometry, measured from the baked layout in makeme.pcx.
-// Value panel spans game-x ~541-613; the -/+ buttons are baked at ~524-540 and ~614-630.
+// Bonus-panel geometry. The -/+ hit rects are the original's button rects from
+// fcn.004968e2 (MM7-Rel.exe 0x497440 and 0x497469), which also register '-' and
+// '+' as hotkeys.
 constexpr int kBonusPanelCenterX = 577; // center of the value panel
-constexpr int kBonusMinusX = 524;       // left edge of the baked "-" box
-constexpr int kBonusPlusX = 614;        // left edge of the baked "+" box
-constexpr int kBonusButtonY = 402;      // top of the -/+ button row
-constexpr int kBonusButtonW = 16;       // baked button box width
-constexpr int kBonusButtonH = 22;       // baked button box height
+constexpr int kBonusMinusX = 523;
+constexpr int kBonusPlusX = 613;
+constexpr int kBonusButtonY = 393;
+constexpr int kBonusButtonW = 20;
+constexpr int kBonusButtonH = 35;
 // The value box spans game-y ~393-427 (Clear/OK start at 428). create.fnt is 18px
 // tall, so the label and count stack tight near the top to avoid the buttons.
 constexpr int kBonusLabelY = 393; // "Bonus" label row (below the panel top border)
 constexpr int kBonusValueY = 410; // remaining-points count row
 
-// Face group base stats
-constexpr int kFaceBaseStats[4][7] = {
-    {11, 11, 11, 9, 11, 11, 9}, // Faces 0-7 (Human)
-    {7, 14, 11, 7, 11, 14, 9},  // Faces 8-11 (Elf)
-    {14, 11, 11, 14, 7, 7, 9},  // Faces 12-15 (Dwarf)
-    {14, 7, 7, 11, 11, 14, 9},  // Faces 16-19 (Goblin)
-};
+// Per-character column hit rects (0x49701D-0x497091): x = 5/163/321/479 with a
+// 158px stride, y = 21, 153x365. Hotkeys '1'-'4' select the same columns.
+constexpr int kColumnX[] = {5, 163, 321, 479};
+constexpr int kColumnY = 21;
+constexpr int kColumnW = 153;
+constexpr int kColumnH = 365;
 
-constexpr int kFaceStatMax[4][7] = {
-    {25, 25, 25, 25, 25, 25, 25}, // Faces 0-7
-    {15, 30, 25, 15, 25, 30, 20}, // Faces 8-11
-    {30, 25, 25, 30, 15, 15, 20}, // Faces 12-15
-    {30, 15, 15, 25, 30, 25, 20}, // Faces 16-19
-};
+// Class selection grid (0x497217-0x49733A): three 65x17 cells per row, columns
+// at x = 323/388/453 and rows at y = 417/434/451.
+constexpr int kClassGridStartX = 323;
+constexpr int kClassGridY = 417;
+constexpr int kClassGridColW = 65;
+constexpr int kClassGridRows = 3;
+constexpr int kClassGridRowH = 17;
 
-int faceGroupFromId(int faceId)
-{
-    if (faceId < 8)
-        return 0;
-    if (faceId < 12)
-        return 1;
-    if (faceId < 16)
-        return 2;
-    return 3;
-}
+// OK / Clear (0x4973D5 and 0x497411), both 51x39 at y=431 with Enter and 'C'
+// as hotkeys.
+constexpr int kOkButtonX = 580;
+constexpr int kClearButtonX = 527;
+constexpr int kBottomButtonY = 431;
+constexpr int kBottomButtonW = 51;
+constexpr int kBottomButtonH = 39;
 
 std::string getLowerExtension(const std::string& filename)
 {
@@ -465,9 +463,9 @@ std::optional<GameStateId> CharacterCreationState::update()
 
     const auto changeFace = [this](Character& ch, int delta)
     {
-        const int oldGroup = faceGroupFromId(ch.faceId);
+        const int oldGroup = game::faceGroupFromFaceId(ch.faceId);
         ch.faceId = (ch.faceId + delta + kPortraitCount) % kPortraitCount;
-        const int newGroup = faceGroupFromId(ch.faceId);
+        const int newGroup = game::faceGroupFromFaceId(ch.faceId);
         if (oldGroup != newGroup)
         {
             updateCharacterForFace(ch);
@@ -483,18 +481,36 @@ std::optional<GameStateId> CharacterCreationState::update()
         rebuildAvailableSkills();
     };
 
+    // `delta` is a direction (+1 / -1), not an amount: the original moves the
+    // attribute by a race-dependent step and charges a race-dependent price.
     const auto adjustStat = [this](Character& ch, int statIdx, int delta)
     {
-        const int groupIdx = faceGroupFromId(ch.faceId);
-        const int minVal = ch.baseStats.byIndex(statIdx) - 2;
-        const int maxVal = kFaceStatMax[groupIdx][statIdx];
-        if (delta > 0 && calculateBonusPointsRemaining() <= 0)
-        {
-            return;
-        }
-
+        const game::AttributeRule& rule =
+            game::attributeRule(game::faceGroupFromFaceId(ch.faceId), statIdx);
         int& stat = ch.stats.byIndex(statIdx);
-        stat = std::clamp(stat + delta, minVal, maxVal);
+
+        if (delta > 0)
+        {
+            const int step = game::attributeIncreaseStep(rule, stat);
+            if (calculateBonusPointsRemaining() < game::attributeIncreaseCost(rule, stat))
+            {
+                return;
+            }
+            if (stat + step > rule.max)
+            {
+                return;
+            }
+            stat += step;
+        }
+        else if (delta < 0)
+        {
+            const int step = game::attributeDecreaseStep(rule, stat);
+            if (stat - step < rule.base - game::kMaxAttributePointsBelowBase)
+            {
+                return;
+            }
+            stat -= step;
+        }
     };
 
     // Select active character with 1-4
@@ -524,11 +540,9 @@ std::optional<GameStateId> CharacterCreationState::update()
         const auto inRect = [](int x, int y, int rx, int ry, int rw, int rh)
         { return x >= rx && x < rx + rw && y >= ry && y < ry + rh; };
 
-        constexpr int colX[] = {8, 166, 324, 482};
-        constexpr int colWidth = 153;
         for (int i = 0; i < 4; i++)
         {
-            if (inRect(gameX, gameY, colX[i], 30, colWidth, 360))
+            if (inRect(gameX, gameY, kColumnX[i], kColumnY, kColumnW, kColumnH))
             {
                 if (activeCharacterIndex != i)
                 {
@@ -542,10 +556,10 @@ std::optional<GameStateId> CharacterCreationState::update()
         }
 
         Character& ch = party[activeCharacterIndex];
-        const int panelX = colX[activeCharacterIndex];
+        const int panelX = kColumnX[activeCharacterIndex];
         bool handledPanelClick = false;
 
-        if (inRect(gameX, gameY, panelX, 120, colWidth, 22))
+        if (inRect(gameX, gameY, panelX, 120, kColumnW, 22))
         {
             menuRowIndex = 0;
             isNaming = true;
@@ -559,7 +573,7 @@ std::optional<GameStateId> CharacterCreationState::update()
             handledPanelClick = true;
         }
 
-        if (!handledPanelClick && inRect(gameX, gameY, panelX, 35, colWidth, 82))
+        if (!handledPanelClick && inRect(gameX, gameY, panelX, 35, kColumnW, 82))
         {
             menuRowIndex = 1;
             // Split prev/next on the drawn portrait center, not the panel center:
@@ -568,7 +582,7 @@ std::optional<GameStateId> CharacterCreationState::update()
             // center biases the split toward "previous".
             constexpr int portraitX[] = {17, 176, 335, 494};
             const int faceId = std::clamp(ch.faceId, 0, kPortraitCount - 1);
-            const int pw = portraitWidths[faceId] > 0 ? portraitWidths[faceId] : colWidth;
+            const int pw = portraitWidths[faceId] > 0 ? portraitWidths[faceId] : kColumnW;
             const int portraitCenterX = portraitX[activeCharacterIndex] + pw / 2;
             if (gameX < portraitCenterX - 20)
             {
@@ -586,7 +600,7 @@ std::optional<GameStateId> CharacterCreationState::update()
         for (int s = 0; s < 7; s++)
         {
             const int statY = statsStartY + s * statSpacing;
-            if (!inRect(gameX, gameY, panelX, statY - 2, colWidth, statSpacing))
+            if (!inRect(gameX, gameY, panelX, statY - 2, kColumnW, statSpacing))
             {
                 continue;
             }
@@ -597,18 +611,13 @@ std::optional<GameStateId> CharacterCreationState::update()
 
         // Class selector: original bottom 3x3 class grid.
         {
-            constexpr int classGridStartX = 329;
-            constexpr int classGridY = 417;
-            constexpr int classGridColW = 57;
-            constexpr int classGridRows = 3;
-            constexpr int classGridRowH = 17;
             for (int i = 0; i < kBaseClassCount; i++)
             {
                 const int col = i % 3;
-                const int row = i / classGridRows;
-                const int bx = classGridStartX + col * classGridColW;
-                const int by = classGridY + row * classGridRowH;
-                if (inRect(gameX, gameY, bx, by, classGridColW - 2, classGridRowH))
+                const int row = i / kClassGridRows;
+                const int bx = kClassGridStartX + col * kClassGridColW;
+                const int by = kClassGridY + row * kClassGridRowH;
+                if (inRect(gameX, gameY, bx, by, kClassGridColW - 2, kClassGridRowH))
                 {
                     const int displayIdx = kClassGridDisplayIndices[i];
                     if (ch.charClass != kBaseClasses[displayIdx])
@@ -682,9 +691,7 @@ std::optional<GameStateId> CharacterCreationState::update()
         }
 
         // OK button
-        const int okW = okButton.w > 0 ? okButton.w : 52;
-        const int okH = okButton.h > 0 ? okButton.h : 34;
-        if (inRect(gameX, gameY, 580, 431, okW, okH))
+        if (inRect(gameX, gameY, kOkButtonX, kBottomButtonY, kBottomButtonW, kBottomButtonH))
         {
             // Finalize each member on the Application-side party vector. The
             // CharacterCreation->Loading transition also calls
@@ -764,9 +771,8 @@ std::optional<GameStateId> CharacterCreationState::update()
         // stat changes are reverted to base and any extra skills chosen beyond
         // the two starting ones are dropped. The two starting skills stay (they
         // are determined by class, not by player choice).
-        const int clearW = clearButton.w > 0 ? clearButton.w : 52;
-        const int clearH = clearButton.h > 0 ? clearButton.h : 34;
-        if (inRect(gameX, gameY, 527, 431, clearW, clearH))
+
+        if (inRect(gameX, gameY, kClearButtonX, kBottomButtonY, kBottomButtonW, kBottomButtonH))
         {
             ch.stats = ch.baseStats;
             if (ch.skills.size() > 2)
@@ -839,6 +845,22 @@ std::optional<GameStateId> CharacterCreationState::update()
         else if (menuRowIndex >= 3 && menuRowIndex <= 9) // STATS
         {
             adjustStat(activeChar, menuRowIndex - 3, hDelta);
+        }
+    }
+
+    // '-' and '+' are registered as hotkeys on the bonus buttons themselves
+    // (MM7-Rel.exe 0x497440 / 0x497469), so they adjust the selected stat row
+    // regardless of the arrow-key focus.
+    if (menuRowIndex >= 3 && menuRowIndex <= 9)
+    {
+        const int statIdx = menuRowIndex - 3;
+        if (ctx.isKeyPressed(SDL_SCANCODE_MINUS) || ctx.isKeyPressed(SDL_SCANCODE_KP_MINUS))
+        {
+            adjustStat(activeChar, statIdx, -1);
+        }
+        if (ctx.isKeyPressed(SDL_SCANCODE_EQUALS) || ctx.isKeyPressed(SDL_SCANCODE_KP_PLUS))
+        {
+            adjustStat(activeChar, statIdx, 1);
         }
     }
 
@@ -950,8 +972,6 @@ void CharacterCreationState::render()
 
     // Layout constants from Ghidra reverse-engineering of original MM7-Rel.exe
     // FUN_004968e2 (setup) and FUN_00495b4f (render) — 640x480 base resolution
-    constexpr int colX[] = {8, 166, 324, 482}; // stride 158 (0x9E)
-    constexpr int colWidth = 153;              // 0x99
 
     constexpr int portraitY = 35;    // 0x23 from Ghidra
     constexpr int nameY = 124;       // 0x7C from Ghidra
@@ -974,8 +994,8 @@ void CharacterCreationState::render()
     {
         const Character& ch = party[c];
         bool isActive = (c == activeCharacterIndex);
-        int panelX = colX[c];
-        int panelCenterX = panelX + colWidth / 2;
+        int panelX = kColumnX[c];
+        int panelCenterX = panelX + kColumnW / 2;
 
         // 2. Portrait — use Ghidra exact X positions: 17, 176, 335, 494 (stride 159)
         constexpr int portraitX[] = {17, 176, 335, 494}; // 0x11, 0xB0, 0x14F, 0x1EE
@@ -1003,7 +1023,7 @@ void CharacterCreationState::render()
 
         // Race label in the portrait header area, matching the original's race/class pairing.
         {
-            std::string_view raceStr = kFaceGroupNames[faceGroupFromId(ch.faceId)];
+            std::string_view raceStr = kFaceGroupNames[game::faceGroupFromFaceId(ch.faceId)];
             drawText(nameClassX[c] + 70, 35, raceStr, labelFont, 255, 255, 235);
         }
 
@@ -1023,11 +1043,11 @@ void CharacterCreationState::render()
             }
             if (rightArrow.tex)
             {
-                drawOverlay(rightArrow, panelX + colWidth - rightArrow.w - 2, faceArrowY);
+                drawOverlay(rightArrow, panelX + kColumnW - rightArrow.w - 2, faceArrowY);
             }
             else if (ctx.debugText)
             {
-                ctx.debugText->drawText(sdlRenderer, ctx.scaleX(panelX + colWidth - 12),
+                ctx.debugText->drawText(sdlRenderer, ctx.scaleX(panelX + kColumnW - 12),
                                         ctx.scaleY(faceArrowY), textScale, 255, 255, 0, ">");
             }
         }
@@ -1092,7 +1112,7 @@ void CharacterCreationState::render()
             // Stat value right-aligned with consistent margin
             std::string valStr = std::to_string(ch.stats.byIndex(s));
             int valW = measureGameText(valStr, numFont);
-            int valX = panelX + colWidth - valW - 10;
+            int valX = panelX + kColumnW - valW - 10;
             drawText(valX, statY, valStr, numFont, sr, sg, sb);
 
             // The selected stat is bracketed by inward-pointing gold arrows.
@@ -1110,7 +1130,7 @@ void CharacterCreationState::render()
                 {
                     auto* arrow = static_cast<SDL_Texture*>(leftArrow.tex);
                     SDL_SetTextureColorMod(arrow, 232, 176, 72);
-                    drawOverlay(leftArrow, panelX + colWidth - leftArrow.w - 2, statY + 2);
+                    drawOverlay(leftArrow, panelX + kColumnW - leftArrow.w - 2, statY + 2);
                     SDL_SetTextureColorMod(arrow, 255, 255, 255);
                 }
             }
@@ -1243,11 +1263,6 @@ void CharacterCreationState::render()
 
     // 11. Original bottom class grid.
     {
-        constexpr int classGridStartX = 329;
-        constexpr int classGridY = 417;
-        constexpr int classGridColW = 57;
-        constexpr int classGridRows = 3;
-        constexpr int classGridRowH = 17;
         auto* classGridFont = numFont;
         const Character& activeChar = party[activeCharacterIndex];
 
@@ -1255,9 +1270,9 @@ void CharacterCreationState::render()
         {
             const int displayIdx = kClassGridDisplayIndices[i];
             const int col = i % 3;
-            const int row = i / classGridRows;
-            const int bx = classGridStartX + col * classGridColW;
-            const int by = classGridY + row * classGridRowH;
+            const int row = i / kClassGridRows;
+            const int bx = kClassGridStartX + col * kClassGridColW;
+            const int by = kClassGridY + row * kClassGridRowH;
             const bool selected = activeChar.charClass == kBaseClasses[displayIdx];
             const uint8_t cr = selected ? 0 : 255;
             const uint8_t cg = selected ? 220 : 255;
@@ -1266,10 +1281,10 @@ void CharacterCreationState::render()
         }
     }
 
-    // 12. Bottom controls: OK + Clear buttons (from Ghidra: OK at 580,431; Clear at 527,431)
+    // 12. Bottom controls: OK + Clear (MM7-Rel.exe 0x4973D5 / 0x497411)
     if (okButton.tex)
     {
-        drawOverlay(okButton, 580, 431);
+        drawOverlay(okButton, kOkButtonX, kBottomButtonY);
     }
     else
     {
@@ -1278,7 +1293,7 @@ void CharacterCreationState::render()
 
     if (clearButton.tex)
     {
-        drawOverlay(clearButton, 527, 431);
+        drawOverlay(clearButton, kClearButtonX, kBottomButtonY);
     }
     else
     {
@@ -1293,20 +1308,22 @@ int CharacterCreationState::calculateBonusPointsRemaining() const
     int totalSpent = 0;
     for (const auto& ch : *ctx.shared->party)
     {
+        const int group = game::faceGroupFromFaceId(ch.faceId);
         for (int i = 0; i < 7; i++)
         {
-            totalSpent += ch.stats.byIndex(i) - ch.baseStats.byIndex(i);
+            totalSpent +=
+                game::attributePointsSpent(game::attributeRule(group, i), ch.stats.byIndex(i));
         }
     }
-    return 50 - totalSpent;
+    return game::kCreationBonusPoints - totalSpent;
 }
 
 void CharacterCreationState::updateCharacterForFace(Character& ch)
 {
-    int groupIdx = faceGroupFromId(ch.faceId);
+    int groupIdx = game::faceGroupFromFaceId(ch.faceId);
     for (int i = 0; i < 7; i++)
     {
-        ch.baseStats.byIndex(i) = kFaceBaseStats[groupIdx][i];
+        ch.baseStats.byIndex(i) = game::attributeRule(groupIdx, i).base;
     }
     ch.stats = ch.baseStats;
 

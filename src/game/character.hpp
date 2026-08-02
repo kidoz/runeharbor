@@ -364,6 +364,51 @@ struct Character
     void rest(int hours);
 };
 
+// Character-creation attribute rules, transcribed from the original's table at
+// MM7-Rel.exe 0x4ED658 (four bytes per race/attribute pair).
+//
+// `lowRate`/`highRate` encode the asymmetric buy/sell rates the original
+// applies (fcn.004905ed for "+", fcn.00490485 for "-", fcn.0049090b for the
+// running point total). Above the racial base an attribute moves in steps of
+// `highRate` and is charged `lowRate` points; at or below the base the two
+// swap. Humans use 1/1 everywhere, so every point buys exactly one. A race's
+// favoured attributes (rate pair 1/2) gain +2 per point spent, and its weak
+// ones (2/1) cost 2 points per +1.
+struct AttributeRule
+{
+    int base = 11;
+    int max = 25;
+    int lowRate = 1;  // original byte [2]
+    int highRate = 1; // original byte [3]
+};
+
+// Bonus points shared by the whole party, not per character (fcn.0049090b
+// seeds its running total with 50 and then walks all four members).
+inline constexpr int kCreationBonusPoints = 50;
+
+// How far below the racial base an attribute may be pushed (fcn.00490485:
+// `lea esi, [ecx - 2]`).
+inline constexpr int kMaxAttributePointsBelowBase = 2;
+
+// Portrait index -> race group. The original derives a race id in fcn.00490101
+// (faces 0-7 -> 0, 8-11 -> 1, 12-15 -> 3, 16-19 -> 2); the group returned here
+// is ordered by face range instead, so 2 is the faces-12-15 group.
+int faceGroupFromFaceId(int faceId);
+
+/// Attribute rule for a face group (0-3) and MM7 stat index (0-6).
+const AttributeRule& attributeRule(int faceGroup, int statIndex);
+
+/// Points consumed by holding `value` in an attribute governed by `rule`.
+/// Negative values mean the attribute is below its base and refunds points.
+int attributePointsSpent(const AttributeRule& rule, int value);
+
+/// Amount one press of "+" / "-" moves the attribute by.
+int attributeIncreaseStep(const AttributeRule& rule, int value);
+int attributeDecreaseStep(const AttributeRule& rule, int value);
+
+/// Points charged for one press of "+".
+int attributeIncreaseCost(const AttributeRule& rule, int value);
+
 std::optional<SkillId> skillIdFromName(std::string_view name);
 void learnSkill(Character& character, SkillId skillId, int level = 1,
                 SkillMastery mastery = SkillMastery::Normal);
