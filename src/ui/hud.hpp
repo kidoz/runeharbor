@@ -80,6 +80,9 @@ class HUD
         int w = 0, h = 0;
     };
     std::unordered_map<std::string, CachedPortrait> portraitCache_;
+    // True once the shipped ib-b-A panel has been drawn this frame, so the
+    // placeholder backdrop can stay out of its way.
+    bool bottomPanelDrawn_ = false;
     // Wraps textureLookup_ with the cache. Returns the cached texture (or null).
     void* lookupCached(const std::string& name, int& w, int& h);
 };

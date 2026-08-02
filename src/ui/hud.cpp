@@ -19,19 +19,23 @@ namespace runeharbor::ui
 namespace
 {
 // The 3D view occupies the inclusive rect (8,8)-(468,351) (mm7.ini vx1/vy1/
-// vx2/vy2 defaults, MM7-Rel.exe 0x4660C7-0x466103), so the frame panels tile
-// around it: top strip 8px, left strip 8px, right panel from x=469 and bottom
-// panel from y=352.
+// vx2/vy2 defaults, MM7-Rel.exe 0x4660C7-0x466103). The frame panels tile
+// around it, and their rects are fixed by the native size of the shipped art
+// rather than derived: ib-t-A is 468x8, ib-l-A is 8x344, ib-r-A is 172x480 and
+// ib-b-A is 468x128. Note the right panel therefore starts at 468, painting
+// over the view's inclusive right-edge column — a quirk of the original.
 constexpr int kViewLeft = 8;
 constexpr int kViewTop = 8;
-constexpr int kViewRight = 468;  // inclusive
 constexpr int kViewBottom = 351; // inclusive
-constexpr int kRightPanelX = kViewRight + 1;
-constexpr int kRightPanelW = 640 - kRightPanelX;
+constexpr int kSidePanelH = 344; // ib-l-A height
+constexpr int kRightPanelX = 468;
+constexpr int kRightPanelW = 172;
+constexpr int kTopPanelW = 468;
 
-// Party bar at the bottom of the screen.
-constexpr int kPartyBarY = kViewBottom + 1;
-constexpr int kPartyBarH = 480 - kPartyBarY;
+// Party bar at the bottom of the screen (ib-b-A).
+constexpr int kPartyBarY = 352;
+constexpr int kPartyBarW = 468;
+constexpr int kPartyBarH = 128;
 
 // Portrait art. X array at 0x4ED5F0, drawn at y=385 at the face texture's
 // native 63x73 (fcn.004921b9).
@@ -244,21 +248,22 @@ void HUD::render(graphics::IRenderer& renderer, const graphics::DebugText& debug
 
         // Bottom panel
         void* tex_b = lookupCached("ib-b-A", w, h);
+        bottomPanelDrawn_ = tex_b != nullptr;
         if (tex_b)
             renderer.renderTexture(tex_b, sx(0, scale, offsetX), sy(kPartyBarY, scale, offsetY),
-                                   sw(kRightPanelX, scale), sh(kPartyBarH, scale));
+                                   sw(kPartyBarW, scale), sh(kPartyBarH, scale));
 
         // Top border
         void* tex_t = lookupCached("ib-t-A", w, h);
         if (tex_t)
             renderer.renderTexture(tex_t, sx(0, scale, offsetX), sy(0, scale, offsetY),
-                                   sw(kRightPanelX, scale), sh(kViewTop, scale));
+                                   sw(kTopPanelW, scale), sh(kViewTop, scale));
 
         // Left border
         void* tex_l = lookupCached("ib-l-A", w, h);
         if (tex_l)
             renderer.renderTexture(tex_l, sx(0, scale, offsetX), sy(kViewTop, scale, offsetY),
-                                   sw(kViewLeft, scale), sh(kViewBottom - kViewTop + 1, scale));
+                                   sw(kViewLeft, scale), sh(kSidePanelH, scale));
     }
 
     renderPartyBar(renderer, debugText, scale, offsetX, offsetY);
@@ -272,9 +277,13 @@ void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugTex
 {
     const auto& party = gameWorld_->party();
 
-    // Background panel
-    renderer.drawFilledRect(sx(0, scale, offsetX), sy(kPartyBarY, scale, offsetY), sw(640, scale),
-                            sh(kPartyBarH, scale), 10, 10, 15, 200);
+    // Placeholder backdrop, only when the real ib-b-A panel art is unavailable —
+    // painting it unconditionally hid the shipped panel underneath.
+    if (!bottomPanelDrawn_)
+    {
+        renderer.drawFilledRect(sx(0, scale, offsetX), sy(kPartyBarY, scale, offsetY),
+                                sw(640, scale), sh(kPartyBarH, scale), 10, 10, 15, 200);
+    }
 
     for (int i = 0; i < game::kPartySize; i++)
     {
