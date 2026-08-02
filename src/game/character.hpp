@@ -409,6 +409,27 @@ int attributeDecreaseStep(const AttributeRule& rule, int value);
 /// Points charged for one press of "+".
 int attributeIncreaseCost(const AttributeRule& rule, int value);
 
+// Class skill data, transcribed from the original's [9 base classes][37 skills]
+// table at MM7-Rel.exe 0x4ED6C8. Player::SetClass (fcn.00490242) clears all 37
+// skill slots and then learns every skill whose entry is 2; entries of 1 are the
+// further skills the class is allowed to pick up, and 0 means never.
+inline constexpr int kBaseClassCount = 9;
+inline constexpr size_t kClassStartingSkillCount = 2;
+inline constexpr size_t kClassAvailableSkillCount = 9;
+
+/// The two skills a base class (0-8, ordered Knight, Thief, Monk, Paladin,
+/// Archer, Ranger, Cleric, Druid, Sorcerer) begins with.
+const std::array<SkillId, kClassStartingSkillCount>& classStartingSkills(int baseClassIndex);
+
+/// The nine further skills a base class may choose during creation. The count
+/// is exactly nine for every class, which is what fills the 3x3 selection grid.
+const std::array<SkillId, kClassAvailableSkillCount>& classAvailableSkills(int baseClassIndex);
+
+/// Canonical display name for a skill. Magic schools use the full
+/// "<School> Magic" form and BodyBuilding its full name so that every entry is
+/// unique and round-trips through skillIdFromName.
+std::string_view skillDisplayName(SkillId id);
+
 std::optional<SkillId> skillIdFromName(std::string_view name);
 void learnSkill(Character& character, SkillId skillId, int level = 1,
                 SkillMastery mastery = SkillMastery::Normal);

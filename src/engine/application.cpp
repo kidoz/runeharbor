@@ -160,23 +160,6 @@ const char* directionName(int direction)
 }
 
 // Starting skills per base class (indexed by baseClassIndex)
-struct ClassSkills
-{
-    const char* skill1;
-    const char* skill2;
-};
-
-constexpr ClassSkills kClassStartingSkills[] = {
-    {"Sword", "Leather Armor"}, // Knight (base 0)
-    {"Dagger", "Stealing"},     // Thief (base 1)
-    {"Dodging", "Unarmed"},     // Monk (base 2)
-    {"Mace", "Spirit Magic"},   // Paladin (base 3)
-    {"Bow", "Air Magic"},       // Archer (base 4)
-    {"Axe", "Perception"},      // Ranger (base 5)
-    {"Mace", "Body Magic"},     // Cleric (base 6)
-    {"Dagger", "Earth Magic"},  // Druid (base 7)
-    {"Staff", "Fire Magic"},    // Sorcerer (base 8)
-};
 
 void groundPartyToOutdoorTerrain(game::Party& party, const MapScene* scene,
                                  util::ILogger* /*logger*/ = nullptr, const char* tag = "ground")
@@ -2828,10 +2811,12 @@ void Application::updateCharacterForFace(Character& ch)
 
 void Application::updateSkillsForClass(Character& ch)
 {
-    int classIdx = baseClassIndex(ch.charClass);
+    const int classIdx = baseClassIndex(ch.charClass);
     ch.skills.clear();
-    ch.skills.push_back(kClassStartingSkills[classIdx].skill1);
-    ch.skills.push_back(kClassStartingSkills[classIdx].skill2);
+    for (const game::SkillId skill : game::classStartingSkills(classIdx))
+    {
+        ch.skills.emplace_back(game::skillDisplayName(skill));
+    }
     game::syncSkillLevelsFromDisplaySkills(ch);
 }
 

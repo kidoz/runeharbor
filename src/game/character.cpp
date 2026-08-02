@@ -2,6 +2,7 @@
 #include "character.hpp"
 
 #include <algorithm>
+#include <array>
 #include <string>
 #include <string_view>
 
@@ -458,6 +459,115 @@ int attributeDecreaseStep(const AttributeRule& rule, int value)
 int attributeIncreaseCost(const AttributeRule& rule, int value)
 {
     return (value >= rule.base) ? rule.lowRate : rule.highRate;
+}
+
+namespace
+{
+// [base class][skill] entries of 2 from MM7-Rel.exe 0x4ED6C8.
+constexpr std::array<SkillId, kClassStartingSkillCount> kClassStartingSkills[kBaseClassCount] = {
+    {SkillId::Sword, SkillId::Leather},   // Knight
+    {SkillId::Dagger, SkillId::Stealing}, // Thief
+    {SkillId::Dodging, SkillId::Unarmed}, // Monk
+    {SkillId::Mace, SkillId::Spirit},     // Paladin
+    {SkillId::Bow, SkillId::Air},         // Archer
+    {SkillId::Axe, SkillId::Perception},  // Ranger
+    {SkillId::Mace, SkillId::Body},       // Cleric
+    {SkillId::Dagger, SkillId::Earth},    // Druid
+    {SkillId::Staff, SkillId::Fire},      // Sorcerer
+};
+
+// [base class][skill] entries of 1 from the same table, in skill-index order.
+constexpr std::array<SkillId, kClassAvailableSkillCount> kClassAvailableSkills[kBaseClassCount] = {
+    // Knight
+    {SkillId::Axe, SkillId::Spear, SkillId::Bow, SkillId::Mace, SkillId::Shield, SkillId::Chain,
+     SkillId::BodyBuilding, SkillId::Perception, SkillId::Armsmaster},
+    // Thief
+    {SkillId::Sword, SkillId::Bow, SkillId::Leather, SkillId::ItemId, SkillId::Merchant,
+     SkillId::Perception, SkillId::DisarmTrap, SkillId::Dodging, SkillId::Alchemy},
+    // Monk
+    {SkillId::Staff, SkillId::Sword, SkillId::Dagger, SkillId::Spear, SkillId::Leather,
+     SkillId::BodyBuilding, SkillId::Perception, SkillId::MonsterLore, SkillId::Armsmaster},
+    // Paladin
+    {SkillId::Sword, SkillId::Dagger, SkillId::Axe, SkillId::Shield, SkillId::Leather,
+     SkillId::Merchant, SkillId::Repair, SkillId::BodyBuilding, SkillId::Armsmaster},
+    // Archer
+    {SkillId::Sword, SkillId::Axe, SkillId::Spear, SkillId::Leather, SkillId::Fire, SkillId::Water,
+     SkillId::Perception, SkillId::Armsmaster, SkillId::Learning},
+    // Ranger
+    {SkillId::Sword, SkillId::Dagger, SkillId::Bow, SkillId::Leather, SkillId::BodyBuilding,
+     SkillId::DisarmTrap, SkillId::Dodging, SkillId::MonsterLore, SkillId::Armsmaster},
+    // Cleric
+    {SkillId::Shield, SkillId::Leather, SkillId::Spirit, SkillId::Mind, SkillId::Merchant,
+     SkillId::Repair, SkillId::Meditation, SkillId::Alchemy, SkillId::Learning},
+    // Druid
+    {SkillId::Mace, SkillId::Leather, SkillId::Water, SkillId::Spirit, SkillId::Body,
+     SkillId::Meditation, SkillId::Perception, SkillId::Alchemy, SkillId::Learning},
+    // Sorcerer
+    {SkillId::Dagger, SkillId::Leather, SkillId::Air, SkillId::Water, SkillId::Earth,
+     SkillId::ItemId, SkillId::Merchant, SkillId::MonsterLore, SkillId::Alchemy},
+};
+
+// clang-format off
+constexpr std::array<std::string_view, static_cast<size_t>(SkillId::Count)> kSkillDisplayNames = {
+    "Staff",         // Staff
+    "Sword",         // Sword
+    "Dagger",        // Dagger
+    "Axe",           // Axe
+    "Spear",         // Spear
+    "Bow",           // Bow
+    "Mace",          // Mace
+    "Blaster",       // Blaster
+    "Shield",        // Shield
+    "Leather",       // Leather
+    "Chain",         // Chain
+    "Plate",         // Plate
+    "Fire Magic",    // Fire
+    "Air Magic",     // Air
+    "Water Magic",   // Water
+    "Earth Magic",   // Earth
+    "Spirit Magic",  // Spirit
+    "Mind Magic",    // Mind
+    "Body Magic",    // Body
+    "Light Magic",   // Light
+    "Dark Magic",    // Dark
+    "Identify Item", // ItemId
+    "Merchant",      // Merchant
+    "Repair",        // Repair
+    "Bodybuilding",  // BodyBuilding
+    "Meditation",    // Meditation
+    "Perception",    // Perception
+    "Diplomacy",     // Diplomacy
+    "Thievery",      // Thievery
+    "Disarm Trap",   // DisarmTrap
+    "Dodging",       // Dodging
+    "Unarmed",       // Unarmed
+    "Monster Lore",  // MonsterLore
+    "Armsmaster",    // Armsmaster
+    "Stealing",      // Stealing
+    "Alchemy",       // Alchemy
+    "Learning",      // Learning
+};
+// clang-format on
+} // namespace
+
+const std::array<SkillId, kClassStartingSkillCount>& classStartingSkills(int baseClassIndex)
+{
+    return kClassStartingSkills[std::clamp(baseClassIndex, 0, kBaseClassCount - 1)];
+}
+
+const std::array<SkillId, kClassAvailableSkillCount>& classAvailableSkills(int baseClassIndex)
+{
+    return kClassAvailableSkills[std::clamp(baseClassIndex, 0, kBaseClassCount - 1)];
+}
+
+std::string_view skillDisplayName(SkillId id)
+{
+    const auto index = static_cast<size_t>(id);
+    if (index >= kSkillDisplayNames.size())
+    {
+        return {};
+    }
+    return kSkillDisplayNames[index];
 }
 
 } // namespace runeharbor::game

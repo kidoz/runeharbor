@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: MIT
+#include <algorithm>
+#include <string_view>
+#include <utility>
+#include <vector>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include "../../src/game/character.hpp"
@@ -480,4 +485,109 @@ TEST_CASE("A default party spends none of its 50 creation points", "[game][chara
     }
     CHECK(spent == 0);
     CHECK(kCreationBonusPoints - spent == 50);
+}
+
+TEST_CASE("Class starting skills match MM7-Rel.exe 0x4ED6C8", "[game][character][creation]")
+{
+    // Entries of 2 in the original's [9][37] class skill table; Player::SetClass
+    // (fcn.00490242) learns exactly these at level 1.
+    using P = std::pair<SkillId, SkillId>;
+    const P expected[] = {
+        {SkillId::Sword, SkillId::Leather},   // Knight
+        {SkillId::Dagger, SkillId::Stealing}, // Thief
+        {SkillId::Dodging, SkillId::Unarmed}, // Monk
+        {SkillId::Mace, SkillId::Spirit},     // Paladin
+        {SkillId::Bow, SkillId::Air},         // Archer
+        {SkillId::Axe, SkillId::Perception},  // Ranger
+        {SkillId::Mace, SkillId::Body},       // Cleric
+        {SkillId::Dagger, SkillId::Earth},    // Druid
+        {SkillId::Staff, SkillId::Fire},      // Sorcerer
+    };
+
+    for (int i = 0; i < kBaseClassCount; i++)
+    {
+        const auto& actual = classStartingSkills(i);
+        CHECK(actual[0] == expected[i].first);
+        CHECK(actual[1] == expected[i].second);
+    }
+}
+
+TEST_CASE("Every class offers exactly nine further skills", "[game][character][creation]")
+{
+    // The original marks nine entries with 1 per class, which is what fills the
+    // 3x3 selection grid on the creation screen.
+    for (int i = 0; i < kBaseClassCount; i++)
+    {
+        CHECK(classAvailableSkills(i).size() == 9);
+    }
+}
+
+TEST_CASE("Class available skills match MM7-Rel.exe 0x4ED6C8", "[game][character][creation]")
+{
+    const std::vector<std::vector<SkillId>> expected = {
+        // Knight
+        {SkillId::Axe, SkillId::Spear, SkillId::Bow, SkillId::Mace, SkillId::Shield, SkillId::Chain,
+         SkillId::BodyBuilding, SkillId::Perception, SkillId::Armsmaster},
+        // Thief
+        {SkillId::Sword, SkillId::Bow, SkillId::Leather, SkillId::ItemId, SkillId::Merchant,
+         SkillId::Perception, SkillId::DisarmTrap, SkillId::Dodging, SkillId::Alchemy},
+        // Monk
+        {SkillId::Staff, SkillId::Sword, SkillId::Dagger, SkillId::Spear, SkillId::Leather,
+         SkillId::BodyBuilding, SkillId::Perception, SkillId::MonsterLore, SkillId::Armsmaster},
+        // Paladin
+        {SkillId::Sword, SkillId::Dagger, SkillId::Axe, SkillId::Shield, SkillId::Leather,
+         SkillId::Merchant, SkillId::Repair, SkillId::BodyBuilding, SkillId::Armsmaster},
+        // Archer
+        {SkillId::Sword, SkillId::Axe, SkillId::Spear, SkillId::Leather, SkillId::Fire,
+         SkillId::Water, SkillId::Perception, SkillId::Armsmaster, SkillId::Learning},
+        // Ranger
+        {SkillId::Sword, SkillId::Dagger, SkillId::Bow, SkillId::Leather, SkillId::BodyBuilding,
+         SkillId::DisarmTrap, SkillId::Dodging, SkillId::MonsterLore, SkillId::Armsmaster},
+        // Cleric
+        {SkillId::Shield, SkillId::Leather, SkillId::Spirit, SkillId::Mind, SkillId::Merchant,
+         SkillId::Repair, SkillId::Meditation, SkillId::Alchemy, SkillId::Learning},
+        // Druid
+        {SkillId::Mace, SkillId::Leather, SkillId::Water, SkillId::Spirit, SkillId::Body,
+         SkillId::Meditation, SkillId::Perception, SkillId::Alchemy, SkillId::Learning},
+        // Sorcerer
+        {SkillId::Dagger, SkillId::Leather, SkillId::Air, SkillId::Water, SkillId::Earth,
+         SkillId::ItemId, SkillId::Merchant, SkillId::MonsterLore, SkillId::Alchemy},
+    };
+
+    for (int i = 0; i < kBaseClassCount; i++)
+    {
+        const auto& actual = classAvailableSkills(i);
+        for (size_t j = 0; j < expected[static_cast<size_t>(i)].size(); j++)
+        {
+            CHECK(actual[j] == expected[static_cast<size_t>(i)][j]);
+        }
+    }
+}
+
+TEST_CASE("A class never offers a skill it already starts with", "[game][character][creation]")
+{
+    for (int i = 0; i < kBaseClassCount; i++)
+    {
+        const auto& start = classStartingSkills(i);
+        const auto& avail = classAvailableSkills(i);
+        for (const SkillId s : start)
+        {
+            CHECK(std::find(avail.begin(), avail.end(), s) == avail.end());
+        }
+    }
+}
+
+TEST_CASE("Skill display names round-trip through skillIdFromName", "[game][character]")
+{
+    // The starting-equipment mapping keys off SkillId, but the creation UI
+    // stores display names, so the two must agree for every skill.
+    for (int i = 0; i < static_cast<int>(SkillId::Count); i++)
+    {
+        const auto id = static_cast<SkillId>(i);
+        const std::string_view name = skillDisplayName(id);
+        REQUIRE_FALSE(name.empty());
+        const auto resolved = skillIdFromName(name);
+        REQUIRE(resolved.has_value());
+        CHECK(*resolved == id);
+    }
 }
