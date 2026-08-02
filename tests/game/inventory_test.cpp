@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: MIT
+#include <algorithm>
+#include <vector>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include "../../src/game/inventory.hpp"
@@ -517,4 +520,112 @@ TEST_CASE("Equip skill gate: skipped (allowed) when no party is wired", "[game][
     inv.loadItemData({makeSkilledSword()});
     // No setParty() call.
     REQUIRE(inv.canEquip(0, 10));
+}
+
+TEST_CASE("Starting item map matches the original's skill dispatch", "[game][inventory]")
+{
+    // Transcribed from MM7-Rel.exe fcn.004974ae (0x497735-0x49785F) and its
+    // skill-index-to-case table at 0x497935.
+    SECTION("weapon and armor skills")
+    {
+        CHECK(startingItemForSkill(SkillId::Staff) == 61);
+        CHECK(startingItemForSkill(SkillId::Sword) == 1);
+        CHECK(startingItemForSkill(SkillId::Dagger) == 15);
+        CHECK(startingItemForSkill(SkillId::Axe) == 23);
+        CHECK(startingItemForSkill(SkillId::Spear) == 31);
+        CHECK(startingItemForSkill(SkillId::Bow) == 47);
+        CHECK(startingItemForSkill(SkillId::Mace) == 50);
+        CHECK(startingItemForSkill(SkillId::Shield) == 84);
+        CHECK(startingItemForSkill(SkillId::Leather) == 66);
+        CHECK(startingItemForSkill(SkillId::Chain) == 71);
+        CHECK(startingItemForSkill(SkillId::Plate) == 76);
+    }
+
+    SECTION("magic schools grant their spellbook, 11 ids apart")
+    {
+        CHECK(startingItemForSkill(SkillId::Fire) == 401);
+        CHECK(startingItemForSkill(SkillId::Air) == 412);
+        CHECK(startingItemForSkill(SkillId::Water) == 423);
+        CHECK(startingItemForSkill(SkillId::Earth) == 434);
+        CHECK(startingItemForSkill(SkillId::Spirit) == 445);
+        CHECK(startingItemForSkill(SkillId::Mind) == 456);
+        CHECK(startingItemForSkill(SkillId::Body) == 467);
+    }
+
+    SECTION("misc skills sharing the original's single 220 case")
+    {
+        CHECK(startingItemForSkill(SkillId::ItemId) == 220);
+        CHECK(startingItemForSkill(SkillId::Repair) == 220);
+        CHECK(startingItemForSkill(SkillId::Meditation) == 220);
+        CHECK(startingItemForSkill(SkillId::Perception) == 220);
+        CHECK(startingItemForSkill(SkillId::DisarmTrap) == 220);
+        CHECK(startingItemForSkill(SkillId::Learning) == 220);
+        CHECK(startingItemForSkill(SkillId::Dodging) == 115);
+        CHECK(startingItemForSkill(SkillId::Unarmed) == 110);
+    }
+
+    SECTION("skills the original's default case leaves empty-handed")
+    {
+        CHECK(startingItemForSkill(SkillId::Blaster) == 0);
+        CHECK(startingItemForSkill(SkillId::Light) == 0);
+        CHECK(startingItemForSkill(SkillId::Dark) == 0);
+        CHECK(startingItemForSkill(SkillId::Merchant) == 0);
+        CHECK(startingItemForSkill(SkillId::BodyBuilding) == 0);
+        CHECK(startingItemForSkill(SkillId::Diplomacy) == 0);
+        CHECK(startingItemForSkill(SkillId::Thievery) == 0);
+        CHECK(startingItemForSkill(SkillId::MonsterLore) == 0);
+        CHECK(startingItemForSkill(SkillId::Armsmaster) == 0);
+        CHECK(startingItemForSkill(SkillId::Stealing) == 0);
+        CHECK(startingItemForSkill(SkillId::Alchemy) == 0);
+    }
+}
+
+TEST_CASE("grantStartingEquipment fills the backpack from learned skills", "[game][inventory]")
+{
+    NullLogger logger;
+    Inventory inv(logger);
+
+    Character ch;
+    learnSkill(ch, SkillId::Sword);
+    learnSkill(ch, SkillId::Leather);
+    learnSkill(ch, SkillId::Armsmaster); // grants nothing in the original
+
+    grantStartingEquipment(inv, 0, ch);
+
+    const auto& backpack = inv.getInventory(0).backpack;
+    std::vector<int> granted;
+    for (const auto& item : backpack)
+    {
+        if (item.valid())
+        {
+            granted.push_back(item.itemId);
+        }
+    }
+
+    // Armsmaster contributes nothing, so exactly two items land in the pack.
+    REQUIRE(granted.size() == 2);
+    CHECK(std::find(granted.begin(), granted.end(), 1) != granted.end());  // Sword
+    CHECK(std::find(granted.begin(), granted.end(), 66) != granted.end()); // Leather
+
+    SECTION("items arrive unequipped, matching Player::AddItem(-1, id)")
+    {
+        for (const auto& slot : inv.getInventory(0).equipped)
+        {
+            CHECK_FALSE(slot.valid());
+        }
+    }
+}
+
+TEST_CASE("grantStartingEquipment ignores unlearned skills", "[game][inventory]")
+{
+    NullLogger logger;
+    Inventory inv(logger);
+
+    Character ch; // no skills learned at all
+    grantStartingEquipment(inv, 0, ch);
+
+    for (const auto& item : inv.getInventory(0).backpack)
+    {
+        CHECK_FALSE(item.valid());
+    }
 }

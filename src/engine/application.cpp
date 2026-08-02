@@ -2857,6 +2857,15 @@ void Application::commitPartyToGameWorld()
         ch.spellPoints = ch.maxSpellPoints;
         game::syncSkillLevelsFromDisplaySkills(ch);
         gp.member(i) = ch;
+
+        // Starting kit: one item per learned skill, dropped unequipped into the
+        // backpack, matching the original's post-OK loop (MM7-Rel.exe
+        // 0x497735-0x49785F). This runs only on the CharacterCreation->Loading
+        // transition, so a loaded save is unaffected.
+        if (inventory_)
+        {
+            game::grantStartingEquipment(*inventory_, i, ch);
+        }
     }
     logger.info("Committed party data to GameWorld");
 }

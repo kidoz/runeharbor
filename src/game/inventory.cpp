@@ -738,4 +738,84 @@ EquipSlot Inventory::mapEquipSlot(const formats::ItemEntry& entry) const
     }
 }
 
+int startingItemForSkill(SkillId skill)
+{
+    switch (skill)
+    {
+    case SkillId::Staff:
+        return 61;
+    case SkillId::Sword:
+        return 1;
+    case SkillId::Dagger:
+        return 15;
+    case SkillId::Axe:
+        return 23;
+    case SkillId::Spear:
+        return 31;
+    case SkillId::Bow:
+        return 47;
+    case SkillId::Mace:
+        return 50;
+    case SkillId::Shield:
+        return 84;
+    case SkillId::Leather:
+        return 66;
+    case SkillId::Chain:
+        return 71;
+    case SkillId::Plate:
+        return 76;
+    case SkillId::Fire:
+        return 401;
+    case SkillId::Air:
+        return 412;
+    case SkillId::Water:
+        return 423;
+    case SkillId::Earth:
+        return 434;
+    case SkillId::Spirit:
+        return 445;
+    case SkillId::Mind:
+        return 456;
+    case SkillId::Body:
+        return 467;
+    // The original routes all of these to the same case (table value 0x12).
+    case SkillId::ItemId:
+    case SkillId::Repair:
+    case SkillId::Meditation:
+    case SkillId::Perception:
+    case SkillId::DisarmTrap:
+    case SkillId::Learning:
+        return 220;
+    case SkillId::Dodging:
+        return 115;
+    case SkillId::Unarmed:
+        return 110;
+    // Blaster, Light, Dark, Merchant, BodyBuilding, Diplomacy, Thievery,
+    // MonsterLore, Armsmaster, Stealing and Alchemy fall through to the
+    // original's default case, which grants nothing.
+    default:
+        return 0;
+    }
+}
+
+void grantStartingEquipment(Inventory& inventory, int characterIndex, const Character& character)
+{
+    for (size_t i = 0; i < character.skillLevels.size(); i++)
+    {
+        if (!character.skillLevels[i].learned())
+        {
+            continue;
+        }
+        const int itemId = startingItemForSkill(static_cast<SkillId>(i));
+        if (itemId <= 0)
+        {
+            continue;
+        }
+        Item item;
+        item.itemId = itemId;
+        item.identified = true;
+        inventory.addToBackpack(characterIndex, item);
+    }
+}
+
 } // namespace runeharbor::game

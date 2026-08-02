@@ -230,4 +230,15 @@ class Inventory
     SpellSystem* spellSystem_ = nullptr;
 };
 
+/// Item granted at character creation for having `skill`, or 0 for skills that
+/// grant nothing. Transcribed from the original's dispatch in fcn.004974ae
+/// (MM7-Rel.exe 0x497735-0x49785F) with its skill-index-to-case table at
+/// 0x497935. SkillId already matches the original's skill numbering.
+int startingItemForSkill(SkillId skill);
+
+/// Drop one starting item into `characterIndex`'s backpack for every skill the
+/// character has learned. The original adds these unequipped via
+/// Player::AddItem(-1, id) — it does not auto-equip them.
+void grantStartingEquipment(Inventory& inventory, int characterIndex, const Character& character);
+
 } // namespace runeharbor::game
