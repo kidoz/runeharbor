@@ -67,6 +67,7 @@ constexpr SkillAlias kSkillAliases[] = {
     {"dark", SkillId::Dark},
     {"darkmagic", SkillId::Dark},
     {"identify", SkillId::ItemId},
+    {"identifyitem", SkillId::ItemId},
     {"itemid", SkillId::ItemId},
     {"merchant", SkillId::Merchant},
     {"repair", SkillId::Repair},
