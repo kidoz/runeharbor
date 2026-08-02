@@ -66,6 +66,7 @@ test_sources = files(
     'media/vid_manifest_test.cpp',
     'engine/application_test.cpp',
     'engine/physics_test.cpp',
+    'engine/ini_config_test.cpp',
     'game/character_test.cpp',
     'game/party_test.cpp',
     'game/combat_test.cpp',

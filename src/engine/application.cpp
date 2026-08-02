@@ -4661,10 +4661,12 @@ void Application::setBootConfig(const BootConfig& config)
 
     if (sharedData)
     {
+        // Extent, not edges: the original's vx1/vy1/vx2/vy2 = 8/8/468/351 yields
+        // a 461x344 render area (MM7-Rel.exe 0x464830-0x464844).
         constexpr int kDefaultViewportX = 8;
         constexpr int kDefaultViewportY = 8;
-        constexpr int kDefaultViewportWidth = 468;
-        constexpr int kDefaultViewportHeight = 351;
+        constexpr int kDefaultViewportWidth = 461;
+        constexpr int kDefaultViewportHeight = 344;
         constexpr int kMinSafeViewportWidth = 64;
         constexpr int kMinSafeViewportHeight = 64;
 

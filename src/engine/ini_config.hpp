@@ -63,11 +63,13 @@ struct StartupSettings
     // [render]
     bool noDecorations = false;
 
-    // [screen]
+    // [screen] — stored as an origin plus extent. The original INI expresses
+    // this as inclusive edges vx1/vy1/vx2/vy2 = 8/8/468/351, so the extent is
+    // 461x344 (see parseIniSettings).
     int viewportX = 8;
     int viewportY = 8;
-    int viewportWidth = 468;
-    int viewportHeight = 351;
+    int viewportWidth = 461;
+    int viewportHeight = 344;
     std::optional<int> windowX;
     std::optional<int> windowY;
 };

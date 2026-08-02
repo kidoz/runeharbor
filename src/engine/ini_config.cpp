@@ -460,45 +460,62 @@ StartupSettings parseIniSettings(std::string_view iniText, util::ILogger& logger
     settings.noDecorations =
         readBoolSetting(sections, "render", "nodecorations", settings.noDecorations, logger);
 
+    // The original reads four *inclusive edge* coordinates from [screen] —
+    // vx1/vy1/vx2/vy2, defaulting to 8/8/468/351 (MM7-Rel.exe 0x4660C7-0x466103) —
+    // and derives the render extent as (vx2 - vx1 + 1) x (vy2 - vy1 + 1)
+    // (0x464830-0x464844). Prefer those keys, then fall back to the
+    // width/height-style aliases we accepted previously.
+    constexpr int kGameWidth = 640;
+    constexpr int kGameHeight = 480;
+    constexpr int kDefaultViewportX = 8;
+    constexpr int kDefaultViewportY = 8;
+    constexpr int kDefaultViewportRight = 468;
+    constexpr int kDefaultViewportBottom = 351;
+    constexpr int kDefaultViewportWidth = kDefaultViewportRight - kDefaultViewportX + 1;
+    constexpr int kDefaultViewportHeight = kDefaultViewportBottom - kDefaultViewportY + 1;
+    constexpr int kMinSafeViewportWidth = 64;
+    constexpr int kMinSafeViewportHeight = 64;
+
     if (auto value = readIntSettingAny(
-            sections, "screen", {"viewport x", "view x", "x", "param1", "1", "screen x", "screenx"},
-            logger);
+            sections, "screen",
+            {"vx1", "viewport x", "view x", "x", "param1", "1", "screen x", "screenx"}, logger);
         value.has_value())
     {
         settings.viewportX = *value;
     }
     if (auto value = readIntSettingAny(
-            sections, "screen", {"viewport y", "view y", "y", "param2", "2", "screen y", "screeny"},
-            logger);
+            sections, "screen",
+            {"vy1", "viewport y", "view y", "y", "param2", "2", "screen y", "screeny"}, logger);
         value.has_value())
     {
         settings.viewportY = *value;
     }
-    if (auto value = readIntSettingAny(sections, "screen",
-                                       {"viewport width", "view width", "width", "w", "param3", "3",
-                                        "screen width", "screenw"},
-                                       logger);
-        value.has_value())
+
+    if (auto right = readIntSetting(sections, "screen", "vx2", logger); right.has_value())
+    {
+        settings.viewportWidth = std::max(1, *right - settings.viewportX + 1);
+    }
+    else if (auto value = readIntSettingAny(sections, "screen",
+                                            {"viewport width", "view width", "width", "w", "param3",
+                                             "3", "screen width", "screenw"},
+                                            logger);
+             value.has_value())
     {
         settings.viewportWidth = std::max(1, *value);
     }
-    if (auto value = readIntSettingAny(sections, "screen",
-                                       {"viewport height", "view height", "height", "h", "param4",
-                                        "4", "screen height", "screenh"},
-                                       logger);
-        value.has_value())
+
+    if (auto bottom = readIntSetting(sections, "screen", "vy2", logger); bottom.has_value())
+    {
+        settings.viewportHeight = std::max(1, *bottom - settings.viewportY + 1);
+    }
+    else if (auto value = readIntSettingAny(sections, "screen",
+                                            {"viewport height", "view height", "height", "h",
+                                             "param4", "4", "screen height", "screenh"},
+                                            logger);
+             value.has_value())
     {
         settings.viewportHeight = std::max(1, *value);
     }
-
-    constexpr int kGameWidth = 640;
-    constexpr int kGameHeight = 480;
-    constexpr int kDefaultViewportX = 8;
-    constexpr int kDefaultViewportY = 8;
-    constexpr int kDefaultViewportWidth = 468;
-    constexpr int kDefaultViewportHeight = 351;
-    constexpr int kMinSafeViewportWidth = 64;
-    constexpr int kMinSafeViewportHeight = 64;
 
     settings.viewportX = std::clamp(settings.viewportX, 0, kGameWidth - 1);
     settings.viewportY = std::clamp(settings.viewportY, 0, kGameHeight - 1);
