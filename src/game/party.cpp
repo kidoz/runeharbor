@@ -158,11 +158,15 @@ void Party::initDefault()
     gameTime_ = kDefaultStartTicks;
     activeMemberIndex_ = 0;
 
-    // Emerald Island starting position (MM7 default new-game spawn)
+    // Emerald Island starting position (MM7 default new-game spawn). The
+    // original writes vPosition = (12552, 1816, 0) and sRotationY = 512 when it
+    // seeds data\new.lod (MM7-Rel.exe 0x460A4A-0x460A97); Z is left at 0 so the
+    // party is snapped down onto the terrain on arrival, and rotation is in MM7
+    // angle units (2048 == full turn), so 512 is a quarter turn.
     worldX_ = 12552.0f;
     worldY_ = 1816.0f;
-    worldZ_ = 512.0f;
-    yaw_ = 0.0f;
+    worldZ_ = 0.0f;
+    yaw_ = 512.0f;
     pitch_ = 0.0f;
     currentMap_ = "out01.odm";
 }

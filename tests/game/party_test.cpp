@@ -264,3 +264,21 @@ TEST_CASE("Party active member index", "[game][party]")
         REQUIRE(party.activeMemberIndex() == -1); // clamped
     }
 }
+
+TEST_CASE("Default party spawns at the original's Emerald Island transform", "[game][party]")
+{
+    Party party;
+    party.initDefault();
+
+    // MM7-Rel.exe 0x460A4A-0x460A97 writes vPosition = (12552, 1816, 0) and
+    // sRotationY = 512 when it seeds a new game.
+    CHECK(party.worldX() == 12552.0f);
+    CHECK(party.worldY() == 1816.0f);
+    // Z stays at ground level so the arrival snaps the party onto the terrain;
+    // 512 belongs to the rotation, not the height.
+    CHECK(party.worldZ() == 0.0f);
+    // Rotation is in MM7 angle units (2048 == full turn), so 512 is a quarter turn.
+    CHECK(party.yaw() == 512.0f);
+    CHECK(party.pitch() == 0.0f);
+    CHECK(party.currentMap() == "out01.odm");
+}
