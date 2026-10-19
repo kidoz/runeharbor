@@ -15,6 +15,11 @@ void GameWorld::advanceTime(int64_t minutes)
     processConditions();
 }
 
+void GameWorld::resetConditionClock()
+{
+    lastConditionTick_ = calendar_.totalTicks;
+}
+
 void GameWorld::processConditions()
 {
     const int64_t now = calendar_.totalTicks;
@@ -25,6 +30,14 @@ void GameWorld::processConditions()
         lastConditionTick_ = now;
         return;
     }
+
+    // Buff expiry is cheap and should take effect on the frame it is due, not
+    // only on the next hourly condition tick.
+    for (int i = 0; i < kPartySize; ++i)
+    {
+        party_.member(i).clearExpiredEffects(now);
+    }
+
     if (now <= lastConditionTick_)
     {
         return;

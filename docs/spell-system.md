@@ -3,7 +3,7 @@ title: "Spell System"
 summary: "The spell system combines spell data, mastery, targeting, cost, duration, and effect dispatch."
 doc_type: reference
 status: partial
-last_updated: 2026-08-01
+last_updated: 2026-10-19
 ---
 # Spell System
 
@@ -1012,6 +1012,20 @@ Offset +7: skill_level_override (byte)
 ```
 
 ---
+
+## Integration notes
+
+### Current implementation
+
+- Buff spells (Shield, Bless, Haste, Heroism, Stone Skin, Hour of Power,
+  Day of Protection, Resist...) create `TimedEffect` entries carrying stat, AC, and
+  resistance bonuses with a game-time expiry. `GameWorld::processConditions()`
+  expires them and recomputes derived stats.
+- Spell target classification is name-first: healing names (cure/heal/restore) target
+  one ally, buff names target the party, and remaining spells fall back to the school
+  heuristic (Spirit/Mind/Body → ally, otherwise enemy).
+- Utility effects such as Light, Fly, Water Walk, Town Portal, and Lloyd's Beacon
+  are not implemented mechanically yet.
 
 ## Notes
 

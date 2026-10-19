@@ -34,7 +34,8 @@ struct SaveHeader
     //  12  — per-character spellbook (knownSpells) + quickbar, party bankGold
     //  13  — per-map automap explored sectors (fog-of-war)
     //  14  — generated chest world positions
-    static constexpr uint32_t kVersion = 14;
+    //  15  — active timed spell effects (buffs)
+    static constexpr uint32_t kVersion = 15;
 
     uint32_t magic = kMagic;
     uint32_t version = kVersion;

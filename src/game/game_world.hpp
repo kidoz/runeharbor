@@ -268,6 +268,10 @@ class GameWorld
     // Safe to call every frame; it only does work once per in-game hour.
     void processConditions();
 
+    /// Rebase the hourly condition clock to the current calendar time. Call
+    /// after loading a save so elapsed clock time is not applied retroactively.
+    void resetConditionClock();
+
     // Game state
     bool isGameOver() const;
     void reset();

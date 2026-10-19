@@ -242,6 +242,22 @@ struct Stats
     }
 };
 
+/// A spell buff active on a character until a game-time deadline.
+///
+/// Bonuses are additive and applied by `effectiveStat`, `armorClass`, and the
+/// resistance lookups. The spell id is used to refresh rather than stack the
+/// same buff.
+struct TimedEffect
+{
+    int spellId = 0;
+    int64_t expiresAtTicks = 0; // 0 = no expiry (until dispelled/cleared)
+    std::string name;
+    std::array<int, Stats::kCount> statBonus = {};
+    int armorClassBonus = 0;
+    // Fire, Air, Water, Earth, Mind, Body
+    std::array<int, 6> resistanceBonus = {};
+};
+
 struct Character
 {
     std::string name = "New Hero";
@@ -317,6 +333,17 @@ struct Character
     }
 
     void clearCondition(ConditionIndex c) { conditionTimestamps[static_cast<size_t>(c)] = 0; }
+
+    // Timed spell buffs (Shield, Bless, Haste, ...). Applying a buff with the
+    // same spell id refreshes it rather than stacking another copy.
+    std::vector<TimedEffect> timedEffects;
+    void addTimedEffect(TimedEffect effect);
+    bool hasTimedEffect(int spellId) const;
+    void clearExpiredEffects(int64_t nowTicks);
+    void clearAllTimedEffects();
+    int timedStatBonus(int statIndex) const;
+    int timedArmorClassBonus() const;
+    int timedResistanceBonus(int index) const; // 0..5 = Fire..Body
 
     // Returns the most severe active condition per the MM7 priority order
     // (Eradicated > Stoned > Dead > Zombie > Unconscious > Asleep > Paralyzed >

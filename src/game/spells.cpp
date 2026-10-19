@@ -26,18 +26,18 @@ int resistanceForSchool(const Character& target, SpellSchool school)
     switch (school)
     {
     case SpellSchool::Fire:
-        return target.fireResistance;
+        return target.fireResistance + target.timedResistanceBonus(0);
     case SpellSchool::Air:
-        return target.airResistance;
+        return target.airResistance + target.timedResistanceBonus(1);
     case SpellSchool::Water:
-        return target.waterResistance;
+        return target.waterResistance + target.timedResistanceBonus(2);
     case SpellSchool::Earth:
-        return target.earthResistance;
+        return target.earthResistance + target.timedResistanceBonus(3);
     case SpellSchool::Mind:
     case SpellSchool::Spirit:
-        return target.mindResistance;
+        return target.mindResistance + target.timedResistanceBonus(4);
     case SpellSchool::Body:
-        return target.bodyResistance;
+        return target.bodyResistance + target.timedResistanceBonus(5);
     default:
         return 0;
     }
@@ -49,6 +49,31 @@ std::string toLowerCopy(std::string_view text)
     std::transform(result.begin(), result.end(), result.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return result;
+}
+
+bool containsAny(const std::string& text, std::initializer_list<std::string_view> tokens)
+{
+    for (std::string_view token : tokens)
+    {
+        if (text.find(token) != std::string::npos)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool isHealingSpellName(const std::string& lowerName)
+{
+    return containsAny(lowerName, {"cure", "heal", "restore", "raise dead"});
+}
+
+bool isBuffSpellName(const std::string& lowerName)
+{
+    return containsAny(lowerName,
+                       {"bless", "shield", "heroism", "haste", "hour of power", "day of protection",
+                        "stone skin", "resist", "protection", "regeneration", "armor", "might",
+                        "grace", "endurance", "luck", "speed", "prayer"});
 }
 } // namespace
 
@@ -79,10 +104,21 @@ void SpellSystem::loadSpellData(const std::vector<formats::SpellEntry>& spells)
         info.manaCostMaster = static_cast<int>(std::ceil(entry.level * 1.5));
         info.manaCostGM = entry.level;
 
-        // Determine target type from spell school and level
-        // Simple heuristic: damage spells target enemies, healing/buff target allies
-        if (info.school == SpellSchool::Spirit || info.school == SpellSchool::Body ||
-            info.school == SpellSchool::Mind)
+        // Determine the target type. Name-based healing/buff classification is
+        // more accurate than school alone (Light and Body both contain damage
+        // and beneficial spells), so check names first, then fall back to the
+        // school heuristic.
+        const std::string lowerName = toLowerCopy(info.name);
+        if (isHealingSpellName(lowerName))
+        {
+            info.target = SpellTarget::SingleAlly;
+        }
+        else if (isBuffSpellName(lowerName))
+        {
+            info.target = SpellTarget::AllAllies;
+        }
+        else if (info.school == SpellSchool::Spirit || info.school == SpellSchool::Body ||
+                 info.school == SpellSchool::Mind)
         {
             info.target = SpellTarget::SingleAlly;
         }
@@ -346,8 +382,118 @@ SpellResult SpellSystem::castBuffSpell(int characterIndex, int spellId)
     int cost = getManaCost(characterIndex, spellId);
     caster.spellPoints -= cost;
 
+    const SkillMastery mastery = getEffectiveMastery(characterIndex, spell->school);
+    const int casterLevel = std::max(1, getEffectiveSkillLevel(characterIndex, spell->school));
+    const int power = std::max(1, casterLevel + spell->level / 2);
+
+    int masteryPct = 100;
+    switch (mastery)
+    {
+    case SkillMastery::Expert:
+        masteryPct = 150;
+        break;
+    case SkillMastery::Master:
+        masteryPct = 200;
+        break;
+    case SkillMastery::GrandMaster:
+        masteryPct = 300;
+        break;
+    default:
+        break;
+    }
+
+    const int64_t now = gameWorld_->calendar().totalTicks;
+    const int64_t durationTicks = static_cast<int64_t>(std::max(1, spell->level)) *
+                                  GameCalendar::kTicksPerHour * masteryPct / 100;
+    const int64_t minimumTicks = GameCalendar::kTicksPerHour / 2;
+
+    TimedEffect effect;
+    effect.spellId = spellId;
+    effect.name = spell->name;
+    effect.expiresAtTicks = now + std::max(minimumTicks, durationTicks);
+
+    const std::string lower = toLowerCopy(spell->name);
+    const auto addAllResistances = [&effect](int amount)
+    {
+        for (int& value : effect.resistanceBonus)
+        {
+            value += amount;
+        }
+    };
+    const auto addAllStats = [&effect](int amount)
+    {
+        for (int& value : effect.statBonus)
+        {
+            value += amount;
+        }
+    };
+
+    bool implemented = true;
+    if (lower.find("shield") != std::string::npos)
+    {
+        effect.armorClassBonus += 5 + power * 2;
+    }
+    else if (lower.find("stone skin") != std::string::npos)
+    {
+        effect.armorClassBonus += 3 + power;
+        addAllResistances(5);
+    }
+    else if (lower.find("bless") != std::string::npos)
+    {
+        effect.statBonus[4] += 2 + power / 2; // accuracy
+    }
+    else if (lower.find("heroism") != std::string::npos)
+    {
+        effect.statBonus[0] += 2 + power / 2; // might
+        effect.statBonus[4] += 2;             // accuracy
+    }
+    else if (lower.find("haste") != std::string::npos)
+    {
+        effect.statBonus[5] += 3 + power / 2; // speed
+    }
+    else if (lower.find("hour of power") != std::string::npos)
+    {
+        addAllStats(2 + power / 4);
+    }
+    else if (lower.find("day of protection") != std::string::npos)
+    {
+        addAllResistances(10);
+    }
+    else if (lower.find("resist") != std::string::npos)
+    {
+        addAllResistances(5 + spell->level);
+    }
+    else
+    {
+        implemented = false;
+    }
+
+    int applied = 0;
+    for (int i = 0; i < kPartySize; ++i)
+    {
+        if (spell->target != SpellTarget::AllAllies && i != characterIndex)
+        {
+            continue;
+        }
+        auto& target = gameWorld_->party().member(i);
+        if (!target.isConscious())
+        {
+            continue;
+        }
+        target.addTimedEffect(effect);
+        ++applied;
+    }
+
     result.success = true;
     result.description = caster.name + " casts " + spell->name;
+    if (!implemented)
+    {
+        result.description += " (effect not implemented yet)";
+    }
+    else if (applied > 1)
+    {
+        result.description += " on the party";
+    }
 
     if (callbacks_.onSpellCast)
         callbacks_.onSpellCast(spellId, characterIndex, result);

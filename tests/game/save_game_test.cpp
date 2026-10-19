@@ -276,3 +276,49 @@ TEST_CASE("Save/Load preserves generated chest world positions", "[game][save][c
     CHECK(loaded->chests[0].z == 333.0f);
     REQUIRE(loaded->chests[0].itemIds.size() == 2);
 }
+
+TEST_CASE("Save/Load round-trips active timed spell effects", "[game][save][buffs]")
+{
+    NullLogger logger;
+    TempSaveDir dir;
+
+    SaveGame save(logger);
+    save.setSaveDirectory(dir.path.string());
+
+    GameWorld src;
+    auto& ch = src.party().member(0);
+    ch.charClass = CharacterClass::Sorcerer;
+    ch.level = 10;
+    ch.stats.intellect = 40;
+    ch.baseStats = ch.stats;
+    ch.recalculateDerived();
+    ch.maxHitPoints = 200;
+    ch.hitPoints = 200;
+    ch.maxSpellPoints = 200;
+    ch.spellPoints = 200;
+
+    TimedEffect effect;
+    effect.spellId = 45;
+    effect.expiresAtTicks = 1234567;
+    effect.name = "Shield";
+    effect.armorClassBonus = 10;
+    effect.statBonus[0] = 5;
+    effect.resistanceBonus[0] = 10;
+    ch.addTimedEffect(effect);
+    const int sourceArmorClass = ch.armorClass;
+
+    REQUIRE(save.save(src, 0));
+
+    GameWorld dst;
+    REQUIRE(save.load(dst, 0));
+
+    const auto& loaded = dst.party().member(0);
+    REQUIRE(loaded.timedEffects.size() == 1);
+    CHECK(loaded.timedEffects[0].spellId == 45);
+    CHECK(loaded.timedEffects[0].expiresAtTicks == 1234567);
+    CHECK(loaded.timedEffects[0].name == "Shield");
+    CHECK(loaded.timedEffects[0].armorClassBonus == 10);
+    CHECK(loaded.timedEffects[0].statBonus[0] == 5);
+    CHECK(loaded.timedEffects[0].resistanceBonus[0] == 10);
+    CHECK(loaded.armorClass == sourceArmorClass);
+}

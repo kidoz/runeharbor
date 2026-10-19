@@ -1397,6 +1397,24 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
         {
             writeI32(out, ch.quickbarSpells[static_cast<size_t>(slot)]);
         }
+
+        // v15: active timed spell effects.
+        writeU32(out, static_cast<uint32_t>(ch.timedEffects.size()));
+        for (const auto& effect : ch.timedEffects)
+        {
+            writeI32(out, effect.spellId);
+            writeU64(out, static_cast<uint64_t>(effect.expiresAtTicks));
+            writeString(out, effect.name);
+            for (int stat = 0; stat < Stats::kCount; ++stat)
+            {
+                writeI32(out, effect.statBonus[static_cast<size_t>(stat)]);
+            }
+            writeI32(out, effect.armorClassBonus);
+            for (int resistance = 0; resistance < 6; ++resistance)
+            {
+                writeI32(out, effect.resistanceBonus[static_cast<size_t>(resistance)]);
+            }
+        }
     }
 
     // Game variables
@@ -1641,6 +1659,7 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
     if (!readU64(ptr, end, calTicks))
         return false;
     world.calendar().totalTicks = static_cast<int64_t>(calTicks);
+    world.resetConditionClock();
 
     // Current map
     std::string mapName;
@@ -1840,6 +1859,54 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
                     return false;
                 ch.quickbarSpells[static_cast<size_t>(slot)] = spellId;
             }
+        }
+
+        // v15: active timed spell effects.
+        if (header.version >= 15)
+        {
+            uint32_t effectCount = 0;
+            if (!readU32(ptr, end, effectCount))
+                return false;
+            ch.timedEffects.reserve(effectCount);
+            for (uint32_t e = 0; e < effectCount; ++e)
+            {
+                TimedEffect effect;
+                int32_t spellId = 0;
+                uint64_t expiresAt = 0;
+                if (!readI32(ptr, end, spellId) || !readU64(ptr, end, expiresAt) ||
+                    !readString(ptr, end, effect.name))
+                {
+                    return false;
+                }
+                effect.spellId = spellId;
+                effect.expiresAtTicks = static_cast<int64_t>(expiresAt);
+                for (int stat = 0; stat < Stats::kCount; ++stat)
+                {
+                    int32_t value = 0;
+                    if (!readI32(ptr, end, value))
+                        return false;
+                    effect.statBonus[static_cast<size_t>(stat)] = value;
+                }
+                int32_t armorClassBonus = 0;
+                if (!readI32(ptr, end, armorClassBonus))
+                    return false;
+                effect.armorClassBonus = armorClassBonus;
+                for (int resistance = 0; resistance < 6; ++resistance)
+                {
+                    int32_t value = 0;
+                    if (!readI32(ptr, end, value))
+                        return false;
+                    effect.resistanceBonus[static_cast<size_t>(resistance)] = value;
+                }
+                ch.timedEffects.push_back(std::move(effect));
+            }
+        }
+
+        // Recompute derived stats only when buffs are active, so saved derived
+        // values are otherwise preserved exactly as written.
+        if (!ch.timedEffects.empty())
+        {
+            ch.recalculateDerived();
         }
     }
 

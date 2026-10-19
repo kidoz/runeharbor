@@ -93,7 +93,82 @@ constexpr SkillAlias kSkillAliases[] = {
 
 int Character::effectiveStat(int statIndex) const
 {
-    return baseStats.byIndex(statIndex);
+    return baseStats.byIndex(statIndex) + timedStatBonus(statIndex);
+}
+
+void Character::addTimedEffect(TimedEffect effect)
+{
+    for (auto& existing : timedEffects)
+    {
+        if (existing.spellId != 0 && existing.spellId == effect.spellId)
+        {
+            existing = std::move(effect);
+            recalculateDerived();
+            return;
+        }
+    }
+    timedEffects.push_back(std::move(effect));
+    recalculateDerived();
+}
+
+bool Character::hasTimedEffect(int spellId) const
+{
+    return std::ranges::any_of(timedEffects, [spellId](const TimedEffect& effect)
+                               { return effect.spellId == spellId; });
+}
+
+void Character::clearExpiredEffects(int64_t nowTicks)
+{
+    const size_t before = timedEffects.size();
+    std::erase_if(timedEffects, [nowTicks](const TimedEffect& effect)
+                  { return effect.expiresAtTicks > 0 && nowTicks >= effect.expiresAtTicks; });
+    if (timedEffects.size() != before)
+    {
+        recalculateDerived();
+    }
+}
+
+void Character::clearAllTimedEffects()
+{
+    if (!timedEffects.empty())
+    {
+        timedEffects.clear();
+        recalculateDerived();
+    }
+}
+
+int Character::timedStatBonus(int statIndex) const
+{
+    int total = 0;
+    for (const auto& effect : timedEffects)
+    {
+        total += effect.statBonus[static_cast<size_t>(statIndex)];
+    }
+    return total;
+}
+
+int Character::timedArmorClassBonus() const
+{
+    int total = 0;
+    for (const auto& effect : timedEffects)
+    {
+        total += effect.armorClassBonus;
+    }
+    return total;
+}
+
+int Character::timedResistanceBonus(int index) const
+{
+    if (index < 0 || index >= 6)
+    {
+        return 0;
+    }
+    int total = 0;
+    for (const auto& effect : timedEffects)
+    {
+        total += effect.resistanceBonus[static_cast<size_t>(index)];
+    }
+    return total;
 }
 
 void Character::takeDamage(int amount)
@@ -217,8 +292,9 @@ void Character::recalculateDerived()
     maxSpellPoints = classSpBase + (classSpBase > 0 ? (classSpBase + spBonus) * (level - 1) : 0);
     spellPoints = std::min(spellPoints, maxSpellPoints);
 
-    // AC: base from speed
-    armorClass = std::max(0, (stats.speed - 10) / 2);
+    // AC: base from speed, plus timed buff bonuses (Shield, Stone Skin, ...).
+    armorClass = std::max(0, (stats.speed - 10) / 2) + timedArmorClassBonus();
+    armorClass = std::max(0, armorClass);
 }
 
 int Character::xpRequiredForNextLevel() const
