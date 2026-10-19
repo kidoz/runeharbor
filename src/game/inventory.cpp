@@ -465,9 +465,28 @@ UseResult Inventory::useItem(int characterIndex, int backpackSlot, int targetCha
         Character& reader = party_->member(targetCharIndex);
         const int bookIndex = std::max(0, item.itemId - 400);
         const int spellId = bookIndex + 1;
-        // Gate on the Fire school skill as the default (the binary's
-        // school-selection by book index is not fully RE'd; refine later).
-        if (reader.learnSpell(spellId, SkillId::Fire))
+
+        // Resolve the school from the loaded spell table; fall back to the
+        // contiguous 11-spell-per-school ID layout when the table is absent.
+        SkillId school = SkillId::Fire;
+        if (spellSystem_)
+        {
+            if (const auto* info = spellSystem_->getSpell(spellId))
+            {
+                school = schoolToSkill(info->school);
+            }
+        }
+        else
+        {
+            static constexpr SkillId kSchoolSkills[] = {
+                SkillId::Fire, SkillId::Air,  SkillId::Water, SkillId::Earth, SkillId::Spirit,
+                SkillId::Mind, SkillId::Body, SkillId::Light, SkillId::Dark,
+            };
+            const int schoolBase = std::clamp((spellId - 1) / 11, 0, 8);
+            school = kSchoolSkills[schoolBase];
+        }
+
+        if (reader.learnSpell(spellId, school))
         {
             result.spellLearned = spellId;
             result.used = true;

@@ -701,12 +701,16 @@ std::expected<ShopReceipt, ShopError> ShopSystem::learnGuildSpell(const ShopCont
     if (ctx.party->gold() < cost)
         return std::unexpected(ShopError::InsufficientGold);
     // Gate: must know the spell's school. Map spell id to a school skill.
-    const int schoolBase = ((spellId - 1) / 11); // 0=Fire..10=Dark
-    static constexpr SkillId kSchoolSkills[] = {SkillId::Fire,  SkillId::Air,    SkillId::Water,
-                                                SkillId::Earth, SkillId::Fire, // 4 unused
-                                                SkillId::Fire,  SkillId::Spirit, SkillId::Mind,
-                                                SkillId::Body,  SkillId::Light,  SkillId::Dark};
-    const SkillId school = kSchoolSkills[std::clamp(schoolBase, 0, 10)];
+    // Spell IDs are contiguous in groups of 11 over the nine schools:
+    // Fire, Air, Water, Earth, Spirit, Mind, Body, Light, Dark. The previous
+    // table assumed the SpellSchool enum's 11-slot gapped layout and therefore
+    // mapped Spirit..Dark to the wrong skills.
+    const int schoolBase = std::clamp((spellId - 1) / 11, 0, 8);
+    static constexpr SkillId kSchoolSkills[] = {
+        SkillId::Fire, SkillId::Air,  SkillId::Water, SkillId::Earth, SkillId::Spirit,
+        SkillId::Mind, SkillId::Body, SkillId::Light, SkillId::Dark,
+    };
+    const SkillId school = kSchoolSkills[schoolBase];
     if (!member.learnSpell(spellId, school))
         return std::unexpected(ShopError::NothingToLearn);
     (void)ctx.party->spendGold(cost);
