@@ -2287,7 +2287,7 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
 namespace
 {
 constexpr uint32_t kQuestLogMagic = 0x4c485152u; // "RHQL" (RuneHarbor Quest Log)
-constexpr uint32_t kQuestLogVersion = 1;
+constexpr uint32_t kQuestLogVersion = 2;
 } // namespace
 
 std::vector<uint8_t> SaveGame::serializeQuestLog(const QuestLog& questLog)
@@ -2319,6 +2319,18 @@ std::vector<uint8_t> SaveGame::serializeQuestLog(const QuestLog& questLog)
         writeU64(out, entry.gameTime);
         writeString(out, entry.text);
         writeI32(out, entry.questBit);
+    }
+
+    // v2: acquired award and autonote bit ids.
+    writeU32(out, static_cast<uint32_t>(questLog.acquiredAwards().size()));
+    for (int awardBit : questLog.acquiredAwards())
+    {
+        writeI32(out, awardBit);
+    }
+    writeU32(out, static_cast<uint32_t>(questLog.acquiredAutonotes().size()));
+    for (int noteBit : questLog.acquiredAutonotes())
+    {
+        writeI32(out, noteBit);
     }
     return out;
 }
@@ -2394,6 +2406,32 @@ bool SaveGame::deserializeQuestLog(const std::vector<uint8_t>& data, QuestLog& q
         if (!readI32(ptr, end, questBit))
             return false;
         questLog.addJournalEntry(text, gameTime, questBit);
+    }
+
+    // v2: acquired award and autonote bit ids.
+    if (version >= 2)
+    {
+        uint32_t awardCount = 0;
+        if (!readU32(ptr, end, awardCount))
+            return false;
+        for (uint32_t i = 0; i < awardCount; i++)
+        {
+            int32_t awardBit = 0;
+            if (!readI32(ptr, end, awardBit))
+                return false;
+            questLog.acquireAward(awardBit);
+        }
+
+        uint32_t noteCount = 0;
+        if (!readU32(ptr, end, noteCount))
+            return false;
+        for (uint32_t i = 0; i < noteCount; i++)
+        {
+            int32_t noteBit = 0;
+            if (!readI32(ptr, end, noteBit))
+                return false;
+            questLog.acquireAutonote(noteBit);
+        }
     }
     return true;
 }

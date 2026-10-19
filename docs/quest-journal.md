@@ -3,7 +3,7 @@ title: "Quest Log / Journal / Autonotes"
 summary: "Quest, autonote, and map books share a common window flow backed by separate data tables."
 doc_type: reference
 status: partial
-last_updated: 2026-08-01
+last_updated: 2026-10-19
 ---
 # Quest Log / Journal / Autonotes
 
@@ -145,28 +145,23 @@ news/state block at `0xACD804` (stride 0x1B3C) is manipulated by EVT opcode
 
 ## Integration notes
 
-RuneHarbor already has a complete-but-dormant `game::QuestLog` API (state
-tracking, journal entries, callbacks) and `QuestsParser`/`AutonoteParser`, but
-**none of it is wired** — no `QuestLog` instance, `quests.txt`/`autonote.txt`
-never parsed at startup, no event-engine bridge. To ship a journal:
+### Current implementation
 
-1. **Instantiate + load**: own a `QuestLog` in `Application`; parse
-   `quests.txt` via `QuestsParser` and call `loadQuestData`; parse
-   `autonote.txt` similarly.
-2. **Bridge quest bits**: the EVT `SetGlobalVar`/`SetGlobalVar2` handlers
-   currently write generic game vars — also call
-   `QuestLog::startQuest`/`completeQuest`/`failQuest` keyed by the qBit (the
-   MM7 model is "set = acquired"; RuneHarbor can map set→start, and use a
-   companion var/flag for completion).
-3. **Expose to widgets**: add `QuestLog*` to `SharedGameData` (or a
-   `GameWorld::questLog()` accessor).
-4. **Build the journal widget** (new `src/ui/journal_widget.{hpp,cpp}`,
-   modeled on `map_widget`/`character_stats_widget`): render active/completed
-   quest lists + journal entries; toggle with `Q`.
-
-The faithful minimum (matching MM7) is "show all acquired quests"; RuneHarbor's
-`QuestState` subdivision (active/completed/failed) is a value-add extension
-that the existing `QuestLog` API already supports.
+- `Application` owns a `QuestLog`; `quests.txt` and the autonote/award catalogs
+  are parsed at startup and exposed to the journal.
+- EVT `SetGlobalVar` field 0 acquires a quest (`startQuest`). Quest
+  completion/failure remain RuneHarbor extensions: the shipped scripts only set
+  acquired bits, so most quests appear as active.
+- EVT `GiveAward` carries the target bit plus a trailing kind byte: `0` = award
+  bit, `1` = autonote bit (inferred from the shipped D23/D27/D475 scripts and
+  worth confirming against the binary). Acquired ids are recorded in
+  `QuestLog` and serialized in the `questlog.bin` v2 blob.
+- The journal Autonotes/Awards tabs show only acquired entries; the full
+  catalogs are no longer listed.
+- Still missing: quest completion/failure triggers, autonote acquisition from
+  non-EVT sources (wells, potions, obelisks), awards with formatted values such
+  as `Current Fines Due: %lu`, and the original flat "all acquired quests"
+  presentation (approximated by active/completed/failed rows).
 
 ### Function/global additions for `docs/data/`
 

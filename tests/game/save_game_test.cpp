@@ -322,3 +322,34 @@ TEST_CASE("Save/Load round-trips active timed spell effects", "[game][save][buff
     CHECK(loaded.timedEffects[0].resistanceBonus[0] == 10);
     CHECK(loaded.armorClass == sourceArmorClass);
 }
+
+TEST_CASE("Save/Load round-trips acquired awards and autonotes", "[game][save][journal]")
+{
+    NullLogger logger;
+    TempSaveDir dir;
+
+    SaveGame save(logger);
+    save.setSaveDirectory(dir.path.string());
+
+    GameWorld src;
+    QuestLog srcQuests(logger);
+    srcQuests.acquireAward(2);
+    srcQuests.acquireAward(7);
+    srcQuests.acquireAutonote(1);
+    srcQuests.acquireAutonote(42);
+
+    REQUIRE(save.save(src, 0, nullptr, nullptr, &srcQuests));
+
+    GameWorld dst;
+    QuestLog dstQuests(logger);
+    REQUIRE(save.load(dst, 0, nullptr, nullptr, &dstQuests));
+
+    CHECK(dstQuests.hasAward(2));
+    CHECK(dstQuests.hasAward(7));
+    CHECK_FALSE(dstQuests.hasAward(1));
+    CHECK(dstQuests.acquiredAwards().size() == 2);
+    CHECK(dstQuests.hasAutonote(1));
+    CHECK(dstQuests.hasAutonote(42));
+    CHECK_FALSE(dstQuests.hasAutonote(2));
+    CHECK(dstQuests.acquiredAutonotes().size() == 2);
+}
