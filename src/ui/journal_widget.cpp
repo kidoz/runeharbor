@@ -39,11 +39,41 @@ int JournalWidget::currentListSize() const
     case JournalTab::Quests:
         return static_cast<int>(rows_.size());
     case JournalTab::Autonotes:
-        return autonoteCatalog_ ? static_cast<int>(autonoteCatalog_->size()) : 0;
+        return static_cast<int>(autonoteRows_.size());
     case JournalTab::Awards:
-        return awardCatalog_ ? static_cast<int>(awardCatalog_->size()) : 0;
+        return static_cast<int>(awardRows_.size());
     }
     return 0;
+}
+
+void JournalWidget::rebuildCatalogs()
+{
+    autonoteRows_.clear();
+    awardRows_.clear();
+    if (questLog_ == nullptr)
+    {
+        return;
+    }
+    if (autonoteCatalog_ != nullptr)
+    {
+        for (const auto& note : *autonoteCatalog_)
+        {
+            if (questLog_->hasAutonote(note.noteBit))
+            {
+                autonoteRows_.push_back(&note);
+            }
+        }
+    }
+    if (awardCatalog_ != nullptr)
+    {
+        for (const auto& award : *awardCatalog_)
+        {
+            if (questLog_->hasAward(award.aBit))
+            {
+                awardRows_.push_back(&award);
+            }
+        }
+    }
 }
 
 void JournalWidget::rebuildRows()
@@ -87,6 +117,8 @@ void JournalWidget::render(graphics::IRenderer& renderer, const graphics::DebugT
 {
     if (!visible_)
         return;
+
+    rebuildCatalogs();
 
     SDL_Renderer* sdl = renderer.getSDLRenderer();
     if (!sdl)
@@ -198,19 +230,19 @@ void JournalWidget::render(graphics::IRenderer& renderer, const graphics::DebugT
     }
     else if (activeTab_ == JournalTab::Autonotes)
     {
-        if (autonoteCatalog_ == nullptr || autonoteCatalog_->empty())
+        if (autonoteRows_.empty())
         {
-            text.drawText(sdl, x, y, 1, 200, 200, 200, "(no autonotes available)");
+            text.drawText(sdl, x, y, 1, 200, 200, 200, "(no autonotes discovered)");
         }
         else
         {
-            if (selected_ >= static_cast<int>(autonoteCatalog_->size()))
+            if (selected_ >= static_cast<int>(autonoteRows_.size()))
                 selected_ = 0;
-            for (size_t i = 0; i < autonoteCatalog_->size(); i++)
+            for (size_t i = 0; i < autonoteRows_.size(); i++)
             {
                 if (y + rowHeight_ > maxListY)
                     break;
-                const auto& note = (*autonoteCatalog_)[i];
+                const auto& note = *autonoteRows_[i];
                 if (static_cast<int>(i) == selected_)
                     renderer.drawFilledRect(bounds_.x + 16, y - 1, listW, rowHeight_, 80, 70, 30,
                                             220);
@@ -224,11 +256,11 @@ void JournalWidget::render(graphics::IRenderer& renderer, const graphics::DebugT
                 y += rowHeight_;
             }
             // Detail pane.
-            if (selected_ >= 0 && selected_ < static_cast<int>(autonoteCatalog_->size()))
+            if (selected_ >= 0 && selected_ < static_cast<int>(autonoteRows_.size()))
             {
                 int dy = bounds_.y + 72;
                 for (const auto& ln :
-                     util::wordWrap((*autonoteCatalog_)[selected_].autonoteText, detailChars))
+                     util::wordWrap(autonoteRows_[selected_]->autonoteText, detailChars))
                 {
                     text.drawText(sdl, detailX, dy, 1, 230, 230, 230, ln);
                     dy += rowHeight_;
@@ -238,19 +270,19 @@ void JournalWidget::render(graphics::IRenderer& renderer, const graphics::DebugT
     }
     else // Awards
     {
-        if (awardCatalog_ == nullptr || awardCatalog_->empty())
+        if (awardRows_.empty())
         {
-            text.drawText(sdl, x, y, 1, 200, 200, 200, "(no awards available)");
+            text.drawText(sdl, x, y, 1, 200, 200, 200, "(no awards earned)");
         }
         else
         {
-            if (selected_ >= static_cast<int>(awardCatalog_->size()))
+            if (selected_ >= static_cast<int>(awardRows_.size()))
                 selected_ = 0;
-            for (size_t i = 0; i < awardCatalog_->size(); i++)
+            for (size_t i = 0; i < awardRows_.size(); i++)
             {
                 if (y + rowHeight_ > maxListY)
                     break;
-                const auto& award = (*awardCatalog_)[i];
+                const auto& award = *awardRows_[i];
                 if (static_cast<int>(i) == selected_)
                     renderer.drawFilledRect(bounds_.x + 16, y - 1, listW, rowHeight_, 80, 70, 30,
                                             220);
@@ -264,20 +296,18 @@ void JournalWidget::render(graphics::IRenderer& renderer, const graphics::DebugT
                 y += rowHeight_;
             }
             // Detail pane.
-            if (selected_ >= 0 && selected_ < static_cast<int>(awardCatalog_->size()))
+            if (selected_ >= 0 && selected_ < static_cast<int>(awardRows_.size()))
             {
                 int dy = bounds_.y + 72;
-                for (const auto& ln :
-                     util::wordWrap((*awardCatalog_)[selected_].awardText, detailChars))
+                for (const auto& ln : util::wordWrap(awardRows_[selected_]->awardText, detailChars))
                 {
                     text.drawText(sdl, detailX, dy, 1, 230, 230, 230, ln);
                     dy += rowHeight_;
                 }
-                if (!(*awardCatalog_)[selected_].notes.empty())
+                if (!awardRows_[selected_]->notes.empty())
                 {
                     dy += 4;
-                    for (const auto& ln :
-                         util::wordWrap((*awardCatalog_)[selected_].notes, detailChars))
+                    for (const auto& ln : util::wordWrap(awardRows_[selected_]->notes, detailChars))
                     {
                         text.drawText(sdl, detailX, dy, 1, 200, 200, 170, ln);
                         dy += rowHeight_;

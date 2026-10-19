@@ -73,10 +73,12 @@ class JournalWidget : public Widget
     };
 
     void rebuildRows();
+    // Rebuild the acquired-only autonote/award lists from the catalogs.
+    void rebuildCatalogs();
     std::string statusLabel(game::QuestState state) const;
     // Row count of the active tab's list (Quests -> rows_, Autonotes ->
-    // autonoteCatalog_, Awards -> awardCatalog_). Used so keyboard navigation
-    // and render clamping agree on how far the selection can move.
+    // autonoteRows_, Awards -> awardRows_). Used so keyboard navigation and
+    // render clamping agree on how far the selection can move.
     int currentListSize() const;
 
     game::GameWorld* gameWorld_ = nullptr;
@@ -88,6 +90,8 @@ class JournalWidget : public Widget
     JournalTab activeTab_ = JournalTab::Quests;
 
     std::vector<QuestRow> rows_;
+    std::vector<const formats::AutonoteEntry*> autonoteRows_;
+    std::vector<const formats::AwardEntry*> awardRows_;
     std::vector<int> rowY_; // screen Y per row for hit-testing
     int rowHeight_ = 16;
     int selected_ = 0;
