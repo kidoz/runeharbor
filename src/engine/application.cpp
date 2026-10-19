@@ -47,6 +47,7 @@
 #include "../media/vid_manifest.hpp"
 #include "../media/video_player.hpp"
 #include "../platform/iwindow.hpp"
+#include "../ui/dialogue.hpp"
 #include "../util/ilogger.hpp"
 #include "map_transition_resolver.hpp"
 #include "outdoor_terrain.hpp"
@@ -269,6 +270,7 @@ void Application::initStates()
     sharedData->awardCatalog = &awardEntries_;
     sharedData->saveGame = saveGame_.get();
     sharedData->newGameStartMapName = defaultStartMapName_;
+    configureNpcHireCallback();
 
     // Create state context
     stateCtx = std::make_unique<StateContext>(StateContext{
@@ -3070,6 +3072,40 @@ void Application::configureGameplayCallbacks()
                         break;
                     }
                 }
+
+                // Hiring: hireable NPCs append a Hire button, hired NPCs a
+                // Dismiss button. Reserved ids are handled by InGameState.
+                const bool hired = gameWorld_ && gameWorld_->party().isNpcHired(dialogTextId);
+                const auto hireableIt = npcHireableById_.find(dialogTextId);
+                const bool hireable = hireableIt != npcHireableById_.end() && hireableIt->second;
+                const bool rosterFull = gameWorld_ && gameWorld_->party().hiredNpcs().size() >=
+                                                          static_cast<size_t>(game::kMaxHiredNpcs);
+
+                if (hired)
+                {
+                    sharedData->npcDialogueChoiceIds.push_back(ui::kDialogueChoiceDismiss);
+                    sharedData->npcDialogueChoiceTexts.push_back("Dismiss");
+                }
+                else if (hireable && !rosterFull)
+                {
+                    int cost = 0;
+                    if (auto profIdIt = npcProfessionIdByNpcId_.find(dialogTextId);
+                        profIdIt != npcProfessionIdByNpcId_.end())
+                    {
+                        if (auto profIt = npcProfessionById_.find(profIdIt->second);
+                            profIt != npcProfessionById_.end())
+                        {
+                            cost = profIt->second.cost;
+                            if (!profIt->second.benefitText.empty())
+                            {
+                                sharedData->npcDialogueText += " " + profIt->second.benefitText;
+                            }
+                        }
+                    }
+                    sharedData->npcDialogueChoiceIds.push_back(ui::kDialogueChoiceHire);
+                    sharedData->npcDialogueChoiceTexts.push_back(
+                        cost > 0 ? std::format("Hire ({} gp)", cost) : "Hire");
+                }
             }
         };
         callbacks.onShowBuilding = [this](int buildingId)
@@ -3539,6 +3575,112 @@ void Application::configureGameplayCallbacks()
     }
 }
 
+void Application::configureNpcHireCallback()
+{
+    if (sharedData)
+    {
+        sharedData->onNpcHireAction = [this](int npcId, bool dismiss)
+        {
+            if (!gameWorld_ || npcId <= 0)
+            {
+                return;
+            }
+
+            auto& party = gameWorld_->party();
+            if (dismiss)
+            {
+                int professionId = 0;
+                for (const auto& npc : party.hiredNpcs())
+                {
+                    if (npc.npcId == npcId)
+                    {
+                        professionId = npc.professionId;
+                        break;
+                    }
+                }
+                const formats::NPCProfessionEntry* profession = nullptr;
+                if (auto it = npcProfessionById_.find(professionId); it != npcProfessionById_.end())
+                {
+                    profession = &it->second;
+                }
+
+                const bool removed = party.dismissNpc(npcId);
+                if (!removed)
+                {
+                    sharedData->statusMessage = "That NPC is not hired.";
+                }
+                else if (profession != nullptr && !profession->dismissText.empty())
+                {
+                    sharedData->statusMessage = profession->dismissText;
+                }
+                else
+                {
+                    sharedData->statusMessage = "NPC dismissed.";
+                }
+                return;
+            }
+
+            if (party.isNpcHired(npcId))
+            {
+                sharedData->statusMessage = "That NPC is already hired.";
+                return;
+            }
+            if (party.hiredNpcs().size() >= static_cast<size_t>(game::kMaxHiredNpcs))
+            {
+                sharedData->statusMessage = "The party cannot hire any more NPCs.";
+                return;
+            }
+
+            int professionId = 0;
+            if (auto it = npcProfessionIdByNpcId_.find(npcId); it != npcProfessionIdByNpcId_.end())
+            {
+                professionId = it->second;
+            }
+            const formats::NPCProfessionEntry* profession = nullptr;
+            if (auto it = npcProfessionById_.find(professionId); it != npcProfessionById_.end())
+            {
+                profession = &it->second;
+            }
+
+            const int cost = profession ? std::max(0, profession->cost) : 0;
+            if (cost > 0 && !party.spendGold(cost))
+            {
+                sharedData->statusMessage = "Not enough gold to hire that NPC.";
+                return;
+            }
+
+            game::HiredNpc hired;
+            hired.npcId = npcId;
+            hired.professionId = professionId;
+            if (auto nameIt = npcNameById_.find(npcId); nameIt != npcNameById_.end())
+            {
+                hired.name = nameIt->second;
+            }
+            else
+            {
+                hired.name = std::format("NPC #{}", npcId);
+            }
+            hired.professionName = profession ? profession->name : std::string{};
+            hired.hireCost = cost;
+            const std::string hiredName = hired.name;
+
+            if (!party.hireNpc(std::move(hired)))
+            {
+                if (cost > 0)
+                {
+                    party.addGold(cost);
+                }
+                sharedData->statusMessage = "Could not hire that NPC.";
+                return;
+            }
+
+            sharedData->statusMessage = (profession != nullptr && !profession->joinText.empty())
+                                            ? profession->joinText
+                                            : (hiredName + " joins the party.");
+        };
+    }
+}
+
 void Application::loadDataTables()
 {
     if (!vfs)
@@ -3723,6 +3865,11 @@ void Application::loadDataTables()
     npcTopicIdsByNpcId_.clear();
     npcTopicIdsByTextId_.clear();
     npcTopicNameById_.clear();
+    npcProfessionIdByNpcId_.clear();
+    npcGreetingIdByNpcId_.clear();
+    npcHireableById_.clear();
+    npcProfessionById_.clear();
+    npcGreetingById_.clear();
     if (auto npcTextData = readFirstExisting({"npctext.txt", "NPCTEXT.TXT", "NPCText.txt"});
         npcTextData.has_value())
     {
@@ -3821,6 +3968,7 @@ void Application::loadDataTables()
 
                 npcProfessionIdByNpcId_[entry.id] = entry.professionId;
                 npcGreetingIdByNpcId_[entry.id] = entry.greetingId;
+                npcHireableById_[entry.id] = entry.joinsParty;
             }
 
             logger.info(std::format("Loaded {} npc profiles with {} dialogue topic sets",

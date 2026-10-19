@@ -416,6 +416,21 @@ with NPC shopkeeper dialog integrated.
 
 ## Integration notes
 
+### Current implementation
+
+- `npcdata.txt`, `npcnames.txt`, `npctext.txt`, `npctopic.txt`, `npcgreet.txt`,
+  and `npcprof.txt` are loaded at startup. `EVT_SHOW_NPC_DIALOG` opens the
+  dialogue window with the greeting, profession name/benefit text, and up to
+  four topic buttons.
+- Hireable NPCs (`joinsParty` in `npcdata.txt`) append a **Hire (N gp)** choice
+  when the roster has space. Hired NPCs append **Dismiss**. The Application
+  callback validates the roster limit (2), deducts the profession cost, and
+  stores the hireling in `Party::hiredNpcs()`.
+- The HUD shows hired NPC names and professions. The roster is serialized in
+  RHBV v20 (`HiredNpc`: npc id, profession id, name, profession name, cost).
+- Still missing: profession passive bonuses, wandering-NPC distribution,
+  NPC portraits, and original `npcdata.bin` compatibility.
+
 ### Key Functions
 
 | Address      | Suggested Name              | Size  | Purpose |

@@ -147,6 +147,19 @@ void InGameState::enter()
     dialogue_.setOnChoice(
         [this](int choiceId)
         {
+            if (choiceId == ui::kDialogueChoiceHire || choiceId == ui::kDialogueChoiceDismiss)
+            {
+                if (ctx.shared && ctx.shared->onNpcHireAction && dialogueNpcId_ > 0)
+                {
+                    ctx.shared->onNpcHireAction(dialogueNpcId_,
+                                                choiceId == ui::kDialogueChoiceDismiss);
+                }
+                else
+                {
+                    statusLine_ = "NPC hiring is unavailable.";
+                }
+                return;
+            }
             if (choiceId <= 0)
             {
                 statusLine_ = "Dialogue option had no event id";
@@ -435,6 +448,7 @@ std::optional<GameStateId> InGameState::update()
             choices.push_back({choiceId, choiceText});
         }
 
+        dialogueNpcId_ = ctx.shared->pendingNpcDialogId;
         dialogue_.show(speaker, text, choices);
         ctx.shared->openNpcDialogue = false;
         ctx.shared->awaitingNpcDialogText = false;

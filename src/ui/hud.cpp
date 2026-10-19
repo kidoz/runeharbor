@@ -518,6 +518,27 @@ void HUD::renderResourceBar(graphics::IRenderer& renderer, const graphics::Debug
     std::string foodStr = "Food: " + std::to_string(party.food());
     debugText.drawText(sdl, sx(kResourceX + 70, scale, offsetX), sy(kResourceY, scale, offsetY), 1,
                        180, 220, 140, foodStr);
+
+    // Hired NPCs (name + profession), above the gold/food row.
+    if (!party.hiredNpcs().empty())
+    {
+        std::string label = "Hired: ";
+        for (size_t i = 0; i < party.hiredNpcs().size(); ++i)
+        {
+            const auto& npc = party.hiredNpcs()[i];
+            if (i > 0)
+            {
+                label += ", ";
+            }
+            label += npc.name;
+            if (!npc.professionName.empty())
+            {
+                label += " (" + npc.professionName + ")";
+            }
+        }
+        debugText.drawText(sdl, sx(kResourceX - 200, scale, offsetX),
+                           sy(kResourceY - 12, scale, offsetY), 1, 220, 210, 180, label);
+    }
 }
 
 void HUD::renderMinimap(graphics::IRenderer& renderer, const graphics::DebugText& debugText,

@@ -106,6 +106,8 @@ class InGameState : public IGameState
     std::optional<graphics::PickHit> hoveredPick_;
     std::string hoverLine_;
     std::string statusLine_;
+    // NPC id of the currently displayed dialogue (for Hire/Dismiss actions).
+    int dialogueNpcId_ = -1;
 
     // Spell targeting state: when a spell is chosen in the spellbook, the
     // player picks a target (party member for heals, monster for damage).

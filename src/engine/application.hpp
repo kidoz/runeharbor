@@ -228,6 +228,7 @@ class Application
     std::unordered_map<int, std::string> npcTopicNameById_;
     std::unordered_map<int, int> npcProfessionIdByNpcId_;
     std::unordered_map<int, int> npcGreetingIdByNpcId_;
+    std::unordered_map<int, bool> npcHireableById_;
     std::unordered_map<int, formats::NPCProfessionEntry> npcProfessionById_;
     std::unordered_map<int, formats::NPCGreetingEntry> npcGreetingById_;
     std::vector<std::string> npcNamePool_;
@@ -433,6 +434,7 @@ class Application
     void loadGlobalEventScripts();
     void loadMapEventScripts(const std::string& mapName);
     void configureGameplayCallbacks();
+    void configureNpcHireCallback();
     void loadMapStatsTable();
     void playEventSound(int soundId);
     void playUiSound(const std::string& soundName);

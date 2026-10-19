@@ -110,6 +110,10 @@ struct SharedGameData
     std::string npcDialogueText;
     std::vector<int> npcDialogueChoiceIds;
     std::vector<std::string> npcDialogueChoiceTexts;
+    // Set by Application: performs the actual hire/dismiss using NPC data,
+    // profession costs, and the party roster. InGameState invokes it when the
+    // reserved dialogue choices are picked.
+    std::function<void(int npcId, bool dismiss)> onNpcHireAction;
 
     // Runtime shop/building handoff from EVT_SHOW_BUILDING to the shop window.
     // Set by the onShowBuilding event callback; consumed by InGameState.

@@ -14,6 +14,11 @@ class DebugText;
 namespace runeharbor::ui
 {
 
+// Reserved dialogue choice ids for NPC hiring. Real choices are positive EVT
+// topic ids, so these cannot collide.
+inline constexpr int kDialogueChoiceHire = -1;
+inline constexpr int kDialogueChoiceDismiss = -2;
+
 /// A response choice in a dialogue
 struct DialogueChoice
 {
