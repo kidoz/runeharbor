@@ -1,8 +1,8 @@
 [wrap-file]
-directory = SDL-release-3.4.12
-source_url = https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.12.tar.gz
-source_filename = SDL-release-3.4.12.tar.gz
-source_hash = b68381f06a7580e63400b3b6eb547ec57d8c3ebde70f9f40e0aba530ba05da27
+directory = SDL-release-3.4.18
+source_url = https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.18.tar.gz
+source_filename = SDL-release-3.4.18.tar.gz
+source_hash = c4b08b950bd29d83caae0ab8d884298d27046a9d30700fb42841c50992665c90
 method = cmake
 
 [provide]
