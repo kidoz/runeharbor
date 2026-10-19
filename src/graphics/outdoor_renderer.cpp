@@ -878,8 +878,10 @@ void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Ca
         }
     }
 
-    // Monster spawns.
-    if (!(runtimeConfig && runtimeConfig->noMonsters))
+    // Monster spawns. These are source data for the live actor table; once a
+    // live actor provider is installed, the live actors are authoritative and
+    // drawing both would duplicate every monster.
+    if (!liveActorProvider_ && !(runtimeConfig && runtimeConfig->noMonsters))
     {
         for (const auto& spawn : odmData.spawns)
         {

@@ -672,23 +672,29 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         renderOps.push_back(std::move(op));
     }
 
-    for (const auto& spawn : blvData.spawns)
+    // Static spawn markers are source data for the live actor table. When the
+    // host installs a live actor provider, draw only the live actors so each
+    // monster is rendered once and dead/despawned state is respected.
+    if (!liveActorProvider_)
     {
-        if (runtimeConfig && runtimeConfig->noMonsters)
-            break;
-        if (spawn.objectType == 0)
-            continue;
+        for (const auto& spawn : blvData.spawns)
+        {
+            if (runtimeConfig && runtimeConfig->noMonsters)
+                break;
+            if (spawn.objectType == 0)
+                continue;
 
-        BillboardSprite sprite = makeIndoorSpawnBillboard(spawn, cameraPos, runtimeConfig,
-                                                          monsterSpriteLookup, spriteFrameTable);
-        if (sprite.distanceSq > 100000000.0f)
-            continue;
+            BillboardSprite sprite = makeIndoorSpawnBillboard(
+                spawn, cameraPos, runtimeConfig, monsterSpriteLookup, spriteFrameTable);
+            if (sprite.distanceSq > 100000000.0f)
+                continue;
 
-        RenderOp op;
-        op.type = RenderOpType::Billboard;
-        op.distanceSq = sprite.distanceSq;
-        op.billboard = std::move(sprite);
-        renderOps.push_back(std::move(op));
+            RenderOp op;
+            op.type = RenderOpType::Billboard;
+            op.distanceSq = sprite.distanceSq;
+            op.billboard = std::move(sprite);
+            renderOps.push_back(std::move(op));
+        }
     }
 
     // Live roaming/combat monsters (real heading/position/state).
