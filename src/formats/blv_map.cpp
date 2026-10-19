@@ -10,6 +10,19 @@
 namespace runeharbor::formats
 {
 
+namespace
+{
+// BLV sections are byte-packed, so count fields frequently start at offsets
+// that are not naturally aligned. Copy instead of dereferencing a cast pointer.
+template <typename T>
+T readUnaligned(const uint8_t* data, size_t offset)
+{
+    T value{};
+    std::memcpy(&value, data + offset, sizeof(T));
+    return value;
+}
+} // namespace
+
 BLVMap::BLVMap(util::ILogger& logger) : logger(logger) {}
 
 bool BLVMap::parse(const std::vector<uint8_t>& data, ProgressCallback progress)
@@ -132,7 +145,7 @@ bool BLVMap::parseVertices(const std::vector<uint8_t>& data, size_t& offset)
         return false;
     }
 
-    uint32_t count = *reinterpret_cast<const uint32_t*>(data.data() + offset);
+    uint32_t count = readUnaligned<uint32_t>(data.data(), offset);
     offset += 4;
 
     if (count == 0 || count > 100000)
@@ -191,7 +204,7 @@ bool BLVMap::parseFaces(const std::vector<uint8_t>& data, size_t& offset)
         return false;
     }
 
-    uint32_t count = *reinterpret_cast<const uint32_t*>(data.data() + offset);
+    uint32_t count = readUnaligned<uint32_t>(data.data(), offset);
     offset += 4;
 
     if (count == 0 || count > 100000)
@@ -395,7 +408,7 @@ bool BLVMap::parseFaceExtras(const std::vector<uint8_t>& data, size_t& offset)
         return false;
     }
 
-    uint32_t count = *reinterpret_cast<const uint32_t*>(data.data() + offset);
+    uint32_t count = readUnaligned<uint32_t>(data.data(), offset);
     offset += 4;
 
     if (count > 100000)
@@ -463,7 +476,7 @@ bool BLVMap::parseSectors(const std::vector<uint8_t>& data, size_t& offset)
         return false;
     }
 
-    uint32_t count = *reinterpret_cast<const uint32_t*>(data.data() + offset);
+    uint32_t count = readUnaligned<uint32_t>(data.data(), offset);
     offset += 4;
 
     if (count > 10000)
@@ -604,7 +617,7 @@ bool BLVMap::parseLights(const std::vector<uint8_t>& data, size_t& offset)
         return false;
     }
 
-    uint32_t count = *reinterpret_cast<const uint32_t*>(data.data() + offset);
+    uint32_t count = readUnaligned<uint32_t>(data.data(), offset);
     offset += 4;
 
     if (count > 10000)
@@ -650,7 +663,7 @@ bool BLVMap::parseTrailingData(const std::vector<uint8_t>& data, size_t& offset)
     {
         return false;
     }
-    uint32_t doorCount = *reinterpret_cast<const uint32_t*>(data.data() + offset);
+    uint32_t doorCount = readUnaligned<uint32_t>(data.data(), offset);
     offset += 4;
     logger.debug(std::format("Door count: {}", doorCount));
 
@@ -660,7 +673,7 @@ bool BLVMap::parseTrailingData(const std::vector<uint8_t>& data, size_t& offset)
         logger.debug("No space for decoration count");
         return false;
     }
-    const uint32_t decorCount = *reinterpret_cast<const uint32_t*>(data.data() + offset);
+    const uint32_t decorCount = readUnaligned<uint32_t>(data.data(), offset);
     offset += 4;
     constexpr size_t decorSize = sizeof(BLVDecorationOnDisk);
     if (offset + static_cast<size_t>(decorCount) * decorSize > data.size())
@@ -716,7 +729,7 @@ bool BLVMap::parseTrailingData(const std::vector<uint8_t>& data, size_t& offset)
     // 16. Spawn points (count-prefixed)
     if (offset + 4 <= data.size())
     {
-        uint32_t spawnCount = *reinterpret_cast<const uint32_t*>(data.data() + offset);
+        uint32_t spawnCount = readUnaligned<uint32_t>(data.data(), offset);
         offset += 4;
 
         if (spawnCount <= 5000)
@@ -743,7 +756,7 @@ bool BLVMap::parseTrailingData(const std::vector<uint8_t>& data, size_t& offset)
         return true;
     }
 
-    const uint32_t outlineCount = *reinterpret_cast<const uint32_t*>(data.data() + offset);
+    const uint32_t outlineCount = readUnaligned<uint32_t>(data.data(), offset);
     offset += 4;
     constexpr size_t outlineSize = sizeof(BLVOutlinePoint);
     const size_t outlinesSize = static_cast<size_t>(outlineCount) * outlineSize;
@@ -775,7 +788,7 @@ bool BLVMap::skipCountPrefixed(const std::vector<uint8_t>& data, size_t& offset,
         return false;
     }
 
-    outCount = *reinterpret_cast<const uint32_t*>(data.data() + offset);
+    outCount = readUnaligned<uint32_t>(data.data(), offset);
     offset += 4;
 
     size_t totalSize = static_cast<size_t>(outCount) * structSize;
