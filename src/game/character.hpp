@@ -336,6 +336,15 @@ struct Character
 
     bool isConscious() const { return isAlive() && !hasCondition(ConditionIndex::Unconscious); }
 
+    /// A conscious character that is not prevented from acting by a disabling
+    /// condition. Used by combat turn scheduling and player attack checks;
+    /// `isConscious()` remains the right test for targeting and XP sharing.
+    bool canAct() const
+    {
+        return isConscious() && !hasCondition(ConditionIndex::Asleep) &&
+               !hasCondition(ConditionIndex::Paralyzed);
+    }
+
     // Calculate effective stat (base stats only — no racial system in MM7)
     int effectiveStat(int statIndex) const;
 

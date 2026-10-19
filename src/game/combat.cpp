@@ -600,9 +600,9 @@ AttackResult CombatSystem::playerAttack(int characterIndex, int monsterIndex)
         return result;
 
     auto& ch = party.member(characterIndex);
-    if (!ch.isConscious())
+    if (!ch.canAct())
     {
-        result.description = ch.name + " is incapacitated";
+        result.description = ch.name + " is unable to act";
         return result;
     }
 
@@ -1856,7 +1856,7 @@ void CombatSystem::pruneQueue()
     {
         if (actor.type == TurnActor::Type::Player)
         {
-            return gameWorld_ && gameWorld_->party().member(actor.index).isConscious();
+            return gameWorld_ && gameWorld_->party().member(actor.index).canAct();
         }
         if (actor.index >= 0 && actor.index < static_cast<int>(monsters_.size()))
         {
@@ -1886,7 +1886,7 @@ void CombatSystem::startTurnBasedRound()
     auto& party = gameWorld_->party();
     for (int i = 0; i < kPartySize; i++)
     {
-        if (party.member(i).isConscious())
+        if (party.member(i).canAct())
         {
             TurnActor a;
             a.type = TurnActor::Type::Player;
@@ -1945,7 +1945,7 @@ void CombatSystem::processMonsterTurn()
         TurnActor& actor = turnQueue_.front();
         if (actor.type == TurnActor::Type::Player)
         {
-            if (gameWorld_ && gameWorld_->party().member(actor.index).isConscious())
+            if (gameWorld_ && gameWorld_->party().member(actor.index).canAct())
             {
                 awaitingPlayerInput_ = true;
                 return;
