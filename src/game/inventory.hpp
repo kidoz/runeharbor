@@ -210,6 +210,9 @@ class Inventory
         inventories_ = std::move(inventories);
     }
 
+    // Clear all runtime items while keeping the loaded item definition table.
+    void reset() { inventories_ = {}; }
+
   private:
     EquipType categorizeItem(const formats::ItemEntry& entry) const;
     EquipSlot mapEquipSlot(const formats::ItemEntry& entry) const;

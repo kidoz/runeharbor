@@ -590,6 +590,16 @@ void EventEngine::clear()
     lastRuntimeTick_ = -1;
 }
 
+void EventEngine::resetRuntimeState()
+{
+    // Keep events_ (global scripts loaded at startup); the next map load
+    // repopulates mapScopedEvents_ and rebuilds the timer schedule.
+    mapScopedEvents_.clear();
+    timerTriggers_.clear();
+    firedOneShotEvents_.clear();
+    lastRuntimeTick_ = -1;
+}
+
 std::vector<uint8_t> EventEngine::serializeRuntimeState() const
 {
     std::vector<uint8_t> out;

@@ -180,6 +180,10 @@ class EventEngine
     // Clear all registered events
     void clear();
 
+    // Clear per-playthrough runtime state (map scope, timers, fired one-shots)
+    // while keeping the loaded global event scripts.
+    void resetRuntimeState();
+
     // Persist/restore runtime trigger state (timer schedule, last runtime tick).
     std::vector<uint8_t> serializeRuntimeState() const;
     bool deserializeRuntimeState(const std::vector<uint8_t>& data);

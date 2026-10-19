@@ -352,6 +352,7 @@ void Application::transitionTo(GameStateId id)
         activeState = titleState.get();
         break;
     case GameStateId::CharacterCreation:
+        resetForNewGame();
         activeState = charCreationState.get();
         break;
     case GameStateId::Loading:
@@ -2763,6 +2764,72 @@ void Application::commitKeyboardState()
     for (int i = 0; i < keyCount; i++)
     {
         previousKeyState[static_cast<size_t>(i)] = keyState[i] ? 1 : 0;
+    }
+}
+
+void Application::resetForNewGame()
+{
+    // New Game must not inherit state from a previous playthrough or a loaded
+    // save: clear the world, inventories, quests, event runtime state, combat,
+    // and the currently mounted scene before character creation starts.
+    if (gameWorld_)
+    {
+        gameWorld_->reset();
+    }
+    if (inventory_)
+    {
+        inventory_->reset();
+    }
+    if (questLog_)
+    {
+        questLog_->reset();
+    }
+    if (eventEngine_)
+    {
+        eventEngine_->resetRuntimeState();
+    }
+    if (combatSystem_)
+    {
+        combatSystem_->clearMonsters();
+        combatSystem_->setInCombat(false);
+    }
+    if (mapScene)
+    {
+        mapScene->clear();
+    }
+
+    initDefaultParty();
+
+    mapLoaded = false;
+    autoLoadMap = false;
+    quickStartReady = false;
+    startupMapName.clear();
+    startupPreferOutdoor = false;
+    pendingEntryDirection_ = 0;
+    pendingTransition_ = {};
+    pendingArrivalOverride_ = {};
+
+    if (sharedData)
+    {
+        sharedData->loadFromSave = false;
+        sharedData->quickStartReady = false;
+        sharedData->autoLoadMap = false;
+        sharedData->startupMapName.clear();
+        sharedData->startupPreferOutdoor = false;
+        sharedData->arrivalOverrideActive = false;
+        sharedData->hasPendingEventRuntimeState = false;
+        sharedData->pendingEventRuntimeState.clear();
+        sharedData->statusMessage.clear();
+        sharedData->loadingScreenIndex = 0;
+        sharedData->openNpcDialogue = false;
+        sharedData->awaitingNpcDialogText = false;
+        sharedData->pendingNpcDialogId = -1;
+        sharedData->npcDialogueSpeaker.clear();
+        sharedData->npcDialogueText.clear();
+        sharedData->npcDialogueChoiceIds.clear();
+        sharedData->npcDialogueChoiceTexts.clear();
+        sharedData->openShop = false;
+        sharedData->pendingShopBuildingId = 0;
     }
 }
 

@@ -68,8 +68,10 @@ class MapScene
 
     void renderWireframe(graphics::LineRenderer& renderer, const MapRenderOptions& options) const;
 
-  private:
+    /// Unload the current map and discard all scene geometry.
     void clear();
+
+  private:
     void buildWorldVertices();
     void computeBounds();
 

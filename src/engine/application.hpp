@@ -425,6 +425,7 @@ class Application
 
     // Character helpers (used by initDefaultParty)
     void initDefaultParty();
+    void resetForNewGame();
     void commitPartyToGameWorld();
     void updateCharacterForFace(Character& ch);
     void updateSkillsForClass(Character& ch);
