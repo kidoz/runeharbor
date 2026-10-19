@@ -1017,6 +1017,9 @@ Offset +7: skill_level_override (byte)
 
 ### Current implementation
 
+- `SpellSystem::canCast` and `getAvailableSpells` require the spell to be in the
+  character's spellbook (`knownSpells`). Scrolls, potions, and EVT script casts use
+  `castScriptSpell`, which bypasses the spellbook gate.
 - Buff spells (Shield, Bless, Haste, Heroism, Stone Skin, Hour of Power,
   Day of Protection, Resist...) create `TimedEffect` entries carrying stat, AC, and
   resistance bonuses with a game-time expiry. `GameWorld::processConditions()`

@@ -43,6 +43,30 @@ void prepareCaster(Character& ch)
 
 } // namespace
 
+TEST_CASE("Spellbook gates casting and available spells", "[game][spells]")
+{
+    util::ConsoleLogger logger;
+    GameWorld world;
+    SpellSystem spells(logger);
+    spells.setGameWorld(&world);
+    spells.loadSpellData({makeSpell(1, "Fire Bolt", 1), makeSpell(45, "Shield", 1)});
+
+    auto& ch = world.party().member(0);
+    prepareCaster(ch);
+    learnSkill(ch, SkillId::Fire, 10, SkillMastery::Master);
+    learnSkill(ch, SkillId::Spirit, 10, SkillMastery::Master);
+
+    // Skill and mana alone are not enough: the spell must be in the spellbook.
+    CHECK_FALSE(spells.canCast(0, 1));
+    CHECK(spells.getAvailableSpells(0).empty());
+
+    ch.knownSpells[1] = true;
+    CHECK(spells.canCast(0, 1));
+    const auto available = spells.getAvailableSpells(0);
+    CHECK(available.size() == 1);
+    CHECK(available[0] == 1);
+}
+
 TEST_CASE("Buff spells add timed effects that expire", "[game][spells][buffs]")
 {
     util::ConsoleLogger logger;

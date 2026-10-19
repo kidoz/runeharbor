@@ -168,6 +168,11 @@ bool SpellSystem::canCast(int characterIndex, int spellId) const
     if (!ch.isConscious())
         return false;
 
+    // A character can only cast spells in their spellbook. Scrolls, potions,
+    // and scripted casts use castScriptSpell, which bypasses this gate.
+    if (!ch.knowsSpell(spellId))
+        return false;
+
     // Check if character has the required school skill
     int skillLevel = getEffectiveSkillLevel(characterIndex, spell->school);
     if (skillLevel < spell->level)
@@ -634,8 +639,13 @@ std::vector<int> SpellSystem::getAvailableSpells(int characterIndex) const
     if (!gameWorld_ || characterIndex < 0 || characterIndex >= kPartySize)
         return available;
 
+    const auto& ch = gameWorld_->party().member(characterIndex);
     for (const auto& spell : spells_)
     {
+        if (!ch.knowsSpell(spell.spellId))
+        {
+            continue;
+        }
         int skillLevel = getEffectiveSkillLevel(characterIndex, spell.school);
         if (skillLevel >= spell.level)
         {
