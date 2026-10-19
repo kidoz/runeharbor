@@ -33,7 +33,8 @@ struct SaveHeader
     //  11  — party height / eye level
     //  12  — per-character spellbook (knownSpells) + quickbar, party bankGold
     //  13  — per-map automap explored sectors (fog-of-war)
-    static constexpr uint32_t kVersion = 13;
+    //  14  — generated chest world positions
+    static constexpr uint32_t kVersion = 14;
 
     uint32_t magic = kMagic;
     uint32_t version = kVersion;

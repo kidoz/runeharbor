@@ -1495,6 +1495,9 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
             {
                 writeI32(out, itemId);
             }
+            writeFloat(out, chest.x);
+            writeFloat(out, chest.y);
+            writeFloat(out, chest.z);
         }
     }
 
@@ -2019,6 +2022,14 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
                     if (!readI32(ptr, end, itemId))
                         return false;
                     chest.itemIds.push_back(itemId);
+                }
+                if (header.version >= 14)
+                {
+                    if (!readFloat(ptr, end, chest.x) || !readFloat(ptr, end, chest.y) ||
+                        !readFloat(ptr, end, chest.z))
+                    {
+                        return false;
+                    }
                 }
                 content.chests.push_back(std::move(chest));
             }

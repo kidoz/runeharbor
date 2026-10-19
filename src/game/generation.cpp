@@ -103,6 +103,9 @@ GeneratedMapContent ContentGenerator::generateForMap(
         {
             GeneratedChest chest;
             chest.chestId = static_cast<int>(content.chests.size());
+            chest.x = x;
+            chest.y = y;
+            chest.z = z;
             chest.itemIds = generateChestItems(difficulty, salt ^ 0xC8E57ULL);
             content.chests.push_back(std::move(chest));
         }
@@ -124,11 +127,16 @@ GeneratedMapContent ContentGenerator::generateForMap(
                  stableMix(content.seed ^ 0x0D4D4D4DULL, static_cast<uint64_t>(i + 1)));
     }
 
-    // Ensure at least one chest exists on first generation in higher difficulty maps.
-    if (content.chests.empty() && difficulty >= 4 && maxChests > 0)
+    // Ensure at least one chest exists on first generation in higher difficulty
+    // maps. Place it beside the first generated monster so it has a reachable
+    // world position; a chest without a position cannot be interacted with.
+    if (content.chests.empty() && difficulty >= 4 && maxChests > 0 && !content.monsters.empty())
     {
         GeneratedChest chest;
         chest.chestId = 0;
+        chest.x = content.monsters.front().x + 128.0f;
+        chest.y = content.monsters.front().y;
+        chest.z = content.monsters.front().z;
         chest.itemIds = generateChestItems(difficulty, content.seed ^ 0xABCD1234ULL);
         content.chests.push_back(std::move(chest));
     }

@@ -239,3 +239,40 @@ TEST_CASE("Save header rejects bad magic and future versions", "[game][save]")
         REQUIRE_FALSE(save.slotExists(3));
     }
 }
+
+TEST_CASE("Save/Load preserves generated chest world positions", "[game][save][chest]")
+{
+    NullLogger logger;
+    TempSaveDir dir;
+
+    SaveGame save(logger);
+    save.setSaveDirectory(dir.path.string());
+
+    GameWorld src;
+    src.setCurrentMap("test.odm");
+
+    GeneratedMapContent content;
+    content.seed = 42;
+    GeneratedChest chest;
+    chest.chestId = 3;
+    chest.x = 111.0f;
+    chest.y = 222.0f;
+    chest.z = 333.0f;
+    chest.itemIds = {5, 6};
+    content.chests.push_back(chest);
+    src.setGeneratedContent("test.odm", content);
+
+    REQUIRE(save.save(src, 0));
+
+    GameWorld dst;
+    REQUIRE(save.load(dst, 0));
+
+    const auto* loaded = dst.getGeneratedContent("test.odm");
+    REQUIRE(loaded != nullptr);
+    REQUIRE(loaded->chests.size() == 1);
+    CHECK(loaded->chests[0].chestId == 3);
+    CHECK(loaded->chests[0].x == 111.0f);
+    CHECK(loaded->chests[0].y == 222.0f);
+    CHECK(loaded->chests[0].z == 333.0f);
+    REQUIRE(loaded->chests[0].itemIds.size() == 2);
+}
