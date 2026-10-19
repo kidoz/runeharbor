@@ -75,6 +75,48 @@ bool isBuffSpellName(const std::string& lowerName)
                         "stone skin", "resist", "protection", "regeneration", "armor", "might",
                         "grace", "endurance", "luck", "speed", "prayer"});
 }
+
+// Party-wide utility spells handled by GameWorld rather than TimedEffect.
+enum class UtilitySpellKind : uint8_t
+{
+    None = 0,
+    Light,
+    Fly,
+    WaterWalk,
+};
+
+UtilitySpellKind utilitySpellKind(std::string_view lowerName)
+{
+    if (lowerName == "light" || lowerName.find("torch light") != std::string_view::npos ||
+        lowerName.find("torchlight") != std::string_view::npos)
+    {
+        return UtilitySpellKind::Light;
+    }
+    if (lowerName == "fly")
+    {
+        return UtilitySpellKind::Fly;
+    }
+    if (lowerName.find("water walk") != std::string_view::npos)
+    {
+        return UtilitySpellKind::WaterWalk;
+    }
+    return UtilitySpellKind::None;
+}
+
+UtilityEffect toGameUtilityEffect(UtilitySpellKind kind)
+{
+    switch (kind)
+    {
+    case UtilitySpellKind::Light:
+        return UtilityEffect::Light;
+    case UtilitySpellKind::Fly:
+        return UtilityEffect::Fly;
+    case UtilitySpellKind::WaterWalk:
+        return UtilityEffect::WaterWalk;
+    default:
+        return UtilityEffect::Light;
+    }
+}
 } // namespace
 
 SpellSystem::SpellSystem(util::ILogger& logger) : logger_(logger) {}
@@ -109,7 +151,12 @@ void SpellSystem::loadSpellData(const std::vector<formats::SpellEntry>& spells)
         // and beneficial spells), so check names first, then fall back to the
         // school heuristic.
         const std::string lowerName = toLowerCopy(info.name);
-        if (isHealingSpellName(lowerName))
+        if (utilitySpellKind(lowerName) != UtilitySpellKind::None)
+        {
+            // Light/Fly/Water Walk affect the whole party.
+            info.target = SpellTarget::AllAllies;
+        }
+        else if (isHealingSpellName(lowerName))
         {
             info.target = SpellTarget::SingleAlly;
         }
@@ -415,13 +462,46 @@ SpellResult SpellSystem::castBuffSpell(int characterIndex, int spellId)
     const int64_t durationTicks = static_cast<int64_t>(std::max(1, spell->level)) *
                                   GameCalendar::kTicksPerHour * masteryPct / 100;
     const int64_t minimumTicks = GameCalendar::kTicksPerHour / 2;
+    const int64_t expiresAt = now + std::max(minimumTicks, durationTicks);
+
+    const std::string lower = toLowerCopy(spell->name);
+
+    // Light/Fly/Water Walk modify party-wide state instead of character
+    // TimedEffects. Mastery controls Light's strength; the movement effects
+    // only need to be active.
+    if (const UtilitySpellKind kind = utilitySpellKind(lower); kind != UtilitySpellKind::None)
+    {
+        int strength = 1;
+        switch (mastery)
+        {
+        case SkillMastery::Expert:
+            strength = 2;
+            break;
+        case SkillMastery::Master:
+            strength = 3;
+            break;
+        case SkillMastery::GrandMaster:
+            strength = 4;
+            break;
+        default:
+            break;
+        }
+        gameWorld_->setUtilityEffect(toGameUtilityEffect(kind), strength, expiresAt);
+
+        result.success = true;
+        result.description = caster.name + " casts " + spell->name;
+        if (callbacks_.onSpellCast)
+        {
+            callbacks_.onSpellCast(spellId, characterIndex, result);
+        }
+        return result;
+    }
 
     TimedEffect effect;
     effect.spellId = spellId;
     effect.name = spell->name;
-    effect.expiresAtTicks = now + std::max(minimumTicks, durationTicks);
+    effect.expiresAtTicks = expiresAt;
 
-    const std::string lower = toLowerCopy(spell->name);
     const auto addAllResistances = [&effect](int amount)
     {
         for (int& value : effect.resistanceBonus)
@@ -528,6 +608,24 @@ SpellResult SpellSystem::castScriptSpell(int spellId, int power, int targetCharI
     const SpellSchool school = spell ? spell->school : determineSchool(spellId);
     const std::string spellName =
         (spell && !spell->name.empty()) ? spell->name : ("Spell #" + std::to_string(spellId));
+
+    // Script casts of utility spells apply to the party instead of dealing
+    // damage to the targeted character.
+    if (const UtilitySpellKind kind = utilitySpellKind(toLowerCopy(spellName));
+        kind != UtilitySpellKind::None)
+    {
+        const int hours = std::max(1, power > 0 ? power : (spell ? spell->level : 1));
+        const int64_t expiresAt = gameWorld_->calendar().totalTicks +
+                                  static_cast<int64_t>(hours) * GameCalendar::kTicksPerHour;
+        gameWorld_->setUtilityEffect(toGameUtilityEffect(kind), 1, expiresAt);
+        result.success = true;
+        result.description = spellName + " affects the party";
+        if (callbacks_.onSpellCast)
+        {
+            callbacks_.onSpellCast(spellId, -1, result);
+        }
+        return result;
+    }
 
     int magnitude = std::max(1, power);
     if (power <= 0 && spell && spell->level > 0)

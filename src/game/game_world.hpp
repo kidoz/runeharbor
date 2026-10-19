@@ -125,6 +125,27 @@ struct SavedMapState
     std::vector<uint16_t> exploredSectors;
 };
 
+// Party-wide utility spell effects. Unlike per-character TimedEffects these
+// affect movement and rendering (Light/Fly/Water Walk).
+enum class UtilityEffect : uint8_t
+{
+    Light = 0,
+    Fly,
+    WaterWalk,
+    Count,
+};
+
+struct UtilityEffectState
+{
+    int strength = 0;
+    int64_t expiresAtTicks = 0; // 0 = active until dispelled
+
+    bool active(int64_t nowTicks) const
+    {
+        return strength > 0 && (expiresAtTicks == 0 || nowTicks < expiresAtTicks);
+    }
+};
+
 // Runtime items spawned by EVT/map logic.
 struct SpawnedMapItem
 {
@@ -263,6 +284,18 @@ class GameWorld
     const RuntimeConfig& runtimeConfig() const { return runtimeConfig_; }
     void setRuntimeConfig(const RuntimeConfig& config) { runtimeConfig_ = config; }
 
+    // Party utility spell effects (Light/Fly/Water Walk).
+    void setUtilityEffect(UtilityEffect effect, int strength, int64_t expiresAtTicks);
+    bool hasUtilityEffect(UtilityEffect effect) const;
+    int utilityEffectStrength(UtilityEffect effect) const;
+    const UtilityEffectState& utilityEffect(UtilityEffect effect) const;
+    void clearExpiredUtilityEffects();
+
+    // Night-blend factor after applying Light (0 = no reduction, <=0.9).
+    float lightNightReduction() const;
+    // calendar().nightBlend() with the Light reduction applied.
+    float effectiveNightBlend() const;
+
     // Advance time-based condition effects: poison/disease damage per in-game
     // hour and expiry of timed conditions (weak, afraid, asleep, paralyzed, ...).
     // Safe to call every frame; it only does work once per in-game hour.
@@ -289,6 +322,7 @@ class GameWorld
     std::unordered_map<std::string, std::vector<SpawnedMapItem>> spawnedMapItems_;
     EventInteractionContext lastEventInteraction_;
     RuntimeConfig runtimeConfig_;
+    std::array<UtilityEffectState, static_cast<size_t>(UtilityEffect::Count)> utilityEffects_ = {};
     int64_t lastConditionTick_ = 0;
 };
 

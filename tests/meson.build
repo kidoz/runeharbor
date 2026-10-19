@@ -74,6 +74,7 @@ test_sources = files(
     'game/combat_test.cpp',
     'game/combat_depth_test.cpp',
     'game/condition_test.cpp',
+    'game/utility_effect_test.cpp',
     'game/generation_test.cpp',
     'game/spells_test.cpp',
     'game/inventory_test.cpp',

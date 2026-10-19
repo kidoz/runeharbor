@@ -34,6 +34,73 @@ TEST_CASE("Physics - Basic Gravity", "[physics]")
     }
 }
 
+TEST_CASE("Physics - Fly suspends gravity and the ground clamp", "[physics][utility]")
+{
+    formats::ODMMapData odm;
+    odm.heightmap.resize(static_cast<size_t>(formats::ODMMapData::TERRAIN_SIZE) *
+                         formats::ODMMapData::TERRAIN_SIZE);
+    odm.tileTextures = {"grastyl"};
+
+    game::Party party;
+    party.setWorldPosition(0.0f, 0.0f, 1000.0f);
+    party.setVelocityZ(0.0f);
+
+    engine::PhysicsConfig config;
+    config.gravity = -1000.0f;
+    config.flying = true;
+    engine::updatePartyPhysics(party, nullptr, &odm, 1000.0f, config);
+    REQUIRE_THAT(party.worldZ(), Catch::Matchers::WithinAbs(1000.0f, 0.1f));
+
+    party.setWorldPosition(0.0f, 0.0f, 1000.0f);
+    party.setVelocityZ(0.0f);
+    config.flying = false;
+    engine::updatePartyPhysics(party, nullptr, &odm, 1000.0f, config);
+    REQUIRE(party.worldZ() < 1000.0f);
+}
+
+TEST_CASE("Physics - water blocks entry without Water Walk", "[physics][utility]")
+{
+    formats::ODMMapData odm;
+    odm.heightmap.resize(static_cast<size_t>(formats::ODMMapData::TERRAIN_SIZE) *
+                         formats::ODMMapData::TERRAIN_SIZE);
+    odm.tileTextures = {"grastyl", "wtrtyl"};
+    // Water cell at grid (65, 64).
+    odm.heightmap[static_cast<size_t>(64 * formats::ODMMapData::TERRAIN_SIZE + 65)].tileIndex = 1;
+
+    engine::PhysicsConfig config;
+    config.gravity = 0.0f;
+
+    game::Party blocked;
+    blocked.setWorldPosition(256.0f, 0.0f, 0.0f);
+    blocked.setVelocityX(2000.0f);
+    engine::updatePartyPhysics(blocked, nullptr, &odm, 200.0f, config);
+    CHECK_THAT(blocked.worldX(), Catch::Matchers::WithinAbs(256.0f, 0.5f));
+    CHECK(blocked.velocityX() == 0.0f);
+
+    game::Party walking;
+    walking.setWorldPosition(256.0f, 0.0f, 0.0f);
+    walking.setVelocityX(2000.0f);
+    config.waterWalk = true;
+    engine::updatePartyPhysics(walking, nullptr, &odm, 200.0f, config);
+    CHECK(walking.worldX() > 512.0f);
+
+    game::Party flying;
+    flying.setWorldPosition(256.0f, 0.0f, 100.0f);
+    flying.setVelocityX(2000.0f);
+    config.waterWalk = false;
+    config.flying = true;
+    engine::updatePartyPhysics(flying, nullptr, &odm, 200.0f, config);
+    CHECK(flying.worldX() > 512.0f);
+
+    // A bridge/piers above the water surface stay passable.
+    game::Party bridge;
+    bridge.setWorldPosition(256.0f, 0.0f, 64.0f);
+    bridge.setVelocityX(2000.0f);
+    config.flying = false;
+    engine::updatePartyPhysics(bridge, nullptr, &odm, 200.0f, config);
+    CHECK(bridge.worldX() > 512.0f);
+}
+
 TEST_CASE("Physics - Slope Limitations", "[physics]")
 {
     game::Party party;

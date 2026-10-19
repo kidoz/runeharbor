@@ -51,6 +51,35 @@ inline float sampleOutdoorTerrainHeight(const formats::ODMMapData& odmData, floa
     return h0 + fy * (h1 - h0);
 }
 
+// True when the terrain cell under the world position uses the water tileset.
+// RuneHarbor has no depth/shoreline classification, so water cells are treated
+// as impassable without Water Walk.
+inline bool isOutdoorWaterAt(const formats::ODMMapData& odmData, float worldX, float worldY)
+{
+    if (odmData.heightmap.empty())
+    {
+        return false;
+    }
+
+    const int gx = std::clamp(static_cast<int>(std::floor(formats::outdoorWorldToGridX(worldX))), 0,
+                              formats::ODMMapData::TERRAIN_SIZE - 1);
+    const int gy = std::clamp(static_cast<int>(std::floor(formats::outdoorWorldToGridY(worldY))), 0,
+                              formats::ODMMapData::TERRAIN_SIZE - 1);
+    const size_t index = static_cast<size_t>(gy * formats::ODMMapData::TERRAIN_SIZE + gx);
+    if (index >= odmData.heightmap.size())
+    {
+        return false;
+    }
+
+    const uint8_t tileIndex = odmData.heightmap[index].tileIndex;
+    if (tileIndex >= odmData.tileTextures.size())
+    {
+        return false;
+    }
+    const std::string& texture = odmData.tileTextures[tileIndex];
+    return texture.rfind("wtrtyl", 0) == 0;
+}
+
 // Clamp the party's Z so it can never sit below the terrain floor.
 // Above-ground Z (jumping, falling, freshly loaded save) is preserved;
 // sub-terrain Z gets snapped up to the floor.

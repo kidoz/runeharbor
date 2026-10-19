@@ -1286,7 +1286,7 @@ void InGameState::render()
         const auto* runtimeConfig =
             ctx.shared->gameWorld ? &ctx.shared->gameWorld->runtimeConfig() : nullptr;
         const float nightBlend =
-            ctx.shared->gameWorld ? ctx.shared->gameWorld->calendar().nightBlend() : 0.0f;
+            ctx.shared->gameWorld ? ctx.shared->gameWorld->effectiveNightBlend() : 0.0f;
 
         SDL_Renderer* sdlRenderer = ctx.renderer ? ctx.renderer->getSDLRenderer() : nullptr;
         if (sdlRenderer)
@@ -1410,6 +1410,10 @@ void InGameState::updateCameraInput(float deltaMs)
     float yaw = party.yaw();
     float pitch = party.pitch();
 
+    const bool flying = ctx.shared->gameWorld->hasUtilityEffect(game::UtilityEffect::Fly);
+    const bool waterWalk = ctx.shared->gameWorld->hasUtilityEffect(game::UtilityEffect::WaterWalk);
+    float vertical = 0.0f;
+
     const auto keyDown = [this](SDL_Scancode primary, SDL_Scancode alternate)
     { return ctx.isKeyDown(primary) || ctx.isKeyDown(alternate); };
 
@@ -1421,13 +1425,28 @@ void InGameState::updateCameraInput(float deltaMs)
     {
         yaw -= turnStep;
     }
-    if (ctx.isKeyDown(SDL_SCANCODE_PAGEUP))
+    // While flying, PageUp/PageDown control altitude instead of pitch.
+    if (flying)
     {
-        pitch += turnStep;
+        if (ctx.isKeyDown(SDL_SCANCODE_PAGEUP))
+        {
+            vertical += 1.0f;
+        }
+        if (ctx.isKeyDown(SDL_SCANCODE_PAGEDOWN))
+        {
+            vertical -= 1.0f;
+        }
     }
-    if (ctx.isKeyDown(SDL_SCANCODE_PAGEDOWN))
+    else
     {
-        pitch -= turnStep;
+        if (ctx.isKeyDown(SDL_SCANCODE_PAGEUP))
+        {
+            pitch += turnStep;
+        }
+        if (ctx.isKeyDown(SDL_SCANCODE_PAGEDOWN))
+        {
+            pitch -= turnStep;
+        }
     }
     if (ctx.isKeyPressed(SDL_SCANCODE_HOME))
     {
@@ -1485,6 +1504,12 @@ void InGameState::updateCameraInput(float deltaMs)
 
     party.setVelocityX(vx);
     party.setVelocityY(vy);
+    if (flying)
+    {
+        // Hover when no altitude key is held; physics leaves vertical velocity
+        // untouched while Fly is active.
+        party.setVelocityZ(vertical * moveSpeed);
+    }
 
     float px = party.worldX();
     float py = party.worldY();
@@ -1494,6 +1519,8 @@ void InGameState::updateCameraInput(float deltaMs)
     {
         PhysicsConfig physConfig;
         physConfig.playerHeight = static_cast<float>(config.partyHeight);
+        physConfig.flying = flying;
+        physConfig.waterWalk = waterWalk;
 
         const formats::BLVMapData* blv = nullptr;
         const formats::ODMMapData* odm = nullptr;
@@ -1872,7 +1899,7 @@ void InGameState::renderOverlay()
     if (ctx.shared && ctx.shared->gameWorld)
     {
         const auto& runtime = ctx.shared->gameWorld->runtimeConfig();
-        const float nightBlend = ctx.shared->gameWorld->calendar().nightBlend();
+        const float nightBlend = ctx.shared->gameWorld->effectiveNightBlend();
         lines.push_back(std::format("WALK:{}  PARTY_H:{}  EYE:{}  MIST:{}", runtime.walkSpeed,
                                     runtime.partyHeight, runtime.partyEyeLevel,
                                     onOff(!runtime.noMist)));
@@ -1880,6 +1907,24 @@ void InGameState::renderOverlay()
                                     runtime.gridBand2, runtime.gridBand3, runtime.distShade,
                                     runtime.distShadeMist, runtime.distMist));
         lines.push_back(std::format("NIGHT_BLEND:{:.2f}", nightBlend));
+
+        std::string utility;
+        if (ctx.shared->gameWorld->hasUtilityEffect(game::UtilityEffect::Light))
+        {
+            utility += "LIGHT ";
+        }
+        if (ctx.shared->gameWorld->hasUtilityEffect(game::UtilityEffect::Fly))
+        {
+            utility += "FLY ";
+        }
+        if (ctx.shared->gameWorld->hasUtilityEffect(game::UtilityEffect::WaterWalk))
+        {
+            utility += "WATER_WALK ";
+        }
+        if (!utility.empty())
+        {
+            lines.push_back("UTILITY: " + utility);
+        }
     }
     if (showFrameRate)
     {

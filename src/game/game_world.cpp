@@ -20,9 +20,66 @@ void GameWorld::resetConditionClock()
     lastConditionTick_ = calendar_.totalTicks;
 }
 
+void GameWorld::setUtilityEffect(UtilityEffect effect, int strength, int64_t expiresAtTicks)
+{
+    const size_t index = static_cast<size_t>(effect);
+    if (index >= utilityEffects_.size())
+    {
+        return;
+    }
+    utilityEffects_[index].strength = std::max(0, strength);
+    utilityEffects_[index].expiresAtTicks = expiresAtTicks;
+}
+
+bool GameWorld::hasUtilityEffect(UtilityEffect effect) const
+{
+    const size_t index = static_cast<size_t>(effect);
+    if (index >= utilityEffects_.size())
+    {
+        return false;
+    }
+    return utilityEffects_[index].active(calendar_.totalTicks);
+}
+
+int GameWorld::utilityEffectStrength(UtilityEffect effect) const
+{
+    return hasUtilityEffect(effect) ? utilityEffects_[static_cast<size_t>(effect)].strength : 0;
+}
+
+const UtilityEffectState& GameWorld::utilityEffect(UtilityEffect effect) const
+{
+    static const UtilityEffectState kEmpty{};
+    const size_t index = static_cast<size_t>(effect);
+    return index < utilityEffects_.size() ? utilityEffects_[index] : kEmpty;
+}
+
+void GameWorld::clearExpiredUtilityEffects()
+{
+    const int64_t now = calendar_.totalTicks;
+    for (auto& effect : utilityEffects_)
+    {
+        if (effect.strength > 0 && effect.expiresAtTicks != 0 && now >= effect.expiresAtTicks)
+        {
+            effect = {};
+        }
+    }
+}
+
+float GameWorld::lightNightReduction() const
+{
+    const int strength = utilityEffectStrength(UtilityEffect::Light);
+    return std::min(0.9f, static_cast<float>(strength) * 0.25f);
+}
+
+float GameWorld::effectiveNightBlend() const
+{
+    return calendar_.nightBlend() * (1.0f - lightNightReduction());
+}
+
 void GameWorld::processConditions()
 {
     const int64_t now = calendar_.totalTicks;
+    clearExpiredUtilityEffects();
     if (lastConditionTick_ <= 0)
     {
         // First run after a new game or load: establish the baseline without
@@ -318,6 +375,7 @@ void GameWorld::reset()
     spawnedMapItems_.clear();
     lastEventInteraction_ = {};
     runtimeConfig_ = RuntimeConfig{};
+    utilityEffects_ = {};
     lastConditionTick_ = calendar_.totalTicks;
 }
 

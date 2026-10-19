@@ -36,7 +36,8 @@ struct SaveHeader
     //  14  — generated chest world positions
     //  15  — active timed spell effects (buffs)
     //  16  — CRC-32 trailer over the world payload
-    static constexpr uint32_t kVersion = 16;
+    //  17  — party utility spell effects (Light/Fly/Water Walk)
+    static constexpr uint32_t kVersion = 17;
 
     uint32_t magic = kMagic;
     uint32_t version = kVersion;

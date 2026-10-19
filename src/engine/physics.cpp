@@ -356,10 +356,14 @@ void updatePartyPhysics(game::Party& party, const formats::BLVMapData* blv,
     Vector3 pos = {party.worldX(), party.worldY(), party.worldZ()};
     Vector3 vel = {party.velocityX(), party.velocityY(), party.velocityZ()};
 
-    // Apply gravity
-    vel.z += config.gravity * dt;
-    if (vel.z < config.maxFallSpeed)
-        vel.z = config.maxFallSpeed;
+    // Apply gravity (Fly keeps the party's vertical velocity under player
+    // control instead).
+    if (!config.flying)
+    {
+        vel.z += config.gravity * dt;
+        if (vel.z < config.maxFallSpeed)
+            vel.z = config.maxFallSpeed;
+    }
 
     CollisionState state;
     state.radiusLo = config.playerRadius;
@@ -468,13 +472,34 @@ void updatePartyPhysics(game::Party& party, const formats::BLVMapData* blv,
         dt -= (state.adjustedMoveDistance / state.speed);
     }
 
+    // Water tiles block ground movement unless Water Walk (or Fly) is active.
+    // The party may already be standing over water (e.g. the spell expired
+    // there); only block entering a water cell from a non-water one. The
+    // "on terrain" test keeps bridges and piers above the water surface
+    // passable.
+    if (odm && !config.waterWalk && !config.flying)
+    {
+        const bool wasOverWater = isOutdoorWaterAt(*odm, party.worldX(), party.worldY());
+        const bool nowOverWater = isOutdoorWaterAt(*odm, pos.x, pos.y);
+        const float terrainZ = sampleOutdoorTerrainHeight(*odm, pos.x, pos.y);
+        const bool onTerrain = pos.z <= terrainZ + 8.0f;
+        if (!wasOverWater && nowOverWater && onTerrain)
+        {
+            pos.x = party.worldX();
+            pos.y = party.worldY();
+            vel.x = 0.0f;
+            vel.y = 0.0f;
+        }
+    }
+
     // Outdoor ground clamp: unconditionally keep the party at or above the
     // terrain. The CCD terrain branch above only catches falls onto the floor
     // from above; once feet reach/below the surface (uphill steps, post-landing
     // dips), the guard rejects the hit and gravity sinks the party. This clamp
     // is the guaranteed backstop — it snaps Z up to the terrain and zeroes
-    // downward velocity so gravity can't accumulate into a sink.
-    if (odm)
+    // downward velocity so gravity can't accumulate into a sink. Fly suspends
+    // it so the party can hover above the ground.
+    if (odm && !config.flying)
     {
         const float terrainZ = sampleOutdoorTerrainHeight(*odm, pos.x, pos.y);
         if (pos.z < terrainZ)

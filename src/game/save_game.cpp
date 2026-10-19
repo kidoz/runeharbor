@@ -1660,6 +1660,14 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
         writeU8(out, transition.hasArrivalOverride ? 1u : 0u);
     }
 
+    // v17: party utility spell effects.
+    for (size_t i = 0; i < static_cast<size_t>(UtilityEffect::Count); ++i)
+    {
+        const auto& effect = world.utilityEffect(static_cast<UtilityEffect>(i));
+        writeI32(out, effect.strength);
+        writeU64(out, static_cast<uint64_t>(std::max<int64_t>(0, effect.expiresAtTicks)));
+    }
+
     // v16: CRC-32 over the complete payload (header included), followed by a
     // trailer magic so a truncated or corrupted save is rejected before any
     // state is applied.
@@ -2349,6 +2357,21 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
                     world.addTransition(triggerId, transition);
                 }
             }
+        }
+    }
+
+    if (header.version >= 17)
+    {
+        for (size_t i = 0; i < static_cast<size_t>(UtilityEffect::Count); ++i)
+        {
+            int32_t strength = 0;
+            uint64_t expiresAt = 0;
+            if (!readI32(ptr, end, strength) || !readU64(ptr, end, expiresAt))
+            {
+                return false;
+            }
+            world.setUtilityEffect(static_cast<UtilityEffect>(i), strength,
+                                   static_cast<int64_t>(expiresAt));
         }
     }
 

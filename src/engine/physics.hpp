@@ -17,6 +17,10 @@ struct PhysicsConfig
     float gravity = -1024.0f; // units per second squared
     float maxFallSpeed = -2048.0f;
     float stepHeight = 48.0f;
+    // Fly: skip gravity and the outdoor ground clamp so the party can hover.
+    bool flying = false;
+    // Water Walk: allow moving onto water terrain tiles.
+    bool waterWalk = false;
 };
 
 // Applies gravity and resolves collisions for the party using continuous collision detection.

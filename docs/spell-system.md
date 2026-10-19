@@ -1027,8 +1027,19 @@ Offset +7: skill_level_override (byte)
 - Spell target classification is name-first: healing names (cure/heal/restore) target
   one ally, buff names target the party, and remaining spells fall back to the school
   heuristic (Spirit/Mind/Body → ally, otherwise enemy).
-- Utility effects such as Light, Fly, Water Walk, Town Portal, and Lloyd's Beacon
-  are not implemented mechanically yet.
+- Utility spells now set party-wide timed `UtilityEffect`s on `GameWorld`
+  (serialized in RHBV v17) instead of per-character `TimedEffect`s:
+  - **Torch Light / Light** scales the effective night blend by mastery
+    (25/50/75/90% reduction at Normal/Expert/Master/Grandmaster).
+    `GameWorld::effectiveNightBlend()` is used by both renderers.
+  - **Fly** suspends gravity and the outdoor ground clamp. While active,
+    PageUp/PageDown adjust altitude instead of pitch.
+  - **Water Walk** allows entering outdoor terrain cells whose tileset is
+    `wtrtyl`; without it, those cells block ground movement. Flying also
+    permits crossing water.
+  - Script casts (`castScriptSpell`) of these names apply the party effect
+    instead of damaging the targeted character.
+- Town Portal and Lloyd's Beacon remain unimplemented mechanically.
 
 ## Notes
 

@@ -597,6 +597,33 @@ TEST_CASE("Version 15 saves without a checksum trailer still load", "[game][save
     CHECK(dst.currentMap() == "out01.odm");
 }
 
+TEST_CASE("Save/Load round-trips utility spell effects", "[game][save][utility]")
+{
+    NullLogger logger;
+    TempSaveDir dir;
+
+    SaveGame save(logger);
+    save.setSaveDirectory(dir.path.string());
+
+    GameWorld src;
+    const int64_t now = src.calendar().totalTicks;
+    src.setUtilityEffect(UtilityEffect::Light, 3, now + 5 * GameCalendar::kTicksPerHour);
+    src.setUtilityEffect(UtilityEffect::Fly, 1, 0);
+
+    REQUIRE(save.save(src, 0));
+
+    GameWorld dst;
+    REQUIRE(save.load(dst, 0));
+
+    CHECK(dst.hasUtilityEffect(UtilityEffect::Light));
+    CHECK(dst.utilityEffectStrength(UtilityEffect::Light) == 3);
+    CHECK(dst.utilityEffect(UtilityEffect::Light).expiresAtTicks ==
+          now + 5 * GameCalendar::kTicksPerHour);
+    CHECK(dst.hasUtilityEffect(UtilityEffect::Fly));
+    CHECK(dst.utilityEffect(UtilityEffect::Fly).expiresAtTicks == 0);
+    CHECK_FALSE(dst.hasUtilityEffect(UtilityEffect::WaterWalk));
+}
+
 TEST_CASE("Save/Load round-trips acquired awards and autonotes", "[game][save][journal]")
 {
     NullLogger logger;
