@@ -39,6 +39,11 @@ run-map DATA_PATH MAP_NAME: build
 asset-check DATA_PATH REPORT="tmp/mm7_asset_report.json": build
     ./{{build_dir}}/src/runeharbor_asset_check "{{DATA_PATH}}" --json "{{REPORT}}"
 
+# Validate MM7 assets in strict mode; warnings also fail (currently expected to
+# fail until the BLV outline and table-parser warnings are resolved)
+asset-check-strict DATA_PATH: build
+    ./{{build_dir}}/src/runeharbor_asset_check "{{DATA_PATH}}" --strict
+
 # ============================================================================
 # LOD Archive Tools
 # ============================================================================
@@ -75,6 +80,14 @@ test-filter PATTERN: build
 test-coverage: build
     meson test -C {{build_dir}}
     ninja -C {{build_dir}} coverage
+
+# Full local verification: formatting, build, tests, and MM7 asset coverage
+verify: format-check build test
+    @if [ -d tmp/MM7/DATA ]; then \
+        ./{{build_dir}}/src/runeharbor_asset_check tmp/MM7 --json tmp/mm7_asset_report.json; \
+    else \
+        echo "Skipping asset check: tmp/MM7/DATA not found"; \
+    fi
 
 # ============================================================================
 # Static Analysis
