@@ -798,31 +798,59 @@ bool SaveGame::save(const GameWorld& world, int slotIndex,
 bool SaveGame::load(GameWorld& world, int slotIndex, std::vector<uint8_t>* eventRuntimeState,
                     Inventory* inventory, QuestLog* questLog)
 {
-    if (eventRuntimeState)
-    {
-        eventRuntimeState->clear();
-    }
-
     if (slotIndex < 0 || slotIndex >= kMaxSlots)
     {
         logger_.error("Invalid save slot: " + std::to_string(slotIndex));
         return false;
     }
 
-    std::string path = resolveExistingSlotPath(slotIndex);
+    const std::string path = resolveExistingSlotPath(slotIndex);
     if (path.empty())
     {
         logger_.error("Save file not found for slot: " + std::to_string(slotIndex));
         return false;
     }
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file)
+
+    if (!loadFromPath(path, world, eventRuntimeState, inventory, questLog))
     {
-        logger_.error("Save file not found: " + path);
         return false;
     }
 
-    auto size = file.tellg();
+    logger_.info("Loaded game from slot " + std::to_string(slotIndex));
+    return true;
+}
+
+bool SaveGame::loadAutosave(GameWorld& world, std::vector<uint8_t>* eventRuntimeState,
+                            Inventory* inventory, QuestLog* questLog)
+{
+    const std::string path = autosavePath();
+    if (!std::filesystem::exists(path))
+    {
+        logger_.error("Autosave file not found: " + path);
+        return false;
+    }
+
+    if (!loadFromPath(path, world, eventRuntimeState, inventory, questLog))
+    {
+        return false;
+    }
+
+    logger_.info("Loaded game from autosave");
+    return true;
+}
+
+bool SaveGame::loadFromPath(const std::string& path, GameWorld& world,
+                            std::vector<uint8_t>* eventRuntimeState, Inventory* inventory,
+                            QuestLog* questLog)
+{
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file)
+    {
+        logger_.error("Failed to open save file: " + path);
+        return false;
+    }
+
+    const auto size = file.tellg();
     if (size <= 0)
     {
         logger_.error("Save file is empty or unreadable: " + path);
@@ -837,10 +865,15 @@ bool SaveGame::load(GameWorld& world, int slotIndex, std::vector<uint8_t>* event
         return false;
     }
 
-    bool loaded = false;
+    std::optional<std::vector<uint8_t>> worldData;
+    std::optional<std::vector<uint8_t>> inventoryData;
+    std::optional<std::vector<uint8_t>> questLogData;
+    std::optional<std::vector<uint8_t>> eventData;
+    bool fallbackOnly = false;
+
     if (hasRawSaveMagic(data))
     {
-        loaded = deserializeWorld(world, data);
+        worldData = std::move(data);
     }
     else if (hasLodMagic(data))
     {
@@ -854,155 +887,112 @@ bool SaveGame::load(GameWorld& world, int slotIndex, std::vector<uint8_t>* event
         auto rhBlob = archive.extractFile("runeharbor.bin");
         if (rhBlob.has_value() && hasRawSaveMagic(*rhBlob))
         {
-            loaded = deserializeWorld(world, *rhBlob);
-            if (inventory)
-            {
-                auto inventoryBlob = archive.extractFile("inventory.bin");
-                if (inventoryBlob.has_value() && !inventoryBlob->empty() &&
-                    !deserializeInventoryState(*inventoryBlob, *inventory))
-                {
-                    logger_.warning("Failed to deserialize inventory payload from save archive");
-                }
-            }
-            if (questLog)
-            {
-                auto questBlob = archive.extractFile("questlog.bin");
-                if (questBlob.has_value() && !questBlob->empty() &&
-                    !deserializeQuestLog(*questBlob, *questLog))
-                {
-                    logger_.warning("Failed to deserialize quest-log payload from save archive");
-                }
-            }
+            worldData = std::move(*rhBlob);
         }
         else
         {
             auto reconstructed = buildRawSaveFromArchive(archive);
             if (reconstructed.has_value() && hasRawSaveMagic(*reconstructed))
             {
-                loaded = deserializeWorld(world, *reconstructed);
+                worldData = std::move(*reconstructed);
             }
             else
             {
-                loaded = loadArchiveFallbackState(logger_, path, world);
+                fallbackOnly = true;
             }
         }
 
-        if (loaded && eventRuntimeState)
+        if (worldData.has_value())
         {
-            extractEventRuntimeFromArchive(archive, *eventRuntimeState);
+            if (inventory != nullptr)
+            {
+                auto inventoryBlob = archive.extractFile("inventory.bin");
+                if (inventoryBlob.has_value() && !inventoryBlob->empty())
+                {
+                    inventoryData = std::move(*inventoryBlob);
+                }
+            }
+            if (questLog != nullptr)
+            {
+                auto questBlob = archive.extractFile("questlog.bin");
+                if (questBlob.has_value() && !questBlob->empty())
+                {
+                    questLogData = std::move(*questBlob);
+                }
+            }
+        }
+
+        if (eventRuntimeState != nullptr)
+        {
+            std::vector<uint8_t> extracted;
+            extractEventRuntimeFromArchive(archive, extracted);
+            if (!extracted.empty())
+            {
+                eventData = std::move(extracted);
+            }
         }
     }
+    else
+    {
+        logger_.error("Unsupported save file format: " + path);
+        return false;
+    }
 
-    if (!loaded)
+    // Parse everything into temporaries first; the live game state is replaced
+    // only after every blob has validated. A corrupt save therefore leaves the
+    // current game intact.
+    GameWorld tempWorld;
+    if (fallbackOnly)
+    {
+        if (!loadArchiveFallbackState(logger_, path, tempWorld))
+        {
+            logger_.error("Failed to deserialize save file: " + path);
+            return false;
+        }
+    }
+    else if (!worldData.has_value() || !deserializeWorld(tempWorld, *worldData))
     {
         logger_.error("Failed to deserialize save file: " + path);
         return false;
     }
 
-    logger_.info("Loaded game from slot " + std::to_string(slotIndex));
-    return true;
-}
-
-bool SaveGame::loadAutosave(GameWorld& world, std::vector<uint8_t>* eventRuntimeState,
-                            Inventory* inventory, QuestLog* questLog)
-{
-    if (eventRuntimeState)
+    std::optional<Inventory> tempInventory;
+    if (inventory != nullptr)
     {
-        eventRuntimeState->clear();
-    }
-
-    const std::string path = autosavePath();
-    if (!std::filesystem::exists(path))
-    {
-        logger_.error("Autosave file not found: " + path);
-        return false;
-    }
-
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file)
-    {
-        logger_.error("Failed to open autosave file: " + path);
-        return false;
-    }
-
-    const auto size = file.tellg();
-    if (size <= 0)
-    {
-        logger_.error("Autosave file is empty or unreadable: " + path);
-        return false;
-    }
-    file.seekg(0, std::ios::beg);
-    std::vector<uint8_t> data(static_cast<size_t>(size));
-    file.read(reinterpret_cast<char*>(data.data()), size);
-    if (!file)
-    {
-        logger_.error("Failed to read autosave file: " + path);
-        return false;
-    }
-
-    bool loaded = false;
-    if (hasRawSaveMagic(data))
-    {
-        loaded = deserializeWorld(world, data);
-    }
-    else if (hasLodMagic(data))
-    {
-        formats::GameLODArchive archive(logger_);
-        if (!archive.open(path))
+        tempInventory.emplace(logger_);
+        if (inventoryData.has_value() && !deserializeInventoryState(*inventoryData, *tempInventory))
         {
-            logger_.error("Failed to open autosave archive: " + path);
+            logger_.error("Failed to deserialize inventory payload: " + path);
             return false;
         }
-
-        auto rhBlob = archive.extractFile("runeharbor.bin");
-        if (rhBlob.has_value() && hasRawSaveMagic(*rhBlob))
-        {
-            loaded = deserializeWorld(world, *rhBlob);
-            if (inventory)
-            {
-                auto inventoryBlob = archive.extractFile("inventory.bin");
-                if (inventoryBlob.has_value() && !inventoryBlob->empty() &&
-                    !deserializeInventoryState(*inventoryBlob, *inventory))
-                {
-                    logger_.warning("Failed to deserialize inventory payload from autosave");
-                }
-            }
-            if (questLog)
-            {
-                auto questBlob = archive.extractFile("questlog.bin");
-                if (questBlob.has_value() && !questBlob->empty() &&
-                    !deserializeQuestLog(*questBlob, *questLog))
-                {
-                    logger_.warning("Failed to deserialize quest-log payload from autosave");
-                }
-            }
-        }
-        else
-        {
-            auto reconstructed = buildRawSaveFromArchive(archive);
-            if (reconstructed.has_value() && hasRawSaveMagic(*reconstructed))
-            {
-                loaded = deserializeWorld(world, *reconstructed);
-            }
-            else
-            {
-                loaded = loadArchiveFallbackState(logger_, path, world);
-            }
-        }
-
-        if (loaded && eventRuntimeState)
-        {
-            extractEventRuntimeFromArchive(archive, *eventRuntimeState);
-        }
     }
 
-    if (!loaded)
+    std::optional<QuestLog> tempQuestLog;
+    if (questLog != nullptr)
     {
-        logger_.error("Failed to deserialize autosave file: " + path);
-        return false;
+        tempQuestLog.emplace(logger_);
+        tempQuestLog->resetToDefinitionsFrom(*questLog);
+        if (questLogData.has_value() && !deserializeQuestLog(*questLogData, *tempQuestLog))
+        {
+            logger_.error("Failed to deserialize quest-log payload: " + path);
+            return false;
+        }
     }
 
-    logger_.info("Loaded game from autosave");
+    // Commit.
+    world = std::move(tempWorld);
+    if (inventory != nullptr)
+    {
+        inventory->setInventories(tempInventory->inventories());
+    }
+    if (questLog != nullptr)
+    {
+        questLog->copyRuntimeStateFrom(*tempQuestLog);
+    }
+    if (eventRuntimeState != nullptr)
+    {
+        *eventRuntimeState = eventData.has_value() ? std::move(*eventData) : std::vector<uint8_t>{};
+    }
     return true;
 }
 

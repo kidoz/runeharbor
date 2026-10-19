@@ -238,4 +238,28 @@ void QuestLog::reset()
     acquiredAutonotes_.clear();
 }
 
+void QuestLog::resetToDefinitionsFrom(const QuestLog& other)
+{
+    quests_.clear();
+    for (const auto& [bit, entry] : other.quests_)
+    {
+        QuestEntry definition = entry;
+        definition.state = QuestState::Unknown;
+        definition.startTime = 0;
+        definition.endTime = 0;
+        quests_[bit] = std::move(definition);
+    }
+    journal_.clear();
+    acquiredAwards_.clear();
+    acquiredAutonotes_.clear();
+}
+
+void QuestLog::copyRuntimeStateFrom(const QuestLog& other)
+{
+    quests_ = other.quests_;
+    journal_ = other.journal_;
+    acquiredAwards_ = other.acquiredAwards_;
+    acquiredAutonotes_ = other.acquiredAutonotes_;
+}
+
 } // namespace runeharbor::game

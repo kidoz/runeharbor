@@ -5,14 +5,21 @@
 // inventory, and quest log; save to a temp slot; load into a fresh world;
 // assert every field survived. This locks in the previously-missing fields
 // (spellbook, bank gold, quest state, quickbar) and guards future regressions.
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <format>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstring>
+#include <fstream>
 
+#include "../../src/formats/game_lod_archive.hpp"
 #include "../../src/formats/quests_parser.hpp"
 #include "../../src/game/character.hpp"
 #include "../../src/game/game_world.hpp"
@@ -55,6 +62,54 @@ struct TempSaveDir
 
 // Seed a world with non-default values across many fields so a round-trip can
 // detect losses. Every value chosen is non-default (not 0/empty).
+std::vector<uint8_t> readFileBytes(const std::filesystem::path& path)
+{
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file)
+    {
+        return {};
+    }
+    const auto size = file.tellg();
+    if (size <= 0)
+    {
+        return {};
+    }
+    file.seekg(0, std::ios::beg);
+    std::vector<uint8_t> data(static_cast<size_t>(size));
+    file.read(reinterpret_cast<char*>(data.data()), size);
+    if (!file)
+    {
+        return {};
+    }
+    return data;
+}
+
+bool writeFileBytes(const std::filesystem::path& path, const std::vector<uint8_t>& data)
+{
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file)
+    {
+        return false;
+    }
+    file.write(reinterpret_cast<const char*>(data.data()),
+               static_cast<std::streamsize>(data.size()));
+    return static_cast<bool>(file);
+}
+
+std::optional<size_t> findBytes(const std::vector<uint8_t>& haystack, std::string_view needle)
+{
+    if (needle.empty() || haystack.size() < needle.size())
+    {
+        return std::nullopt;
+    }
+    const auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end());
+    if (it == haystack.end())
+    {
+        return std::nullopt;
+    }
+    return static_cast<size_t>(std::distance(haystack.begin(), it));
+}
+
 void seedWorld(GameWorld& world)
 {
     auto& party = world.party();
@@ -321,6 +376,63 @@ TEST_CASE("Save/Load round-trips active timed spell effects", "[game][save][buff
     CHECK(loaded.timedEffects[0].statBonus[0] == 5);
     CHECK(loaded.timedEffects[0].resistanceBonus[0] == 10);
     CHECK(loaded.armorClass == sourceArmorClass);
+}
+
+TEST_CASE("Corrupt companion blob aborts load without partial commit", "[game][save][integrity]")
+{
+    NullLogger logger;
+    TempSaveDir dir;
+    SaveGame save(logger);
+    save.setSaveDirectory(dir.path.string());
+
+    GameWorld src;
+    seedWorld(src);
+
+    Inventory srcInventory(logger);
+    Item weapon;
+    weapon.itemId = 5;
+    srcInventory.addToBackpack(0, weapon);
+
+    runeharbor::formats::QuestEntry def;
+    def.qBit = 100;
+    def.questNoteText = "Saved quest";
+    QuestLog srcQuests(logger);
+    srcQuests.loadQuestData({def});
+    REQUIRE(srcQuests.startQuest(100, 1000));
+
+    REQUIRE(save.save(src, 0, nullptr, &srcInventory, &srcQuests));
+
+    const auto slotPath = dir.path / "save000.mm7";
+    auto bytes = readFileBytes(slotPath);
+    REQUIRE_FALSE(bytes.empty());
+
+    // Invalidate the inventory blob's magic. The world blob stays valid, so
+    // this exercises the post-world validation path.
+    const auto inventoryMagic = findBytes(bytes, "RHIV");
+    REQUIRE(inventoryMagic.has_value());
+    bytes[*inventoryMagic] ^= 0xFF;
+    REQUIRE(writeFileBytes(slotPath, bytes));
+
+    GameWorld live;
+    live.party().setGold(777);
+    live.setCurrentMap("sentinel.map");
+
+    Inventory liveInventory(logger);
+    Item sentinelItem;
+    sentinelItem.itemId = 9;
+    REQUIRE(liveInventory.addToBackpack(0, sentinelItem));
+
+    QuestLog liveQuests(logger);
+    liveQuests.loadQuestData({def});
+    REQUIRE(liveQuests.startQuest(100, 500));
+
+    REQUIRE_FALSE(save.load(live, 0, nullptr, &liveInventory, &liveQuests));
+
+    CHECK(live.party().gold() == 777);
+    CHECK(live.currentMap() == "sentinel.map");
+    CHECK(liveInventory.getInventory(0).backpack[0].itemId == 9);
+    CHECK(liveInventory.findItem(5) == std::nullopt);
+    CHECK(liveQuests.isQuestActive(100));
 }
 
 TEST_CASE("Save/Load round-trips acquired awards and autonotes", "[game][save][journal]")

@@ -99,6 +99,11 @@ class QuestLog
     // Reset all quest state
     void reset();
 
+    // Transactional save support: build an empty runtime state with the same
+    // definitions (but no callbacks), then commit the validated state back.
+    void resetToDefinitionsFrom(const QuestLog& other);
+    void copyRuntimeStateFrom(const QuestLog& other);
+
   private:
     util::ILogger& logger_;
     QuestCallbacks callbacks_;

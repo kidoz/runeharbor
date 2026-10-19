@@ -101,6 +101,12 @@ class SaveGame
     std::string autosavePath() const;
     std::string resolveExistingSlotPath(int slotIndex) const;
 
+    // Shared by load()/loadAutosave(): reads and fully validates the save
+    // before committing any part of it to the live world/inventory/quest log.
+    bool loadFromPath(const std::string& path, GameWorld& world,
+                      std::vector<uint8_t>* eventRuntimeState, Inventory* inventory,
+                      QuestLog* questLog);
+
     // Serialization helpers
     void writeU8(std::vector<uint8_t>& buf, uint8_t val);
     void writeU16(std::vector<uint8_t>& buf, uint16_t val);
