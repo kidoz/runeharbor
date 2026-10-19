@@ -10,6 +10,7 @@
 #include "../formats/spells_parser.hpp"
 #include "../util/ilogger.hpp"
 #include "character.hpp"
+#include "damage.hpp"
 
 namespace runeharbor::game
 {
@@ -45,6 +46,36 @@ inline SkillId schoolToSkill(SpellSchool school)
     if (s >= 6 && s <= 10)
         return static_cast<SkillId>(static_cast<int>(SkillId::Spirit) + (s - 6));
     return SkillId::Fire; // fallback for Default/Magic
+}
+
+/// Map a spell school to its damage element. The school enum has holes at
+/// 4 (Default) and 5 (Magic), so a direct cast mis-selects resistances for
+/// Spirit/Mind/Body/Light/Dark.
+inline DamageElement schoolToDamageElement(SpellSchool school)
+{
+    switch (school)
+    {
+    case SpellSchool::Fire:
+        return DamageElement::Fire;
+    case SpellSchool::Air:
+        return DamageElement::Air;
+    case SpellSchool::Water:
+        return DamageElement::Water;
+    case SpellSchool::Earth:
+        return DamageElement::Earth;
+    case SpellSchool::Spirit:
+        return DamageElement::Spirit;
+    case SpellSchool::Mind:
+        return DamageElement::Mind;
+    case SpellSchool::Body:
+        return DamageElement::Body;
+    case SpellSchool::Light:
+        return DamageElement::Light;
+    case SpellSchool::Dark:
+        return DamageElement::Dark;
+    default:
+        return DamageElement::Physical;
+    }
 }
 
 // Spell target type

@@ -190,9 +190,8 @@ SpellResult SpellSystem::castDamageSpell(int characterIndex, int spellId, Monste
     int damage = calculateSpellDamage(
         spellId, getEffectiveSkillLevel(characterIndex, spell->school), mastery);
 
-    // Check resistance
-    // DamageElement values match SpellSchool for elemental schools
-    DamageElement dmgType = static_cast<DamageElement>(static_cast<int>(spell->school));
+    // Check resistance. The spell-school enum has holes, so map it explicitly.
+    const DamageElement dmgType = schoolToDamageElement(spell->school);
     // Spell resistance uses a BINARY roll (X% chance to halve damage), unlike
     // melee which applies a flat (100 - resistance)% reduction every time (see
     // CombatSystem::calculateDamage). The RE model in docs/combat-system.md
