@@ -35,7 +35,8 @@ struct SaveHeader
     //  13  — per-map automap explored sectors (fog-of-war)
     //  14  — generated chest world positions
     //  15  — active timed spell effects (buffs)
-    static constexpr uint32_t kVersion = 15;
+    //  16  — CRC-32 trailer over the world payload
+    static constexpr uint32_t kVersion = 16;
 
     uint32_t magic = kMagic;
     uint32_t version = kVersion;

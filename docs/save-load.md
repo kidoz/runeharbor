@@ -3,7 +3,7 @@ title: "Save/Load System"
 summary: "Save files use LOD containers to persist party, map, event, and presentation state."
 doc_type: reference
 status: partial
-last_updated: 2026-08-01
+last_updated: 2026-10-19
 ---
 # Save/Load System
 
@@ -643,9 +643,27 @@ Each slot displays:
   structs in the same order and at the same offsets as the original.
 - The position swap during save ensures loaded games start at the correct respawn point.
 - The 1MB write buffer can be replaced with streaming writes in a modern implementation.
-- Consider adding save format versioning (the original has none).
 
-### 13.2 Compatibility
+### 13.2 RuneHarbor save integrity (current)
+
+- `runeharbor.bin` holds an RHBV blob (currently **version 16**) with the full
+  serialized world: header, calendar, party/characters, per-map state, and
+  generated content. `party.bin` retains a headerless copy of the same payload
+  for layouts that expect the original split.
+- v16 appends an 8-byte trailer to the world blob: a CRC-32 of every preceding
+  byte plus the `RHCS` marker. Loads verify the trailer before parsing and
+  reject truncated or corrupted payloads.
+- Slots are written to `<slot>.tmp` and renamed into place, so an interrupted
+  save never truncates the previous slot. The autosave is written the same way
+  from the same bytes.
+- Loads deserialize the world, inventory, and quest log into temporaries and
+  commit only after every blob validates. A corrupt save therefore leaves the
+  running game untouched.
+- v1-v15 blobs (which have no trailer) still load. A raw blob reconstructed
+  from a headerless `party.bin` is treated as a pre-v16 save even when
+  `runeharbor.ver` reports 16.
+
+### 13.3 Compatibility
 
 To load original MM7 save files:
 

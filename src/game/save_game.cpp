@@ -12,6 +12,7 @@
 
 #include <cstring>
 #include <fstream>
+#include <zlib.h>
 
 #include "../formats/game_lod_archive.hpp"
 #include "game_world.hpp"
@@ -68,6 +69,8 @@ static_assert(sizeof(SaveSlotHeaderBin) == 100);
 
 constexpr uint32_t kInventoryMagic = 0x56494852u; // "RHIV"
 constexpr uint32_t kInventoryVersion = 2;
+constexpr uint32_t kSaveChecksumMagic = 0x53434852u; // "RHCS"
+constexpr size_t kSaveTrailerSize = sizeof(uint32_t) * 2;
 constexpr uint32_t kTimerRuntimeMagic = 0x54525645u; // "EVRT"
 constexpr uint32_t kTimerRuntimeVersion = 1;
 constexpr size_t kTimerBinSize = 1008;
@@ -98,6 +101,57 @@ bool hasRawSaveMagic(std::span<const uint8_t> data)
     uint32_t magic = 0;
     std::memcpy(&magic, data.data(), sizeof(magic));
     return magic == SaveHeader::kMagic;
+}
+
+uint32_t computeChecksum(const uint8_t* data, size_t size)
+{
+    return static_cast<uint32_t>(::crc32(0L, data, static_cast<uInt>(size)));
+}
+
+/// Write through a sibling temporary file and rename it into place so an
+/// interrupted save never truncates the previous slot.
+bool writeFileAtomically(util::ILogger& logger, const std::string& path,
+                         const std::vector<uint8_t>& data)
+{
+    const std::string tempPath = path + ".tmp";
+    {
+        std::ofstream file(tempPath, std::ios::binary | std::ios::trunc);
+        if (!file)
+        {
+            logger.error("Failed to open temporary save file: " + tempPath);
+            return false;
+        }
+        file.write(reinterpret_cast<const char*>(data.data()),
+                   static_cast<std::streamsize>(data.size()));
+        file.flush();
+        if (!file)
+        {
+            logger.error("Failed to write temporary save file: " + tempPath);
+            file.close();
+            std::error_code removeEc;
+            std::filesystem::remove(tempPath, removeEc);
+            return false;
+        }
+    }
+
+    std::error_code ec;
+    std::filesystem::rename(tempPath, path, ec);
+    if (ec)
+    {
+        // Windows cannot replace an existing file with rename(); retry after
+        // removing the old slot. POSIX takes the atomic path above.
+        std::error_code removeEc;
+        std::filesystem::remove(path, removeEc);
+        ec.clear();
+        std::filesystem::rename(tempPath, path, ec);
+        if (ec)
+        {
+            logger.error("Failed to replace save file: " + path + " (" + ec.message() + ")");
+            std::filesystem::remove(tempPath, removeEc);
+            return false;
+        }
+    }
+    return true;
 }
 
 std::vector<uint8_t> makeClockBin(uint64_t gameTicks)
@@ -372,14 +426,16 @@ std::optional<std::vector<uint8_t>> buildRawSaveFromArchive(formats::GameLODArch
 
     SaveHeader header{};
     header.magic = SaveHeader::kMagic;
-    header.version = SaveHeader::kVersion;
 
+    // party.bin is the headerless payload and never carries the v16 checksum
+    // trailer, so a reconstructed blob is treated as a pre-v16 save.
+    header.version = 15;
     if (auto verBlob = archive.extractFile("runeharbor.ver");
         verBlob.has_value() && verBlob->size() >= sizeof(uint32_t))
     {
-        uint32_t version = SaveHeader::kVersion;
+        uint32_t version = 0;
         std::memcpy(&version, verBlob->data(), sizeof(version));
-        if (version >= 1 && version <= SaveHeader::kVersion)
+        if (version >= 1 && version < 16)
         {
             header.version = version;
         }
@@ -733,7 +789,12 @@ bool SaveGame::save(const GameWorld& world, int slotIndex,
     std::vector<uint8_t> partyPayload;
     if (data.size() > sizeof(SaveHeader))
     {
-        partyPayload.assign(data.begin() + sizeof(SaveHeader), data.end());
+        size_t payloadEnd = data.size();
+        if (saveHeader.version >= 16 && payloadEnd >= sizeof(SaveHeader) + kSaveTrailerSize)
+        {
+            payloadEnd -= kSaveTrailerSize;
+        }
+        partyPayload.assign(data.begin() + sizeof(SaveHeader), data.begin() + payloadEnd);
     }
     files.push_back({"party.bin", std::move(partyPayload)});
     files.push_back({"runeharbor.bin", std::move(data)});
@@ -765,29 +826,16 @@ bool SaveGame::save(const GameWorld& world, int slotIndex,
         return false;
     }
 
-    std::string path = slotPath(slotIndex);
-    std::ofstream file(path, std::ios::binary | std::ios::trunc);
-    if (!file)
+    const std::string path = slotPath(slotIndex);
+    if (!writeFileAtomically(logger_, path, archiveData))
     {
-        logger_.error("Failed to open save file: " + path);
-        return false;
-    }
-
-    file.write(reinterpret_cast<const char*>(archiveData.data()),
-               static_cast<std::streamsize>(archiveData.size()));
-    if (!file)
-    {
-        logger_.error("Failed to write save file: " + path);
         return false;
     }
 
     const std::string autosave = autosavePath();
-    std::error_code ec;
-    std::filesystem::copy_file(path, autosave, std::filesystem::copy_options::overwrite_existing,
-                               ec);
-    if (ec)
+    if (!writeFileAtomically(logger_, autosave, archiveData))
     {
-        logger_.warning("Failed to update autosave: " + autosave + " (" + ec.message() + ")");
+        logger_.warning("Failed to update autosave: " + autosave);
     }
 
     logger_.info("Saved game to slot " + std::to_string(slotIndex) + " (" +
@@ -1268,8 +1316,8 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
     out.clear();
     out.reserve(4096);
 
-    // Header
-    SaveHeader header;
+    // Header (zero-initialized so struct padding is deterministic in the file).
+    SaveHeader header{};
     header.magic = SaveHeader::kMagic;
     header.version = SaveHeader::kVersion;
     header.timestamp = static_cast<uint64_t>(
@@ -1612,6 +1660,12 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
         writeU8(out, transition.hasArrivalOverride ? 1u : 0u);
     }
 
+    // v16: CRC-32 over the complete payload (header included), followed by a
+    // trailer magic so a truncated or corrupted save is rejected before any
+    // state is applied.
+    writeU32(out, computeChecksum(out.data(), out.size()));
+    writeU32(out, kSaveChecksumMagic);
+
     return true;
 }
 
@@ -1640,6 +1694,33 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
     {
         logger_.error("Unsupported save file version: " + std::to_string(header.version));
         return false;
+    }
+
+    if (header.version >= 16)
+    {
+        if (data.size() < sizeof(SaveHeader) + kSaveTrailerSize)
+        {
+            logger_.error("Save file is missing its checksum trailer");
+            return false;
+        }
+
+        const size_t coveredSize = data.size() - kSaveTrailerSize;
+        uint32_t storedChecksum = 0;
+        uint32_t trailerMagic = 0;
+        std::memcpy(&storedChecksum, data.data() + coveredSize, sizeof(storedChecksum));
+        std::memcpy(&trailerMagic, data.data() + coveredSize + sizeof(storedChecksum),
+                    sizeof(trailerMagic));
+        if (trailerMagic != kSaveChecksumMagic)
+        {
+            logger_.error("Save file checksum trailer is missing or invalid");
+            return false;
+        }
+        if (computeChecksum(data.data(), coveredSize) != storedChecksum)
+        {
+            logger_.error("Save file checksum mismatch (file is corrupt)");
+            return false;
+        }
+        end = data.data() + coveredSize;
     }
 
     world.reset();
@@ -2269,6 +2350,12 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
                 }
             }
         }
+    }
+
+    if (header.version >= 16 && ptr != end)
+    {
+        logger_.error("Save payload has trailing bytes");
+        return false;
     }
 
     return true;

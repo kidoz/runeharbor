@@ -378,6 +378,108 @@ TEST_CASE("Save/Load round-trips active timed spell effects", "[game][save][buff
     CHECK(loaded.armorClass == sourceArmorClass);
 }
 
+TEST_CASE("Save files are written atomically with a checksum trailer", "[game][save][integrity]")
+{
+    NullLogger logger;
+    TempSaveDir dir;
+    SaveGame save(logger);
+    save.setSaveDirectory(dir.path.string());
+
+    GameWorld src;
+    seedWorld(src);
+    REQUIRE(save.save(src, 0));
+
+    const auto slotPath = dir.path / "save000.mm7";
+    REQUIRE(std::filesystem::exists(slotPath));
+    // The temporary file must not outlive a successful save.
+    CHECK_FALSE(std::filesystem::exists(dir.path / "save000.mm7.tmp"));
+    CHECK(std::filesystem::exists(dir.path / "autosave.mm7"));
+    CHECK_FALSE(std::filesystem::exists(dir.path / "autosave.mm7.tmp"));
+
+    runeharbor::formats::GameLODArchive archive(logger);
+    REQUIRE(archive.open(slotPath.string()));
+    auto blob = archive.extractFile("runeharbor.bin");
+    REQUIRE(blob.has_value());
+    REQUIRE(blob->size() >= sizeof(SaveHeader) + 8);
+
+    SaveHeader header{};
+    std::memcpy(&header, blob->data(), sizeof(header));
+    CHECK(header.version == SaveHeader::kVersion);
+    CHECK(header.version >= 16);
+
+    uint32_t trailerMagic = 0;
+    std::memcpy(&trailerMagic, blob->data() + blob->size() - sizeof(trailerMagic),
+                sizeof(trailerMagic));
+    CHECK(trailerMagic == 0x53434852u); // "RHCS"
+
+    // party.bin is the headerless copy of the same payload, without the
+    // world-blob header or checksum trailer.
+    auto partyBlob = archive.extractFile("party.bin");
+    REQUIRE(partyBlob.has_value());
+    CHECK(partyBlob->size() == blob->size() - sizeof(SaveHeader) - 8);
+}
+
+TEST_CASE("Corrupt save is rejected without mutating live state", "[game][save][integrity]")
+{
+    NullLogger logger;
+    TempSaveDir dir;
+    SaveGame save(logger);
+    save.setSaveDirectory(dir.path.string());
+
+    GameWorld src;
+    seedWorld(src);
+    REQUIRE(save.save(src, 0));
+
+    const auto slotPath = dir.path / "save000.mm7";
+    auto bytes = readFileBytes(slotPath);
+    REQUIRE_FALSE(bytes.empty());
+
+    // SaveHeader::kMagic = 0x52484256, which is stored little-endian as "VBHR".
+    const auto magicPos = findBytes(bytes, "VBHR");
+    REQUIRE(magicPos.has_value());
+    // Flip one byte inside the serialized world payload (past the header).
+    const size_t corruptOffset = *magicPos + sizeof(SaveHeader) + 16;
+    REQUIRE(corruptOffset < bytes.size());
+    bytes[corruptOffset] ^= 0xFF;
+    REQUIRE(writeFileBytes(slotPath, bytes));
+
+    GameWorld live;
+    live.party().setGold(777);
+    live.setCurrentMap("sentinel.map");
+    live.party().member(0).name = "Sentinel";
+
+    Inventory liveInventory(logger);
+    Item sentinelItem;
+    sentinelItem.itemId = 9;
+    sentinelItem.identified = true;
+    REQUIRE(liveInventory.addToBackpack(0, sentinelItem));
+
+    runeharbor::formats::QuestEntry def;
+    def.qBit = 100;
+    def.questNoteText = "Sentinel quest";
+    QuestLog liveQuests(logger);
+    liveQuests.loadQuestData({def});
+    REQUIRE(liveQuests.startQuest(100, 500));
+
+    REQUIRE_FALSE(save.load(live, 0, nullptr, &liveInventory, &liveQuests));
+
+    CHECK(live.party().gold() == 777);
+    CHECK(live.currentMap() == "sentinel.map");
+    CHECK(live.party().member(0).name == "Sentinel");
+
+    bool foundItem = false;
+    for (const auto& item : liveInventory.getInventory(0).backpack)
+    {
+        if (item.valid() && item.itemId == 9)
+        {
+            foundItem = true;
+        }
+    }
+    CHECK(foundItem);
+    CHECK(liveQuests.isQuestActive(100));
+    CHECK(liveQuests.getJournal().size() == 1);
+}
+
 TEST_CASE("Corrupt companion blob aborts load without partial commit", "[game][save][integrity]")
 {
     NullLogger logger;
@@ -433,6 +535,66 @@ TEST_CASE("Corrupt companion blob aborts load without partial commit", "[game][s
     CHECK(liveInventory.getInventory(0).backpack[0].itemId == 9);
     CHECK(liveInventory.findItem(5) == std::nullopt);
     CHECK(liveQuests.isQuestActive(100));
+}
+
+TEST_CASE("Truncated save is rejected without mutating live state", "[game][save][integrity]")
+{
+    NullLogger logger;
+    TempSaveDir dir;
+    SaveGame save(logger);
+    save.setSaveDirectory(dir.path.string());
+
+    GameWorld src;
+    seedWorld(src);
+    REQUIRE(save.save(src, 0));
+
+    // Write a raw (non-archive) slot whose payload is cut inside the checksum
+    // trailer. The archive's duplicate party.bin cannot mask this.
+    runeharbor::formats::GameLODArchive archive(logger);
+    REQUIRE(archive.open((dir.path / "save000.mm7").string()));
+    auto blob = archive.extractFile("runeharbor.bin");
+    REQUIRE(blob.has_value());
+    REQUIRE(blob->size() > 16);
+    blob->resize(blob->size() - 16);
+    REQUIRE(writeFileBytes(dir.path / "save002.mm7", *blob));
+
+    GameWorld live;
+    live.party().setGold(777);
+    live.setCurrentMap("sentinel.map");
+
+    REQUIRE_FALSE(save.load(live, 2));
+    CHECK(live.party().gold() == 777);
+    CHECK(live.currentMap() == "sentinel.map");
+}
+
+TEST_CASE("Version 15 saves without a checksum trailer still load", "[game][save][integrity]")
+{
+    NullLogger logger;
+    TempSaveDir dir;
+    SaveGame save(logger);
+    save.setSaveDirectory(dir.path.string());
+
+    GameWorld src;
+    seedWorld(src);
+    REQUIRE(save.save(src, 0));
+
+    runeharbor::formats::GameLODArchive archive(logger);
+    REQUIRE(archive.open((dir.path / "save000.mm7").string()));
+    auto blob = archive.extractFile("runeharbor.bin");
+    REQUIRE(blob.has_value());
+    REQUIRE(blob->size() > sizeof(SaveHeader) + 8);
+
+    // Strip the v16 trailer and mark the payload as v15.
+    blob->resize(blob->size() - 8);
+    const uint32_t legacyVersion = 15;
+    std::memcpy(blob->data() + offsetof(SaveHeader, version), &legacyVersion,
+                sizeof(legacyVersion));
+    REQUIRE(writeFileBytes(dir.path / "save001.mm7", *blob));
+
+    GameWorld dst;
+    REQUIRE(save.load(dst, 1));
+    CHECK(dst.party().gold() == 1234);
+    CHECK(dst.currentMap() == "out01.odm");
 }
 
 TEST_CASE("Save/Load round-trips acquired awards and autonotes", "[game][save][journal]")
