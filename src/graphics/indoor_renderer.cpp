@@ -414,9 +414,18 @@ BillboardSprite makeIndoorWorldItemBillboard(const WorldItem& item, const Vec3& 
 {
     BillboardSprite sprite;
     sprite.basePos = gameplayToRenderPosition(item.x, item.y, item.z);
-    sprite.height = 32.0f;
-    sprite.halfWidth = 16.0f;
-    sprite.color = {1.0f, 0.95f, 0.6f, 0.9f};
+    if (item.itemId == kChestBillboardItemId)
+    {
+        sprite.height = 64.0f;
+        sprite.halfWidth = 32.0f;
+        sprite.color = {1.0f, 1.0f, 1.0f, 0.95f};
+    }
+    else
+    {
+        sprite.height = 32.0f;
+        sprite.halfWidth = 16.0f;
+        sprite.color = {1.0f, 0.95f, 0.6f, 0.9f};
+    }
     if (spriteLookup)
     {
         sprite.textureName = spriteLookup(item.itemId);

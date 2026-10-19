@@ -1243,26 +1243,43 @@ void Application::wireUpMapTextures()
                 return items;
             }
             const std::string currentMap = gameWorld_->currentMap();
-            const auto* spawned = gameWorld_->getSpawnedMapItems(currentMap);
-            if (spawned == nullptr)
+            if (const auto* spawned = gameWorld_->getSpawnedMapItems(currentMap))
             {
-                return items;
+                items.reserve(spawned->size());
+                for (const auto& smi : *spawned)
+                {
+                    graphics::WorldItem wi;
+                    wi.x = smi.x;
+                    wi.y = smi.y;
+                    wi.z = smi.z;
+                    wi.itemId = smi.itemType;
+                    items.push_back(wi);
+                }
             }
-            items.reserve(spawned->size());
-            for (const auto& smi : *spawned)
+
+            // Generated chests share the world-item billboard path, using a
+            // reserved negative id that maps to the closed chest icon.
+            if (const auto* generated = gameWorld_->getGeneratedContent(currentMap))
             {
-                graphics::WorldItem wi;
-                wi.x = smi.x;
-                wi.y = smi.y;
-                wi.z = smi.z;
-                wi.itemId = smi.itemType;
-                items.push_back(wi);
+                for (const auto& chest : generated->chests)
+                {
+                    graphics::WorldItem wi;
+                    wi.x = chest.x;
+                    wi.y = chest.y;
+                    wi.z = chest.z;
+                    wi.itemId = graphics::kChestBillboardItemId;
+                    items.push_back(wi);
+                }
             }
             return items;
         });
     worldRenderer->setWorldItemSpriteLookup(
         [this](int itemId) -> std::string
         {
+            if (itemId == graphics::kChestBillboardItemId)
+            {
+                return "CHEST01";
+            }
             if (inventory_)
             {
                 const auto* def = inventory_->getItemDef(itemId);

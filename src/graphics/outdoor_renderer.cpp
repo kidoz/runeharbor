@@ -310,10 +310,21 @@ SpawnBillboard makeWorldItemBillboard(const WorldItem& item, const Vec3& cameraP
 {
     SpawnBillboard sprite;
     sprite.basePos = gameplayToRenderPosition(item.x, item.y, item.z);
-    // Items render as small ground billboards (loot piles).
-    sprite.height = 32.0f;
-    sprite.halfWidth = 16.0f;
-    sprite.color = {1.0f, 0.95f, 0.6f, 0.9f}; // subtle gold tint so items catch the eye
+    if (item.itemId == kChestBillboardItemId)
+    {
+        // Generated chests reuse the world-item billboard path with a closed
+        // chest icon from ICONS.LOD.
+        sprite.height = 64.0f;
+        sprite.halfWidth = 32.0f;
+        sprite.color = {1.0f, 1.0f, 1.0f, 0.95f};
+    }
+    else
+    {
+        // Items render as small ground billboards (loot piles).
+        sprite.height = 32.0f;
+        sprite.halfWidth = 16.0f;
+        sprite.color = {1.0f, 0.95f, 0.6f, 0.9f}; // subtle gold tint so items catch the eye
+    }
     if (spriteLookup)
     {
         sprite.textureName = spriteLookup(item.itemId);

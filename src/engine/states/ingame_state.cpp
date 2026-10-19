@@ -55,6 +55,8 @@ std::string pickTypeLabel(graphics::PickObjectType type)
         return "MONSTER";
     case graphics::PickObjectType::MapItem:
         return "ITEM";
+    case graphics::PickObjectType::Chest:
+        return "CHEST";
     case graphics::PickObjectType::Unknown:
     default:
         return "OBJECT";
@@ -75,6 +77,8 @@ SDL_Color pickTypeColor(graphics::PickObjectType type)
         return SDL_Color{255, 80, 80, 255};
     case graphics::PickObjectType::MapItem:
         return SDL_Color{120, 180, 255, 255};
+    case graphics::PickObjectType::Chest:
+        return SDL_Color{255, 215, 120, 255};
     case graphics::PickObjectType::Unknown:
     default:
         return SDL_Color{255, 255, 255, 255};
@@ -93,6 +97,7 @@ game::EventInteractionType toInteractionType(graphics::PickObjectType type)
         return game::EventInteractionType::OutdoorBuildingFace;
     case graphics::PickObjectType::Monster:
     case graphics::PickObjectType::MapItem:
+    case graphics::PickObjectType::Chest:
     case graphics::PickObjectType::Unknown:
     default:
         return game::EventInteractionType::Unknown;
@@ -659,6 +664,20 @@ std::optional<GameStateId> InGameState::update()
                     });
                 }
             }
+
+            if (const auto* generated = ctx.shared->gameWorld->getGeneratedContent(mapName))
+            {
+                for (const auto& chest : generated->chests)
+                {
+                    extraCandidates.push_back({
+                        .id = chest.chestId + 1,
+                        .worldPos = {chest.x, chest.y, chest.z},
+                        .type = graphics::PickObjectType::Chest,
+                        .objectIndex = chest.chestId,
+                        .eventId = 0,
+                    });
+                }
+            }
             ctx.worldRenderer->setExtraPickCandidates(std::move(extraCandidates));
         }
         else
@@ -983,6 +1002,65 @@ std::optional<GameStateId> InGameState::update()
                     statusLine_ = std::format("Map event #{} not found", eventId);
                 }
                 handled = true;
+            }
+        }
+
+        if (!handled && hoveredPick_.has_value() && ctx.shared->inventory &&
+            ctx.shared->gameWorld && ctx.shared->mapScene &&
+            hoveredPick_->type == graphics::PickObjectType::Chest)
+        {
+            const std::string mapName = ctx.shared->mapScene->getName();
+            const auto* generated = ctx.shared->gameWorld->getGeneratedContent(mapName);
+            if (generated != nullptr)
+            {
+                auto updated = *generated;
+                auto chestIt = std::find_if(updated.chests.begin(), updated.chests.end(),
+                                            [this](const game::GeneratedChest& chest)
+                                            { return chest.chestId == hoveredPick_->objectIndex; });
+                if (chestIt != updated.chests.end())
+                {
+                    const size_t total = chestIt->itemIds.size();
+                    std::vector<int> remaining;
+                    int given = 0;
+                    for (int itemId : chestIt->itemIds)
+                    {
+                        game::Item item;
+                        item.itemId = itemId;
+                        item.identified = true;
+                        if (ctx.shared->inventory->giveItem(item))
+                        {
+                            ++given;
+                        }
+                        else
+                        {
+                            remaining.push_back(itemId);
+                        }
+                    }
+
+                    if (remaining.empty())
+                    {
+                        updated.chests.erase(chestIt);
+                    }
+                    else
+                    {
+                        chestIt->itemIds = std::move(remaining);
+                    }
+                    ctx.shared->gameWorld->setGeneratedContent(mapName, std::move(updated));
+
+                    if (remaining.empty())
+                    {
+                        statusLine_ = std::format("Opened chest: {} item(s)", given);
+                    }
+                    else
+                    {
+                        statusLine_ = std::format("Chest: took {} of {} item(s); inventory full",
+                                                  given, total);
+                    }
+                    hoveredPick_.reset();
+                    hoveredEventId_ = 0;
+                    hoverLine_.clear();
+                    handled = true;
+                }
             }
         }
 

@@ -102,6 +102,13 @@ Actor count: DAT_005fefc0
 
 Each actor maintains position, AI state, health, and combat data.
 
+> **Integration note:** RuneHarbor places generated chests at the spawn marker
+> that produced them and stores the position in `GeneratedChest` (save format
+> v14). Chests render through the world-item billboard path using the `CHEST01`
+> icon from ICONS.LOD and are clicked to transfer their generated items into the
+> party inventory. An emptied chest is removed from the map's generated content,
+> which persists through save/load.
+
 ---
 
 ## 2. Treasure Generation

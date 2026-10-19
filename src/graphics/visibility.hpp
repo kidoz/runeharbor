@@ -158,6 +158,7 @@ enum class PickObjectType : uint8_t
     OutdoorBuildingFace = 3,
     Monster = 4,
     MapItem = 5,
+    Chest = 6,
 };
 
 /// Candidate point for screen-space picking.

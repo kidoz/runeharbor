@@ -35,4 +35,9 @@ struct WorldItem
 using WorldItemProvider = std::function<std::vector<WorldItem>()>;
 using WorldItemSpriteLookup = std::function<std::string(int itemId)>;
 
+/// Reserved item id used by the host to draw generated chests through the
+/// world-item billboard pipeline. Real item ids are positive, so this cannot
+/// collide with an items.txt entry.
+inline constexpr int kChestBillboardItemId = -1;
+
 } // namespace runeharbor::graphics
