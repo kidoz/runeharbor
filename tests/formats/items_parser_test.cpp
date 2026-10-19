@@ -106,4 +106,19 @@ MALFORMED	LINE
         REQUIRE(parser.parse(malformed_vec));
         REQUIRE(parser.getItems().size() == 2); // 2 items parsed (malformed line skipped)
     }
+
+    SECTION("CRLF line endings in the shipped table are accepted")
+    {
+        std::string crlf_data =
+            "Item #\tPic File\tName\tValue\tEquip Stat\tSkill Group\tMod1\tMod2\tmaterial\t"
+            "ID/Rep/St\tNot identified name\tSprite Index\tVarA\tVarB\tEquip X\tEquip Y\tNotes\r\n"
+            "1\titem001\tCrude Longsword\t50\tWeapon\tSword\t3d3\t0\t8\t1\tLongsword\t1\t0\t0\t5\t"
+            "120\t\"Notes\"\r\n";
+        std::vector<uint8_t> crlf_vec(crlf_data.begin(), crlf_data.end());
+
+        REQUIRE(parser.parse(crlf_vec));
+        REQUIRE(parser.getItems().size() == 1);
+        REQUIRE(parser.getItems()[0].name == "Crude Longsword");
+        REQUIRE(parser.getItems()[0].notes == "Notes");
+    }
 }

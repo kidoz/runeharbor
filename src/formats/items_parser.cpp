@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "items_parser.hpp"
 
-#include <algorithm>
 #include <format>
 #include <sstream> // For std::istringstream and std::getline
 
@@ -36,13 +35,16 @@ bool ItemsParser::parse(const std::vector<uint8_t>& data)
     const std::string expected_header = "Item #\tPic File\tName\tValue\tEquip Stat\tSkill "
                                         "Group\tMod1\tMod2\tmaterial\tID/Rep/St\tNot identified "
                                         "name\tSprite Index\tVarA\tVarB\tEquip X\tEquip Y\tNotes";
-    if (line != expected_header)
+    // The shipped ITEMS.TXT uses CRLF line endings. std::getline leaves the
+    // trailing carriage return in place, so compare the trimmed line.
+    const std::string header = util::trim(line);
+    if (header != expected_header)
     {
         logger.error(
-            std::format("Malformed header: Expected '{}', got '{}'", expected_header, line));
+            std::format("Malformed header: Expected '{}', got '{}'", expected_header, header));
         return false;
     }
-    logger.debug(std::format("Skipping main column header: {}", line));
+    logger.debug(std::format("Skipping main column header: {}", header));
 
     // Process data lines
     while (std::getline(iss, line))
