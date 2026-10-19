@@ -654,6 +654,47 @@ TEST_CASE("Save/Load round-trips Lloyd's Beacon", "[game][save][utility]")
     CHECK(dst.beacon().yaw == 768.0f);
 }
 
+TEST_CASE("Save/Load round-trips hired NPCs", "[game][save][npc]")
+{
+    NullLogger logger;
+    TempSaveDir dir;
+
+    SaveGame save(logger);
+    save.setSaveDirectory(dir.path.string());
+
+    GameWorld src;
+    HiredNpc scout;
+    scout.npcId = 44;
+    scout.professionId = 6;
+    scout.name = "Arvid";
+    scout.professionName = "Scout";
+    scout.hireCost = 150;
+    HiredNpc healer;
+    healer.npcId = 45;
+    healer.professionId = 8;
+    healer.name = "Brenna";
+    healer.professionName = "Healer";
+    healer.hireCost = 0;
+    REQUIRE(src.party().hireNpc(scout));
+    REQUIRE(src.party().hireNpc(healer));
+
+    REQUIRE(save.save(src, 0));
+
+    GameWorld dst;
+    REQUIRE(save.load(dst, 0));
+
+    REQUIRE(dst.party().hiredNpcs().size() == 2);
+    CHECK(dst.party().hiredNpcs()[0].npcId == 44);
+    CHECK(dst.party().hiredNpcs()[0].professionId == 6);
+    CHECK(dst.party().hiredNpcs()[0].name == "Arvid");
+    CHECK(dst.party().hiredNpcs()[0].professionName == "Scout");
+    CHECK(dst.party().hiredNpcs()[0].hireCost == 150);
+    CHECK(dst.party().hiredNpcs()[1].npcId == 45);
+    CHECK(dst.party().hiredNpcs()[1].name == "Brenna");
+    CHECK(dst.party().hiredNpcs()[1].professionName == "Healer");
+    CHECK(dst.party().hiredNpcs()[1].hireCost == 0);
+}
+
 TEST_CASE("Save/Load round-trips per-map monster state", "[game][save][state]")
 {
     NullLogger logger;

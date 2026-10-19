@@ -1721,6 +1721,18 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
         }
     }
 
+    // v20: hired NPC roster.
+    const auto& hiredNpcs = party.hiredNpcs();
+    writeU32(out, static_cast<uint32_t>(hiredNpcs.size()));
+    for (const auto& npc : hiredNpcs)
+    {
+        writeI32(out, npc.npcId);
+        writeI32(out, npc.professionId);
+        writeString(out, npc.name);
+        writeString(out, npc.professionName);
+        writeI32(out, npc.hireCost);
+    }
+
     // v16: CRC-32 over the complete payload (header included), followed by a
     // trailer magic so a truncated or corrupted save is rejected before any
     // state is applied.
@@ -2510,6 +2522,33 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
             if (!mapName.empty())
             {
                 world.setSavedMapMonsters(mapName, std::move(monsters));
+            }
+        }
+    }
+
+    if (header.version >= 20)
+    {
+        uint32_t hiredCount = 0;
+        if (!readU32(ptr, end, hiredCount) || hiredCount > 16)
+        {
+            return false;
+        }
+        for (uint32_t i = 0; i < hiredCount; ++i)
+        {
+            HiredNpc npc;
+            if (!readI32(ptr, end, npc.npcId) || !readI32(ptr, end, npc.professionId) ||
+                !readString(ptr, end, npc.name) || !readString(ptr, end, npc.professionName) ||
+                !readI32(ptr, end, npc.hireCost))
+            {
+                return false;
+            }
+            if (npc.npcId > 0)
+            {
+                if (npc.name.empty())
+                {
+                    npc.name = std::format("NPC #{}", npc.npcId);
+                }
+                party.hireNpc(std::move(npc));
             }
         }
     }

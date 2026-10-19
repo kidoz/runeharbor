@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "character.hpp"
 
@@ -19,6 +20,19 @@ enum class Alignment : uint8_t
 };
 
 static constexpr int kPartySize = 4;
+// MM7 allows two hired NPCs alongside the four player characters.
+static constexpr int kMaxHiredNpcs = 2;
+
+// A hireling in the party roster. Names/profession text are stored so the save
+// remains readable even if the NPC data tables change.
+struct HiredNpc
+{
+    int npcId = 0;
+    int professionId = 0;
+    std::string name;
+    std::string professionName;
+    int hireCost = 0;
+};
 
 class Party
 {
@@ -94,6 +108,13 @@ class Party
     // Recalculate all derived stats for all members
     void recalculateAll();
 
+    // Hired NPCs (NPC dialogue "Hire" / "Dismiss").
+    const std::vector<HiredNpc>& hiredNpcs() const { return hiredNpcs_; }
+    bool hireNpc(HiredNpc npc);
+    bool dismissNpc(int npcId);
+    bool isNpcHired(int npcId) const;
+    void clearHiredNpcs() { hiredNpcs_.clear(); }
+
     // Core Gameplay actions
     void awardExperience(int amount);
     bool rest(int hours);
@@ -121,6 +142,7 @@ class Party
 
     uint64_t gameTime_ = 0;
     std::string currentMap_;
+    std::vector<HiredNpc> hiredNpcs_;
     int activeMemberIndex_ = 0;
 };
 

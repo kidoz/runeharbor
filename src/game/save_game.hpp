@@ -39,7 +39,8 @@ struct SaveHeader
     //  17  — party utility spell effects (Light/Fly/Water Walk)
     //  18  — Lloyd's Beacon location
     //  19  — per-map monster runtime state (health/position/AI)
-    static constexpr uint32_t kVersion = 19;
+    //  20  — hired NPC roster
+    static constexpr uint32_t kVersion = 20;
 
     uint32_t magic = kMagic;
     uint32_t version = kVersion;

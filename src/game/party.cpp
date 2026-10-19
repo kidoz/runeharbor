@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <random>
+#include <utility>
 
 #include <cassert>
 
@@ -48,6 +49,38 @@ void Party::withdrawGold(int amount)
     amount = std::min(amount, bankGold_);
     bankGold_ -= amount;
     gold_ += amount;
+}
+
+bool Party::hireNpc(HiredNpc npc)
+{
+    if (npc.npcId <= 0 || npc.name.empty())
+    {
+        return false;
+    }
+    if (hiredNpcs_.size() >= static_cast<size_t>(kMaxHiredNpcs) || isNpcHired(npc.npcId))
+    {
+        return false;
+    }
+    hiredNpcs_.push_back(std::move(npc));
+    return true;
+}
+
+bool Party::dismissNpc(int npcId)
+{
+    const auto it = std::find_if(hiredNpcs_.begin(), hiredNpcs_.end(),
+                                 [npcId](const HiredNpc& npc) { return npc.npcId == npcId; });
+    if (it == hiredNpcs_.end())
+    {
+        return false;
+    }
+    hiredNpcs_.erase(it);
+    return true;
+}
+
+bool Party::isNpcHired(int npcId) const
+{
+    return std::any_of(hiredNpcs_.begin(), hiredNpcs_.end(),
+                       [npcId](const HiredNpc& npc) { return npc.npcId == npcId; });
 }
 
 bool Party::consumeFood(int amount)
@@ -154,6 +187,7 @@ void Party::initDefault()
     food_ = 7;
     alignment_ = Alignment::Neutral;
     reputation_ = 0;
+    hiredNpcs_.clear();
     constexpr uint64_t kDefaultStartTicks = 9ull * 128ull * 3600ull;
     gameTime_ = kDefaultStartTicks;
     activeMemberIndex_ = 0;

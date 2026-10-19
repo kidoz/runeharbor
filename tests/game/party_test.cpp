@@ -282,3 +282,47 @@ TEST_CASE("Default party spawns at the original's Emerald Island transform", "[g
     CHECK(party.pitch() == 0.0f);
     CHECK(party.currentMap() == "out01.odm");
 }
+
+TEST_CASE("Party hired NPC roster", "[game][party][npc]")
+{
+    Party party;
+    party.clearHiredNpcs();
+
+    HiredNpc first;
+    first.npcId = 10;
+    first.professionId = 3;
+    first.name = "Arvid";
+    first.professionName = "Scout";
+    first.hireCost = 100;
+
+    HiredNpc second = first;
+    second.npcId = 11;
+    second.name = "Brenna";
+
+    REQUIRE(party.hireNpc(first));
+    CHECK(party.isNpcHired(10));
+    CHECK_FALSE(party.isNpcHired(11));
+    CHECK(party.hiredNpcs().size() == 1);
+    CHECK(party.hiredNpcs()[0].name == "Arvid");
+
+    // Duplicates and a third hireling are rejected (MM7 allows two).
+    CHECK_FALSE(party.hireNpc(first));
+    REQUIRE(party.hireNpc(second));
+    HiredNpc third = first;
+    third.npcId = 12;
+    third.name = "Cedric";
+    CHECK_FALSE(party.hireNpc(third));
+    CHECK(party.hiredNpcs().size() == 2);
+
+    CHECK(party.dismissNpc(10));
+    CHECK_FALSE(party.isNpcHired(10));
+    CHECK(party.hiredNpcs().size() == 1);
+    CHECK_FALSE(party.dismissNpc(10));
+
+    // A slot freed by dismissal can be reused.
+    CHECK(party.hireNpc(third));
+    CHECK(party.hiredNpcs().size() == 2);
+
+    party.initDefault();
+    CHECK(party.hiredNpcs().empty());
+}
