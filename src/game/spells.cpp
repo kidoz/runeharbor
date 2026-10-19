@@ -3,11 +3,13 @@
 
 #include <algorithm>
 #include <random>
+#include <utility>
 
 #include <cmath>
 
 #include "combat.hpp"
 #include "game_world.hpp"
+#include "travel_destinations.hpp"
 
 namespace runeharbor::game
 {
@@ -77,14 +79,6 @@ bool isBuffSpellName(const std::string& lowerName)
 }
 
 // Party-wide utility spells handled by GameWorld rather than TimedEffect.
-enum class UtilitySpellKind : uint8_t
-{
-    None = 0,
-    Light,
-    Fly,
-    WaterWalk,
-};
-
 UtilitySpellKind utilitySpellKind(std::string_view lowerName)
 {
     if (lowerName == "light" || lowerName.find("torch light") != std::string_view::npos ||
@@ -99,6 +93,14 @@ UtilitySpellKind utilitySpellKind(std::string_view lowerName)
     if (lowerName.find("water walk") != std::string_view::npos)
     {
         return UtilitySpellKind::WaterWalk;
+    }
+    if (lowerName.find("town portal") != std::string_view::npos)
+    {
+        return UtilitySpellKind::TownPortal;
+    }
+    if (lowerName.find("lloyd") != std::string_view::npos)
+    {
+        return UtilitySpellKind::LloydsBeacon;
     }
     return UtilitySpellKind::None;
 }
@@ -187,6 +189,12 @@ const SpellInfo* SpellSystem::getSpell(int spellId) const
     if (it == spellIndex_.end())
         return nullptr;
     return &spells_[it->second];
+}
+
+UtilitySpellKind SpellSystem::getUtilityKind(int spellId) const
+{
+    const SpellInfo* spell = getSpell(spellId);
+    return spell != nullptr ? utilitySpellKind(toLowerCopy(spell->name)) : UtilitySpellKind::None;
 }
 
 std::optional<int> SpellSystem::findSpellIdByName(std::string_view name) const
@@ -422,7 +430,7 @@ SpellResult SpellSystem::castHealSpell(int characterIndex, int spellId, int targ
     return result;
 }
 
-SpellResult SpellSystem::castBuffSpell(int characterIndex, int spellId)
+SpellResult SpellSystem::castBuffSpell(int characterIndex, int spellId, bool setBeaconHere)
 {
     SpellResult result;
 
@@ -465,6 +473,50 @@ SpellResult SpellSystem::castBuffSpell(int characterIndex, int spellId)
     const int64_t expiresAt = now + std::max(minimumTicks, durationTicks);
 
     const std::string lower = toLowerCopy(spell->name);
+
+    // Town Portal performs no state change here: InGameState opens the town
+    // menu and requests the chosen destination after the cast succeeds.
+    if (const UtilitySpellKind kind = utilitySpellKind(lower); kind == UtilitySpellKind::TownPortal)
+    {
+        result.success = true;
+        result.description = caster.name + " casts " + spell->name;
+        if (callbacks_.onSpellCast)
+        {
+            callbacks_.onSpellCast(spellId, characterIndex, result);
+        }
+        return result;
+    }
+
+    if (const UtilitySpellKind kind = utilitySpellKind(lower);
+        kind == UtilitySpellKind::LloydsBeacon)
+    {
+        const bool canRecall = gameWorld_->hasBeacon() && !gameWorld_->beacon().mapName.empty();
+        if (!canRecall || setBeaconHere)
+        {
+            const auto& party = gameWorld_->party();
+            BeaconLocation location;
+            location.mapName = gameWorld_->currentMap();
+            location.x = party.worldX();
+            location.y = party.worldY();
+            location.z = party.worldZ();
+            location.yaw = party.yaw();
+            gameWorld_->setBeacon(std::move(location));
+            result.description = caster.name + " sets " + spell->name;
+        }
+        else
+        {
+            const auto& beacon = gameWorld_->beacon();
+            gameWorld_->requestTravel(
+                {beacon.mapName, beacon.x, beacon.y, beacon.z, beacon.yaw, 0});
+            result.description = caster.name + " recalls " + spell->name;
+        }
+        result.success = true;
+        if (callbacks_.onSpellCast)
+        {
+            callbacks_.onSpellCast(spellId, characterIndex, result);
+        }
+        return result;
+    }
 
     // Light/Fly/Water Walk modify party-wide state instead of character
     // TimedEffects. Mastery controls Light's strength; the movement effects
@@ -614,12 +666,75 @@ SpellResult SpellSystem::castScriptSpell(int spellId, int power, int targetCharI
     if (const UtilitySpellKind kind = utilitySpellKind(toLowerCopy(spellName));
         kind != UtilitySpellKind::None)
     {
-        const int hours = std::max(1, power > 0 ? power : (spell ? spell->level : 1));
-        const int64_t expiresAt = gameWorld_->calendar().totalTicks +
-                                  static_cast<int64_t>(hours) * GameCalendar::kTicksPerHour;
-        gameWorld_->setUtilityEffect(toGameUtilityEffect(kind), 1, expiresAt);
-        result.success = true;
-        result.description = spellName + " affects the party";
+        switch (kind)
+        {
+        case UtilitySpellKind::TownPortal:
+        {
+            // Script casts have no destination menu: pick the first town the
+            // party has visited.
+            const auto destinations = townPortalDestinations();
+            const auto& visited = gameWorld_->visitedMaps();
+            const std::string currentMap = gameWorld_->currentMap();
+            auto choice = std::find_if(destinations.begin(), destinations.end(),
+                                       [&visited, &currentMap](const TravelDestination& destination)
+                                       {
+                                           return destination.mapName != currentMap &&
+                                                  visited.contains(destination.mapName);
+                                       });
+            if (choice == destinations.end())
+            {
+                // Only the current town is known: allow it as a fallback.
+                choice = std::find_if(destinations.begin(), destinations.end(),
+                                      [&visited](const TravelDestination& destination)
+                                      { return visited.contains(destination.mapName); });
+            }
+            if (choice == destinations.end())
+            {
+                result.description = "No known town to portal to";
+                return result;
+            }
+            gameWorld_->requestTravel({choice->mapName, choice->arrivalX, choice->arrivalY,
+                                       choice->arrivalZ, choice->arrivalFacing, 0});
+            result.success = true;
+            result.description = spellName + " opens a portal to " + choice->displayName;
+            break;
+        }
+        case UtilitySpellKind::LloydsBeacon:
+        {
+            if (!gameWorld_->hasBeacon())
+            {
+                const auto& party = gameWorld_->party();
+                BeaconLocation location;
+                location.mapName = gameWorld_->currentMap();
+                location.x = party.worldX();
+                location.y = party.worldY();
+                location.z = party.worldZ();
+                location.yaw = party.yaw();
+                gameWorld_->setBeacon(std::move(location));
+                result.description = spellName + " sets a beacon";
+            }
+            else
+            {
+                const auto& beacon = gameWorld_->beacon();
+                gameWorld_->requestTravel(
+                    {beacon.mapName, beacon.x, beacon.y, beacon.z, beacon.yaw, 0});
+                result.description = spellName + " recalls the beacon";
+            }
+            result.success = true;
+            break;
+        }
+        default:
+        {
+            const int hours = std::max(1, power > 0 ? power : (spell ? spell->level : 1));
+            const int64_t expiresAt = gameWorld_->calendar().totalTicks +
+                                      static_cast<int64_t>(hours) * GameCalendar::kTicksPerHour;
+            gameWorld_->setUtilityEffect(toGameUtilityEffect(kind), 1, expiresAt);
+            result.success = true;
+            result.description = spellName + " affects the party";
+            break;
+        }
+        }
+
         if (callbacks_.onSpellCast)
         {
             callbacks_.onSpellCast(spellId, -1, result);

@@ -252,4 +252,9 @@ entry.
 - Spawn point selection depends on the direction the party entered from
 - The starting map `"out01.odm"` is a constant that can be overridden by INI
 - Lloyd's Beacon requires saving both position data and a screenshot thumbnail
+- RuneHarbor's beacon stores map, position, and yaw (no screenshot yet) and is
+  persisted in RHBV v18
+- Spells queue a `game::TravelRequest` on `GameWorld`; `InGameState` consumes it,
+  teleports directly for same-map destinations, and otherwise sets
+  `startupMapName`/arrival overrides and enters the normal `Loading` flow
 - Special-case map handling should be data-driven rather than hardcoded

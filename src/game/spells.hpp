@@ -91,6 +91,18 @@ enum class SpellTarget : uint8_t
     SingleAnyTarget, // Any single target
 };
 
+// Utility spells whose effects are not damage/healing — the game state itself
+// changes (party movement flags, teleportation).
+enum class UtilitySpellKind : uint8_t
+{
+    None = 0,
+    Light,
+    Fly,
+    WaterWalk,
+    TownPortal,
+    LloydsBeacon,
+};
+
 // Runtime spell info (enriched from SpellEntry)
 struct SpellInfo
 {
@@ -154,6 +166,10 @@ class SpellSystem
     const SpellInfo* getSpell(int spellId) const;
     const std::vector<SpellInfo>& getAllSpells() const { return spells_; }
 
+    // Utility-spell classification (used by the UI to route Town Portal and
+    // Lloyd's Beacon through their choice menus).
+    UtilitySpellKind getUtilityKind(int spellId) const;
+
     /// Resolve a spell by its display name (case-insensitive), used by the
     /// monster tables' "Spl,Mas,Skil" entries (e.g. "Light Bolt,M,8").
     std::optional<int> findSpellIdByName(std::string_view name) const;
@@ -174,8 +190,10 @@ class SpellSystem
     // Cast a healing spell on a party member
     SpellResult castHealSpell(int characterIndex, int spellId, int targetCharIndex);
 
-    // Cast a buff spell on self or party
-    SpellResult castBuffSpell(int characterIndex, int spellId);
+    // Cast a buff spell on self or party. For Lloyd's Beacon, `setBeaconHere`
+    // forces setting a new beacon even when one already exists; otherwise a
+    // cast with an existing beacon requests a recall.
+    SpellResult castBuffSpell(int characterIndex, int spellId, bool setBeaconHere = false);
 
     // Event/script spell cast path (opcode-driven): applies effect directly to party targets
     // without requiring caster skill/mana checks.

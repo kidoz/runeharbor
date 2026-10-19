@@ -76,6 +76,24 @@ float GameWorld::effectiveNightBlend() const
     return calendar_.nightBlend() * (1.0f - lightNightReduction());
 }
 
+void GameWorld::setBeacon(BeaconLocation location)
+{
+    if (location.mapName.empty())
+    {
+        beacon_ = {};
+        return;
+    }
+    location.set = true;
+    beacon_ = std::move(location);
+}
+
+std::optional<TravelRequest> GameWorld::takeTravelRequest()
+{
+    std::optional<TravelRequest> request = std::move(pendingTravel_);
+    pendingTravel_.reset();
+    return request;
+}
+
 void GameWorld::processConditions()
 {
     const int64_t now = calendar_.totalTicks;
@@ -376,6 +394,8 @@ void GameWorld::reset()
     lastEventInteraction_ = {};
     runtimeConfig_ = RuntimeConfig{};
     utilityEffects_ = {};
+    beacon_ = {};
+    pendingTravel_.reset();
     lastConditionTick_ = calendar_.totalTicks;
 }
 

@@ -37,7 +37,8 @@ struct SaveHeader
     //  15  — active timed spell effects (buffs)
     //  16  — CRC-32 trailer over the world payload
     //  17  — party utility spell effects (Light/Fly/Water Walk)
-    static constexpr uint32_t kVersion = 17;
+    //  18  — Lloyd's Beacon location
+    static constexpr uint32_t kVersion = 18;
 
     uint32_t magic = kMagic;
     uint32_t version = kVersion;

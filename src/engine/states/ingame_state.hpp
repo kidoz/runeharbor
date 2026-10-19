@@ -2,9 +2,11 @@
 #pragma once
 
 #include "../../game/spells.hpp"
+#include "../../game/travel_destinations.hpp"
 #include "../../graphics/primitives.hpp"
 #include "../../graphics/visibility.hpp"
 #include "../../ui/character_stats_widget.hpp"
+#include "../../ui/choice_list_widget.hpp"
 #include "../../ui/dialogue.hpp"
 #include "../../ui/hud.hpp"
 #include "../../ui/inventory_widget.hpp"
@@ -59,6 +61,8 @@ class InGameState : public IGameState
     void preserveCurrentMapStateForSave();
     bool quickSaveToSlot(int slotIndex);
     bool quickLoadFromSlot(int slotIndex);
+    void openTownPortalChoices(int caster, int spellId);
+    void resolveChoice(int choiceId);
 
     StateContext& ctx;
 
@@ -76,6 +80,19 @@ class InGameState : public IGameState
     ui::MapWidget mapWidget_;
     ui::JournalWidget journalWidget_;
     ui::SaveLoadWidget saveLoadWidget_;
+    ui::ChoiceListWidget choiceWidget_;
+
+    // Town Portal / Lloyd's Beacon menu state.
+    enum class ChoiceMode : uint8_t
+    {
+        None = 0,
+        TownPortal,
+        LloydsBeacon,
+    };
+    ChoiceMode choiceMode_ = ChoiceMode::None;
+    int choiceCaster_ = -1;
+    int choiceSpellId_ = 0;
+    std::vector<game::TravelDestination> townPortalChoices_;
     uint64_t lastUpdateTicks_ = 0;
     float fpsAccumulatorMs_ = 0.0f;
     int fpsFrameCounter_ = 0;

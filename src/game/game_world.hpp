@@ -3,9 +3,11 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "generation.hpp"
@@ -144,6 +146,29 @@ struct UtilityEffectState
     {
         return strength > 0 && (expiresAtTicks == 0 || nowTicks < expiresAtTicks);
     }
+};
+
+// Lloyd's Beacon destination (one party-wide beacon).
+struct BeaconLocation
+{
+    bool set = false;
+    std::string mapName;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float yaw = 0.0f;
+};
+
+// Deferred teleport requested by a spell or script. InGameState consumes it and
+// either moves the party (same map) or starts the map-loading flow.
+struct TravelRequest
+{
+    std::string mapName;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float yaw = 0.0f;
+    int travelDays = 0; // 0 = instantaneous (Town Portal / Lloyd's Beacon)
 };
 
 // Runtime items spawned by EVT/map logic.
@@ -296,6 +321,17 @@ class GameWorld
     // calendar().nightBlend() with the Light reduction applied.
     float effectiveNightBlend() const;
 
+    // Lloyd's Beacon.
+    const BeaconLocation& beacon() const { return beacon_; }
+    bool hasBeacon() const { return beacon_.set; }
+    void setBeacon(BeaconLocation location);
+    void clearBeacon() { beacon_ = {}; }
+
+    // Deferred travel request (Town Portal / Lloyd's Beacon recall).
+    void requestTravel(TravelRequest request) { pendingTravel_ = std::move(request); }
+    std::optional<TravelRequest> takeTravelRequest();
+    bool hasTravelRequest() const { return pendingTravel_.has_value(); }
+
     // Advance time-based condition effects: poison/disease damage per in-game
     // hour and expiry of timed conditions (weak, afraid, asleep, paralyzed, ...).
     // Safe to call every frame; it only does work once per in-game hour.
@@ -323,6 +359,8 @@ class GameWorld
     EventInteractionContext lastEventInteraction_;
     RuntimeConfig runtimeConfig_;
     std::array<UtilityEffectState, static_cast<size_t>(UtilityEffect::Count)> utilityEffects_ = {};
+    BeaconLocation beacon_;
+    std::optional<TravelRequest> pendingTravel_;
     int64_t lastConditionTick_ = 0;
 };
 

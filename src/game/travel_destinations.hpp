@@ -35,4 +35,10 @@ struct TravelDestination
 // has no authored destinations (the UI will show "no destinations").
 std::vector<TravelDestination> destinationsForBuilding(int sourceMapId, BuildingType type);
 
+// Towns reachable by the Town Portal spell. The original hardcodes a town list
+// in the executable; this seed table mirrors the outdoor regions used by the
+// travel services. Arrival points are placeholders until the portal coordinates
+// are extracted.
+std::vector<TravelDestination> townPortalDestinations();
+
 } // namespace runeharbor::game

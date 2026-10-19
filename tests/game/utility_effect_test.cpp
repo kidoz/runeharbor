@@ -132,6 +132,100 @@ TEST_CASE("Utility spells cast as party-wide effects", "[game][spells][utility]"
     CHECK(world.utilityEffect(UtilityEffect::Fly).expiresAtTicks > firstExpiry);
 }
 
+TEST_CASE("Town Portal defers travel until a destination is chosen", "[game][spells][utility]")
+{
+    util::ConsoleLogger logger;
+    GameWorld world;
+    SpellSystem spells(logger);
+    spells.setGameWorld(&world);
+    spells.loadSpellData({makeSpell(20, "Town Portal", 1)});
+
+    auto& ch = world.party().member(0);
+    prepareCaster(ch);
+    learnSkill(ch, SkillId::Air, 10, SkillMastery::Normal);
+    ch.knownSpells[20] = true;
+    world.setCurrentMap("out01.odm");
+
+    const int spellPointsBefore = ch.spellPoints;
+    const auto result = spells.castBuffSpell(0, 20);
+    REQUIRE(result.success);
+    CHECK(ch.spellPoints < spellPointsBefore);
+    // The cast only validates/deducts mana; InGameState hosts the menu and
+    // issues the travel request once the player picks a town.
+    CHECK_FALSE(world.hasTravelRequest());
+
+    // Script casts have no menu and choose the first visited town.
+    world.markVisited("out02.odm");
+    const auto scripted = spells.castScriptSpell(20, 1, 0);
+    REQUIRE(scripted.success);
+    auto request = world.takeTravelRequest();
+    REQUIRE(request.has_value());
+    CHECK(request->mapName == "out02.odm");
+    CHECK(request->travelDays == 0);
+}
+
+TEST_CASE("Lloyd's Beacon sets and recalls", "[game][spells][utility]")
+{
+    util::ConsoleLogger logger;
+    GameWorld world;
+    SpellSystem spells(logger);
+    spells.setGameWorld(&world);
+    spells.loadSpellData({makeSpell(17, "Lloyd's Beacon", 1)});
+
+    auto& ch = world.party().member(0);
+    prepareCaster(ch);
+    learnSkill(ch, SkillId::Air, 10, SkillMastery::Normal);
+    ch.knownSpells[17] = true;
+    world.setCurrentMap("out02.odm");
+    world.party().setWorldPosition(100.0f, 200.0f, 300.0f);
+    world.party().setOrientation(512.0f, 0.0f);
+
+    const auto set = spells.castBuffSpell(0, 17);
+    REQUIRE(set.success);
+    REQUIRE(world.hasBeacon());
+    CHECK(world.beacon().mapName == "out02.odm");
+    CHECK(world.beacon().x == 100.0f);
+    CHECK(world.beacon().y == 200.0f);
+    CHECK(world.beacon().z == 300.0f);
+    CHECK(world.beacon().yaw == 512.0f);
+    CHECK_FALSE(world.hasTravelRequest());
+
+    // Moving away and casting again requests a recall, not an immediate move.
+    world.party().setWorldPosition(900.0f, 800.0f, 700.0f);
+    world.party().setOrientation(0.0f, 0.0f);
+    const auto recall = spells.castBuffSpell(0, 17);
+    REQUIRE(recall.success);
+    auto request = world.takeTravelRequest();
+    REQUIRE(request.has_value());
+    CHECK(request->mapName == "out02.odm");
+    CHECK(request->x == 100.0f);
+    CHECK(request->y == 200.0f);
+    CHECK(request->z == 300.0f);
+    CHECK(request->yaw == 512.0f);
+
+    // The explicit set-here path overwrites the beacon.
+    const auto reset = spells.castBuffSpell(0, 17, true);
+    REQUIRE(reset.success);
+    CHECK(world.beacon().x == 900.0f);
+    CHECK_FALSE(world.hasTravelRequest());
+}
+
+TEST_CASE("GameWorld reset clears beacon and pending travel", "[game][spells][utility]")
+{
+    GameWorld world;
+    world.setCurrentMap("out03.odm");
+    world.setBeacon(BeaconLocation{
+        .set = true, .mapName = "out03.odm", .x = 1.0f, .y = 2.0f, .z = 3.0f, .yaw = 4.0f});
+    world.requestTravel({"out01.odm", 0.0f, 0.0f, 0.0f, 0.0f, 0});
+
+    CHECK(world.hasBeacon());
+    CHECK(world.hasTravelRequest());
+
+    world.reset();
+    CHECK_FALSE(world.hasBeacon());
+    CHECK_FALSE(world.hasTravelRequest());
+}
+
 TEST_CASE("Script casts apply utility spells to the party", "[game][spells][utility]")
 {
     util::ConsoleLogger logger;

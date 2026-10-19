@@ -1668,6 +1668,15 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
         writeU64(out, static_cast<uint64_t>(std::max<int64_t>(0, effect.expiresAtTicks)));
     }
 
+    // v18: Lloyd's Beacon location.
+    const auto& beacon = world.beacon();
+    writeU8(out, beacon.set ? 1u : 0u);
+    writeString(out, beacon.mapName);
+    writeFloat(out, beacon.x);
+    writeFloat(out, beacon.y);
+    writeFloat(out, beacon.z);
+    writeFloat(out, beacon.yaw);
+
     // v16: CRC-32 over the complete payload (header included), followed by a
     // trailer magic so a truncated or corrupted save is rejected before any
     // state is applied.
@@ -2372,6 +2381,32 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
             }
             world.setUtilityEffect(static_cast<UtilityEffect>(i), strength,
                                    static_cast<int64_t>(expiresAt));
+        }
+    }
+
+    if (header.version >= 18)
+    {
+        uint8_t beaconSet = 0;
+        std::string beaconMap;
+        float beaconX = 0.0f;
+        float beaconY = 0.0f;
+        float beaconZ = 0.0f;
+        float beaconYaw = 0.0f;
+        if (!readU8(ptr, end, beaconSet) || !readString(ptr, end, beaconMap) ||
+            !readFloat(ptr, end, beaconX) || !readFloat(ptr, end, beaconY) ||
+            !readFloat(ptr, end, beaconZ) || !readFloat(ptr, end, beaconYaw))
+        {
+            return false;
+        }
+        if (beaconSet != 0 && !beaconMap.empty())
+        {
+            BeaconLocation location;
+            location.mapName = std::move(beaconMap);
+            location.x = beaconX;
+            location.y = beaconY;
+            location.z = beaconZ;
+            location.yaw = beaconYaw;
+            world.setBeacon(std::move(location));
         }
     }
 

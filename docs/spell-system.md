@@ -1039,7 +1039,16 @@ Offset +7: skill_level_override (byte)
     permits crossing water.
   - Script casts (`castScriptSpell`) of these names apply the party effect
     instead of damaging the targeted character.
-- Town Portal and Lloyd's Beacon remain unimplemented mechanically.
+- **Town Portal** opens a modal town menu listing visited destinations from
+  `game::townPortalDestinations()`. The cast deducts mana, then the chosen
+  destination queues a `TravelRequest`; InGameState teleports directly when the
+  target is the current map or starts the normal map-loading flow otherwise.
+  Script casts have no menu and choose the first visited town other than the
+  current map.
+- **Lloyd's Beacon** stores one party-wide beacon (map, position, yaw) in
+  `GameWorld`, serialized in RHBV v18. The first cast sets the beacon at the
+  party's position; later casts open a Recall / Set-here menu. Recall queues a
+  `TravelRequest` through the same path as Town Portal.
 
 ## Notes
 

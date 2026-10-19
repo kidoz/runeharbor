@@ -624,6 +624,35 @@ TEST_CASE("Save/Load round-trips utility spell effects", "[game][save][utility]"
     CHECK_FALSE(dst.hasUtilityEffect(UtilityEffect::WaterWalk));
 }
 
+TEST_CASE("Save/Load round-trips Lloyd's Beacon", "[game][save][utility]")
+{
+    NullLogger logger;
+    TempSaveDir dir;
+
+    SaveGame save(logger);
+    save.setSaveDirectory(dir.path.string());
+
+    GameWorld src;
+    src.setBeacon(BeaconLocation{.set = true,
+                                 .mapName = "out05.odm",
+                                 .x = 4096.0f,
+                                 .y = -512.0f,
+                                 .z = 128.0f,
+                                 .yaw = 768.0f});
+
+    REQUIRE(save.save(src, 0));
+
+    GameWorld dst;
+    REQUIRE(save.load(dst, 0));
+
+    REQUIRE(dst.hasBeacon());
+    CHECK(dst.beacon().mapName == "out05.odm");
+    CHECK(dst.beacon().x == 4096.0f);
+    CHECK(dst.beacon().y == -512.0f);
+    CHECK(dst.beacon().z == 128.0f);
+    CHECK(dst.beacon().yaw == 768.0f);
+}
+
 TEST_CASE("Save/Load round-trips acquired awards and autonotes", "[game][save][journal]")
 {
     NullLogger logger;

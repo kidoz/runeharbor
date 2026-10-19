@@ -62,4 +62,14 @@ std::vector<TravelDestination> destinationsForBuilding(int sourceMapId, Building
     return out;
 }
 
+std::vector<TravelDestination> townPortalDestinations()
+{
+    return {
+        dest("out01.odm", "Emerald Island", 0),
+        dest("out02.odm", "Harmondale", 0),
+        dest("out03.odm", "Tularea", 0),
+        dest("out04.odm", "Bracada Desert", 0),
+    };
+}
+
 } // namespace runeharbor::game

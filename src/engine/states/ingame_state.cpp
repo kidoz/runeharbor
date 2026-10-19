@@ -130,6 +130,8 @@ void InGameState::enter()
     mapWidget_.setVisible(false);
     journalWidget_.setVisible(false);
     saveLoadWidget_.setVisible(false);
+    choiceWidget_.setVisible(false);
+    choiceMode_ = ChoiceMode::None;
 
     if (ctx.shared && ctx.shared->gameWorld)
     {
@@ -221,12 +223,48 @@ void InGameState::enter()
             if (req.targetType == game::SpellTarget::Self ||
                 req.targetType == game::SpellTarget::AllAllies)
             {
-                // Buff/self: cast immediately on the active caster.
+                // Buff/self: cast immediately on the active caster. Town Portal
+                // and Lloyd's Beacon open their choice menus instead.
                 const int caster = findActivePartyMember();
                 if (caster >= 0 && ctx.shared && ctx.shared->spellSystem)
                 {
-                    auto r = ctx.shared->spellSystem->castBuffSpell(caster, req.spellId);
-                    statusLine_ = r.description;
+                    auto* spellSystem = ctx.shared->spellSystem;
+                    const auto kind = spellSystem->getUtilityKind(req.spellId);
+                    if (kind == game::UtilitySpellKind::TownPortal)
+                    {
+                        if (spellSystem->canCast(caster, req.spellId))
+                        {
+                            spellbook_.setVisible(false);
+                            openTownPortalChoices(caster, req.spellId);
+                        }
+                        else
+                        {
+                            statusLine_ = "Cannot cast spell";
+                        }
+                    }
+                    else if (kind == game::UtilitySpellKind::LloydsBeacon &&
+                             ctx.shared->gameWorld && ctx.shared->gameWorld->hasBeacon())
+                    {
+                        if (spellSystem->canCast(caster, req.spellId))
+                        {
+                            spellbook_.setVisible(false);
+                            choiceMode_ = ChoiceMode::LloydsBeacon;
+                            choiceCaster_ = caster;
+                            choiceSpellId_ = req.spellId;
+                            choiceWidget_.open("Lloyd's Beacon",
+                                               {{"Recall to beacon", 0}, {"Set beacon here", 1}});
+                            statusLine_ = "Choose how to use the beacon.";
+                        }
+                        else
+                        {
+                            statusLine_ = "Cannot cast spell";
+                        }
+                    }
+                    else
+                    {
+                        auto r = spellSystem->castBuffSpell(caster, req.spellId);
+                        statusLine_ = r.description;
+                    }
                 }
                 targetingActive_ = false;
             }
@@ -438,6 +476,35 @@ std::optional<GameStateId> InGameState::update()
             }
         }
 
+        return std::nullopt;
+    }
+
+    // Town Portal / Lloyd's Beacon choice menu. Fully modal: it consumes the
+    // frame while open so panel hotkeys and world input cannot fire behind it.
+    if (choiceWidget_.visible())
+    {
+        for (const SDL_Scancode key : {SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_RETURN,
+                                       SDL_SCANCODE_KP_ENTER, SDL_SCANCODE_ESCAPE})
+        {
+            if (ctx.isKeyPressed(key))
+            {
+                ui::UIEvent ev{ui::UIEventType::KeyDown, 0, 0, platform::MouseButton::Left, key};
+                (void)choiceWidget_.handleEvent(ev);
+            }
+        }
+        if (ctx.window.wasMousePressed(platform::MouseButton::Left))
+        {
+            const auto ms = ctx.window.getMouseState();
+            ui::UIEvent ev{ui::UIEventType::MouseDown, ms.x, ms.y, platform::MouseButton::Left,
+                           SDL_SCANCODE_UNKNOWN};
+            (void)choiceWidget_.handleEvent(ev);
+        }
+
+        const int selection = choiceWidget_.takeSelection();
+        if (selection >= 0)
+        {
+            resolveChoice(selection);
+        }
         return std::nullopt;
     }
 
@@ -671,7 +738,7 @@ std::optional<GameStateId> InGameState::update()
     const bool anyPanelOpen = inventory_.visible() || characterStats_.visible() ||
                               spellbook_.visible() || restWidget_.visible() ||
                               mapWidget_.visible() || journalWidget_.visible() ||
-                              saveLoadWidget_.visible();
+                              saveLoadWidget_.visible() || choiceWidget_.visible();
     if (anyPanelOpen)
     {
         if (ctx.window.wasMousePressed(platform::MouseButton::Left))
@@ -904,6 +971,48 @@ std::optional<GameStateId> InGameState::update()
         else
         {
             statusLine_ = "Event #1 not found";
+        }
+    }
+
+    // Consume deferred teleport requests (Town Portal / Lloyd's Beacon recall).
+    if (ctx.shared && ctx.shared->gameWorld)
+    {
+        if (auto request = ctx.shared->gameWorld->takeTravelRequest())
+        {
+            if (request->mapName.empty())
+            {
+                statusLine_ = "Travel failed: no destination.";
+            }
+            else
+            {
+                if (request->travelDays > 0)
+                {
+                    ctx.shared->gameWorld->advanceTime(static_cast<int64_t>(request->travelDays) *
+                                                       24 * 60);
+                }
+
+                if (request->mapName == ctx.shared->gameWorld->currentMap())
+                {
+                    auto& party = ctx.shared->gameWorld->party();
+                    party.setWorldPosition(request->x, request->y, request->z);
+                    party.setOrientation(request->yaw, party.pitch());
+                    statusLine_ = std::format("Teleported to {}", request->mapName);
+                }
+                else
+                {
+                    ctx.shared->startupMapName = request->mapName;
+                    ctx.shared->startupPreferOutdoor =
+                        (request->mapName.size() >= 4 &&
+                         request->mapName.compare(request->mapName.size() - 4, 4, ".odm") == 0);
+                    ctx.shared->autoLoadMap = true;
+                    ctx.shared->arrivalOverrideActive = true;
+                    ctx.shared->arrivalX = request->x;
+                    ctx.shared->arrivalY = request->y;
+                    ctx.shared->arrivalZ = request->z;
+                    ctx.shared->arrivalYaw = request->yaw;
+                    pendingTravel_ = true;
+                }
+            }
         }
     }
 
@@ -1370,6 +1479,11 @@ void InGameState::render()
                                   static_cast<int>(kGameWidth * scale),
                                   static_cast<int>(kGameHeight * scale));
         saveLoadWidget_.render(*ctx.renderer, *ctx.debugText);
+
+        choiceWidget_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
+                                static_cast<int>(kGameWidth * scale),
+                                static_cast<int>(kGameHeight * scale));
+        choiceWidget_.render(*ctx.renderer, *ctx.debugText);
     }
 
     renderOverlay();
@@ -1721,6 +1835,79 @@ void InGameState::preserveCurrentMapStateForSave()
     }
 
     ctx.shared->gameWorld->setSavedMapState(mapName, std::move(state));
+}
+
+void InGameState::openTownPortalChoices(int caster, int spellId)
+{
+    townPortalChoices_.clear();
+    if (ctx.shared && ctx.shared->gameWorld)
+    {
+        for (const auto& destination : game::townPortalDestinations())
+        {
+            if (ctx.shared->gameWorld->hasVisited(destination.mapName))
+            {
+                townPortalChoices_.push_back(destination);
+            }
+        }
+    }
+
+    if (townPortalChoices_.empty())
+    {
+        statusLine_ = "No known town to portal to.";
+        return;
+    }
+
+    choiceMode_ = ChoiceMode::TownPortal;
+    choiceCaster_ = caster;
+    choiceSpellId_ = spellId;
+
+    std::vector<ui::ChoiceListWidget::Choice> options;
+    options.reserve(townPortalChoices_.size());
+    for (size_t i = 0; i < townPortalChoices_.size(); ++i)
+    {
+        options.push_back({.label = townPortalChoices_[i].displayName, .id = static_cast<int>(i)});
+    }
+    choiceWidget_.open("Town Portal", std::move(options));
+    statusLine_ = "Choose a town.";
+}
+
+void InGameState::resolveChoice(int choiceId)
+{
+    if (!ctx.shared || !ctx.shared->spellSystem || !ctx.shared->gameWorld)
+    {
+        choiceMode_ = ChoiceMode::None;
+        return;
+    }
+
+    if (choiceMode_ == ChoiceMode::TownPortal)
+    {
+        if (choiceId < 0 || choiceId >= static_cast<int>(townPortalChoices_.size()))
+        {
+            choiceMode_ = ChoiceMode::None;
+            return;
+        }
+
+        const auto result = ctx.shared->spellSystem->castBuffSpell(choiceCaster_, choiceSpellId_);
+        statusLine_ = result.description;
+        if (result.success)
+        {
+            const auto& destination = townPortalChoices_[static_cast<size_t>(choiceId)];
+            ctx.shared->gameWorld->requestTravel({destination.mapName, destination.arrivalX,
+                                                  destination.arrivalY, destination.arrivalZ,
+                                                  destination.arrivalFacing, 0});
+            statusLine_ = std::format("Town Portal: {}", destination.displayName);
+        }
+    }
+    else if (choiceMode_ == ChoiceMode::LloydsBeacon)
+    {
+        // id 0 = recall, id 1 = set here.
+        const bool setHere = (choiceId == 1);
+        const auto result =
+            ctx.shared->spellSystem->castBuffSpell(choiceCaster_, choiceSpellId_, setHere);
+        statusLine_ = result.description;
+    }
+
+    choiceMode_ = ChoiceMode::None;
 }
 
 bool InGameState::quickSaveToSlot(int slotIndex)
