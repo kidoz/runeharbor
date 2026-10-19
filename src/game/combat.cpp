@@ -5,14 +5,17 @@
 #include <charconv>
 #include <cstdlib>
 #include <format>
+#include <optional>
 #include <random>
 #include <string_view>
 
+#include <cctype>
 #include <cmath>
 
 #include "../util/string_utils.hpp"
 #include "game_world.hpp"
 #include "inventory.hpp"
+#include "spells.hpp"
 
 namespace runeharbor::game
 {
@@ -83,9 +86,307 @@ MonsterInstance::Personality parsePersonality(std::string_view aiTypeRaw)
     return MonsterInstance::Personality::Normal;
 }
 
+std::string stripQuotes(std::string_view raw)
+{
+    const size_t first = raw.find_first_not_of(" \t\"'");
+    if (first == std::string_view::npos)
+    {
+        return {};
+    }
+    const size_t last = raw.find_last_not_of(" \t\"'");
+    return std::string(raw.substr(first, last - first + 1));
+}
+
+std::string normalizedToken(std::string_view raw)
+{
+    std::string result;
+    result.reserve(raw.size());
+    for (char c : raw)
+    {
+        const auto uc = static_cast<unsigned char>(c);
+        if (c == '"' || c == '\'' || std::isspace(uc))
+        {
+            continue;
+        }
+        result.push_back(static_cast<char>(std::tolower(uc)));
+    }
+    return result;
+}
+
+DamageElement damageElementFromName(std::string_view raw)
+{
+    const std::string name = normalizedToken(raw);
+    if (name == "fire")
+        return DamageElement::Fire;
+    if (name == "air")
+        return DamageElement::Air;
+    if (name == "water")
+        return DamageElement::Water;
+    if (name == "earth")
+        return DamageElement::Earth;
+    if (name == "mind")
+        return DamageElement::Mind;
+    if (name == "spirit")
+        return DamageElement::Spirit;
+    if (name == "body")
+        return DamageElement::Body;
+    if (name == "light")
+        return DamageElement::Light;
+    if (name == "dark")
+        return DamageElement::Dark;
+    if (name == "ener")
+        return DamageElement::Light; // Energy is approximated with Light resistance.
+    return DamageElement::Physical;
+}
+
+bool parseShotCount(std::string_view special, int& shots)
+{
+    const std::string text = stripQuotes(special);
+    if (text.size() < 6 || util::toLower(text.substr(0, 4)) != "shot")
+    {
+        return false;
+    }
+    const size_t comma = text.find(',');
+    if (comma == std::string::npos)
+    {
+        return false;
+    }
+    const size_t x = text.find('x', comma);
+    if (x == std::string::npos)
+    {
+        return false;
+    }
+    int value = 0;
+    const char* begin = text.data() + x + 1;
+    const char* end = text.data() + text.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, value);
+    if (ec != std::errc{} || ptr == begin || value <= 0 || value > 20)
+    {
+        return false;
+    }
+    shots = value;
+    return true;
+}
+
+bool parseExplode(std::string_view special, std::string& dice, DamageElement& element)
+{
+    const std::string text = stripQuotes(special);
+    if (text.size() < 8 || util::toLower(text.substr(0, 8)) != "explode,")
+    {
+        return false;
+    }
+    const auto parts = util::splitString(text, ',', '"');
+    if (parts.size() < 2)
+    {
+        return false;
+    }
+    dice = util::trim(parts[1]);
+    element = parts.size() > 2 ? damageElementFromName(parts[2]) : DamageElement::Physical;
+    return !dice.empty();
+}
+
+bool parseSpellSpec(std::string_view raw, std::string& name, SkillMastery& mastery, int& level)
+{
+    const std::string text = stripQuotes(raw);
+    if (text.empty() || text == "0")
+    {
+        return false;
+    }
+    const auto parts = util::splitString(text, ',', '"');
+    if (parts.empty())
+    {
+        return false;
+    }
+    name = util::trim(parts[0]);
+    if (name.empty() || name == "0")
+    {
+        return false;
+    }
+
+    mastery = SkillMastery::Normal;
+    if (parts.size() > 1)
+    {
+        const std::string token = util::toLower(util::trim(parts[1]));
+        if (!token.empty())
+        {
+            switch (token[0])
+            {
+            case 'e':
+                mastery = SkillMastery::Expert;
+                break;
+            case 'm':
+                mastery = SkillMastery::Master;
+                break;
+            case 'g':
+                mastery = SkillMastery::GrandMaster;
+                break;
+            default:
+                mastery = SkillMastery::Normal;
+                break;
+            }
+        }
+    }
+
+    level = 1;
+    if (parts.size() > 2)
+    {
+        int value = 0;
+        const std::string token = util::trim(parts[2]);
+        const auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), value);
+        if (ec == std::errc{} && ptr != token.data())
+        {
+            level = std::clamp(value, 1, 60);
+        }
+    }
+    return true;
+}
+
+bool isBeneficialSpellName(std::string_view name)
+{
+    const std::string lower = util::toLower(std::string(name));
+    static constexpr std::string_view kBeneficial[] = {
+        "cure",   "heal",   "bless",  "protection",   "power",   "haste",
+        "shield", "skin",   "resist", "regeneration", "heroism", "luck",
+        "speed",  "day of", "armor",  "might",        "grace",   "endurance",
+    };
+    for (std::string_view token : kBeneficial)
+    {
+        if (lower.find(token) != std::string::npos)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::optional<ConditionIndex> conditionForBonus(std::string_view bonus)
+{
+    const std::string name = normalizedToken(bonus);
+    if (name == "disease1")
+        return ConditionIndex::Disease1;
+    if (name == "disease2")
+        return ConditionIndex::Disease2;
+    if (name == "disease3")
+        return ConditionIndex::Disease3;
+    if (name == "poison1")
+        return ConditionIndex::Poison1;
+    if (name == "poison2")
+        return ConditionIndex::Poison2;
+    if (name == "poison3")
+        return ConditionIndex::Poison3;
+    if (name == "afraid")
+        return ConditionIndex::Afraid;
+    if (name == "insane")
+        return ConditionIndex::Insane;
+    if (name == "asleep")
+        return ConditionIndex::Asleep;
+    if (name == "paralyze")
+        return ConditionIndex::Paralyzed;
+    if (name == "uncon")
+        return ConditionIndex::Unconscious;
+    if (name == "dead")
+        return ConditionIndex::Dead;
+    if (name == "errad" || name == "eradicate")
+        return ConditionIndex::Eradicated;
+    if (name == "stone")
+        return ConditionIndex::Stoned;
+    if (name == "curse" || name == "cursex2")
+        return ConditionIndex::Cursed;
+    if (name == "weak")
+        return ConditionIndex::Weak;
+    if (name == "drunk")
+        return ConditionIndex::Drunk;
+    return std::nullopt;
+}
+
+struct TreasureSpec
+{
+    int chancePercent = 100;
+    std::string dice;
+    int itemLevel = 0;
+    std::string itemType;
+};
+
+TreasureSpec parseTreasure(std::string_view raw)
+{
+    TreasureSpec spec;
+    std::string text = stripQuotes(raw);
+    if (text.empty() || text == "0")
+    {
+        return spec;
+    }
+
+    size_t digits = 0;
+    while (digits < text.size() && std::isdigit(static_cast<unsigned char>(text[digits])))
+    {
+        ++digits;
+    }
+    if (digits > 0 && digits < text.size() && text[digits] == '%')
+    {
+        int chance = 0;
+        const auto [ptr, ec] = std::from_chars(text.data(), text.data() + digits, chance);
+        if (ec == std::errc{})
+        {
+            spec.chancePercent = std::clamp(chance, 0, 100);
+        }
+        text = text.substr(digits + 1);
+    }
+
+    std::string itemPart;
+    const size_t plusL = text.find("+L");
+    const size_t plusl = text.find("+l");
+    if (plusL != std::string::npos || plusl != std::string::npos)
+    {
+        const size_t split = plusL != std::string::npos ? plusL : plusl;
+        spec.dice = text.substr(0, split);
+        itemPart = text.substr(split + 2);
+    }
+    else if (!text.empty() && (text[0] == 'L' || text[0] == 'l'))
+    {
+        itemPart = text.substr(1);
+    }
+    else
+    {
+        spec.dice = text;
+    }
+
+    if (!itemPart.empty())
+    {
+        size_t levelDigits = 0;
+        while (levelDigits < itemPart.size() &&
+               std::isdigit(static_cast<unsigned char>(itemPart[levelDigits])))
+        {
+            ++levelDigits;
+        }
+        if (levelDigits > 0)
+        {
+            int level = 0;
+            const auto [ptr, ec] =
+                std::from_chars(itemPart.data(), itemPart.data() + levelDigits, level);
+            if (ec == std::errc{})
+            {
+                spec.itemLevel = std::clamp(level, 1, 20);
+            }
+        }
+        spec.itemType = itemPart.substr(levelDigits);
+    }
+
+    return spec;
+}
+
 } // namespace
 
 CombatSystem::CombatSystem(util::ILogger& logger) : logger_(logger) {}
+
+std::optional<ConditionIndex> CombatSystem::conditionFromBonusName(std::string_view bonus)
+{
+    return conditionForBonus(bonus);
+}
+
+DamageElement CombatSystem::damageElementFromMonsterType(std::string_view type)
+{
+    return damageElementFromName(type);
+}
 
 const formats::MonsterEntry* CombatSystem::getMonsterDef(int monsterId) const
 {
@@ -366,17 +667,9 @@ AttackResult CombatSystem::playerAttack(int characterIndex, int monsterIndex)
 
     if (monster->currentHP <= 0)
     {
-        monster->currentHP = 0;
-        monster->aiState = MonsterInstance::AIState::Dead;
         result.description =
             ch.name + " kills " + monster->name + " (" + std::to_string(result.damage) + " damage)";
-
-        distributeXP(monster->experience);
-
-        if (callbacks_.onMonsterKilled)
-        {
-            callbacks_.onMonsterKilled(*monster, monster->experience);
-        }
+        killMonster(*monster);
     }
     else
     {
@@ -939,40 +1232,90 @@ void CombatSystem::updateMonsterAI(MonsterInstance& monster, float deltaMs)
 
 void CombatSystem::monsterAttack(MonsterInstance& monster)
 {
-    if (!gameWorld_ || monster.targetCharacter < 0)
+    if (!gameWorld_)
         return;
 
     auto& party = gameWorld_->party();
-    auto& target = party.member(monster.targetCharacter);
-
-    if (!target.isConscious())
+    int targetIndex = monster.targetCharacter;
+    if (targetIndex < 0 || targetIndex >= kPartySize || !party.member(targetIndex).isConscious())
     {
-        // Retarget
-        monster.targetCharacter = -1;
-        for (int i = 0; i < kPartySize; i++)
+        targetIndex = pickFirstConscious(party);
+        monster.targetCharacter = targetIndex;
+        if (targetIndex < 0)
         {
-            if (party.member(i).isConscious())
-            {
-                monster.targetCharacter = i;
-                break;
-            }
-        }
-        if (monster.targetCharacter < 0)
             return;
+        }
+    }
+    auto& target = party.member(targetIndex);
+
+    const auto it = monsterDefs_.find(monster.monsterId);
+    const formats::MonsterEntry* def = it != monsterDefs_.end() ? &it->second : nullptr;
+
+    const float dx = party.worldX() - monster.x;
+    const float dy = party.worldY() - monster.y;
+    const float dz = party.worldZ() - monster.z;
+    const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+    constexpr float kMeleeRange = 256.0f;
+    constexpr float kRangedRange = 5631.0f;
+
+    // Out of melee reach: use a shot special or a spell attack if available,
+    // otherwise close the distance. This prevents melee hits from landing at
+    // arbitrary range.
+    if (distance > kMeleeRange)
+    {
+        int shots = 0;
+        if (def && parseShotCount(def->special, shots) && distance <= kRangedRange)
+        {
+            monsterRangedAttack(monster, shots);
+            return;
+        }
+        if (distance <= kRangedRange && tryMonsterSpellAttack(monster, targetIndex, distance))
+        {
+            monster.recoveryTime = std::max(500, def ? def->recovery * 100 : 1000);
+            monster.aiState = MonsterInstance::AIState::Standing;
+            return;
+        }
+        monster.aiState = MonsterInstance::AIState::Pursuing;
+        return;
     }
 
-    // Look up monster attack data
-    auto it = monsterDefs_.find(monster.monsterId);
-    std::string damageExpr = "1d4";
-    if (it != monsterDefs_.end())
+    if (tryMonsterSpellAttack(monster, targetIndex, distance))
     {
-        damageExpr = it->second.attack1.damage;
-        if (damageExpr.empty())
-            damageExpr = "1d4";
+        monster.recoveryTime = std::max(500, def ? def->recovery * 100 : 1000);
+        monster.aiState = MonsterInstance::AIState::Standing;
+        return;
+    }
+
+    // Choose between the two physical attack definitions. attack2 is often an
+    // alternate elemental attack rather than a guaranteed second hit, so pick
+    // one per action instead of doubling damage every round.
+    const formats::MonsterAttack* attack = nullptr;
+    DamageElement element = DamageElement::Physical;
+    if (def)
+    {
+        const bool hasAttack1 = !def->attack1.damage.empty() && def->attack1.damage != "0";
+        const bool hasAttack2 = !def->attack2.damage.empty() && def->attack2.damage != "0";
+        if (hasAttack2 && (!hasAttack1 || randomInt(0, 1) == 0))
+        {
+            attack = &def->attack2;
+        }
+        else if (hasAttack1)
+        {
+            attack = &def->attack1;
+        }
+    }
+
+    const std::string damageExpr =
+        (attack != nullptr && !attack->damage.empty() && attack->damage != "0") ? attack->damage
+                                                                                : "1d4";
+    if (attack != nullptr)
+    {
+        element = damageElementFromName(attack->type);
     }
 
     AttackResult result;
-    int chance = hitChance(monster.level, monster.level * 3, target.armorClass);
+    const int chance = hitChance(monster.level, monster.level * 3, target.armorClass);
 
     if (!rollHit(chance))
     {
@@ -982,44 +1325,440 @@ void CombatSystem::monsterAttack(MonsterInstance& monster)
     else
     {
         result.hit = true;
-        int baseDmg = rollDamage(damageExpr);
-        result.damage =
-            calculateMonsterDamage(baseDmg, DamageElement::Physical, monster.targetCharacter);
+        const int baseDmg = rollDamage(damageExpr);
+        result.damage = calculateMonsterDamage(baseDmg, element, targetIndex);
         target.takeDamage(result.damage);
+
+        std::string bonusSuffix;
+        applyMonsterBonus(monster, target, bonusSuffix);
 
         if (target.hitPoints <= 0)
         {
             result.description = monster.name + " knocks out " + target.name + " (" +
-                                 std::to_string(result.damage) + " damage)";
+                                 std::to_string(result.damage) + " damage)" + bonusSuffix;
 
             if (callbacks_.onCharacterDowned)
             {
-                callbacks_.onCharacterDowned(monster.targetCharacter);
+                callbacks_.onCharacterDowned(targetIndex);
             }
+        }
+        else if (result.damage <= 0)
+        {
+            result.description =
+                monster.name + " hits " + target.name + " but deals no damage" + bonusSuffix;
         }
         else
         {
-            if (result.damage <= 0)
-            {
-                result.description = monster.name + " hits " + target.name + " but deals no damage";
-            }
-            else
-            {
-                result.description = monster.name + " hits " + target.name + " for " +
-                                     std::to_string(result.damage) + " damage";
-            }
+            result.description = monster.name + " hits " + target.name + " for " +
+                                 std::to_string(result.damage) + " damage" + bonusSuffix;
         }
     }
 
     if (callbacks_.onMonsterAttack)
     {
-        callbacks_.onMonsterAttack(monster, monster.targetCharacter, result);
+        callbacks_.onMonsterAttack(monster, targetIndex, result);
     }
 
     // Recovery time from monster stats
-    monster.recoveryTime =
-        std::max(500, (it != monsterDefs_.end()) ? it->second.recovery * 100 : 1000);
+    monster.recoveryTime = std::max(500, def ? def->recovery * 100 : 1000);
     monster.aiState = MonsterInstance::AIState::Standing;
+}
+
+void CombatSystem::monsterRangedAttack(MonsterInstance& monster, int shots)
+{
+    if (!gameWorld_)
+        return;
+
+    auto& party = gameWorld_->party();
+    int targetIndex = monster.targetCharacter;
+    if (targetIndex < 0 || targetIndex >= kPartySize || !party.member(targetIndex).isConscious())
+    {
+        targetIndex = pickFirstConscious(party);
+        monster.targetCharacter = targetIndex;
+        if (targetIndex < 0)
+        {
+            return;
+        }
+    }
+    auto& target = party.member(targetIndex);
+
+    const auto it = monsterDefs_.find(monster.monsterId);
+    const formats::MonsterEntry* def = it != monsterDefs_.end() ? &it->second : nullptr;
+
+    const formats::MonsterAttack* attack = nullptr;
+    if (def)
+    {
+        if (!def->attack1.damage.empty() && def->attack1.damage != "0")
+        {
+            attack = &def->attack1;
+        }
+        else if (!def->attack2.damage.empty() && def->attack2.damage != "0")
+        {
+            attack = &def->attack2;
+        }
+    }
+    const std::string damageExpr =
+        (attack != nullptr && !attack->damage.empty() && attack->damage != "0") ? attack->damage
+                                                                                : "1d4";
+    const DamageElement element =
+        attack != nullptr ? damageElementFromName(attack->type) : DamageElement::Physical;
+
+    AttackResult result;
+    int hits = 0;
+    for (int shot = 0; shot < shots; ++shot)
+    {
+        const int chance = hitChance(monster.level, monster.level * 2, target.armorClass);
+        if (!rollHit(chance))
+        {
+            continue;
+        }
+        const int baseDmg = rollDamage(damageExpr);
+        const int damage = calculateMonsterDamage(baseDmg, element, targetIndex);
+        target.takeDamage(damage);
+        result.damage += damage;
+        ++hits;
+    }
+
+    result.hit = hits > 0;
+    if (hits > 0)
+    {
+        std::string bonusSuffix;
+        applyMonsterBonus(monster, target, bonusSuffix);
+        if (target.hitPoints <= 0)
+        {
+            result.description = monster.name + " shoots " + target.name + " (" +
+                                 std::to_string(result.damage) + " damage)" + bonusSuffix;
+            if (callbacks_.onCharacterDowned)
+            {
+                callbacks_.onCharacterDowned(targetIndex);
+            }
+        }
+        else
+        {
+            result.description = monster.name + " hits " + target.name + " with " +
+                                 std::to_string(hits) + " shot" + (hits == 1 ? "" : "s") + " for " +
+                                 std::to_string(result.damage) + " damage" + bonusSuffix;
+        }
+    }
+    else
+    {
+        result.description = monster.name + " shoots at " + target.name + " and misses";
+    }
+
+    if (callbacks_.onMonsterAttack)
+    {
+        callbacks_.onMonsterAttack(monster, targetIndex, result);
+    }
+
+    monster.recoveryTime = std::max(500, def ? def->recovery * 100 : 1000);
+    monster.aiState = MonsterInstance::AIState::Standing;
+}
+
+bool CombatSystem::tryMonsterSpellAttack(MonsterInstance& monster, int targetCharacter,
+                                         float distance)
+{
+    if (!spellSystem_ || !gameWorld_ || distance > 5631.0f)
+    {
+        return false;
+    }
+
+    const auto it = monsterDefs_.find(monster.monsterId);
+    if (it == monsterDefs_.end())
+    {
+        return false;
+    }
+
+    const formats::MonsterSpellAttack* choices[] = {&it->second.spellAttack1,
+                                                    &it->second.spellAttack2};
+    for (const auto* choice : choices)
+    {
+        if (choice->usePercent <= 0 || choice->spellMasterySkill.empty() ||
+            choice->spellMasterySkill == "0")
+        {
+            continue;
+        }
+        if (randomInt(1, 100) > choice->usePercent)
+        {
+            continue;
+        }
+
+        std::string name;
+        SkillMastery mastery = SkillMastery::Normal;
+        int level = 1;
+        if (!parseSpellSpec(choice->spellMasterySkill, name, mastery, level))
+        {
+            continue;
+        }
+
+        const auto spellId = spellSystem_->findSpellIdByName(name);
+        if (!spellId)
+        {
+            logger_.warning("Unknown monster spell: " + name);
+            continue;
+        }
+
+        AttackResult result;
+        result.hit = true;
+        if (isBeneficialSpellName(name))
+        {
+            const int heal = std::max(1, level * 2 + monster.level / 2);
+            monster.currentHP = std::min(monster.maxHP, monster.currentHP + heal);
+            result.damage = 0;
+            result.description =
+                monster.name + " casts " + name + " and recovers " + std::to_string(heal) + " HP";
+        }
+        else
+        {
+            const auto cast =
+                spellSystem_->castMonsterSpell(*spellId, targetCharacter, level, mastery);
+            result.damage = cast.damage;
+            const std::string& targetName = gameWorld_->party().member(targetCharacter).name;
+            result.description = monster.name + " casts " + name + " on " + targetName + " for " +
+                                 std::to_string(cast.damage) + " damage";
+        }
+
+        if (callbacks_.onMonsterAttack)
+        {
+            callbacks_.onMonsterAttack(monster, targetCharacter, result);
+        }
+        return true;
+    }
+
+    return false;
+}
+
+void CombatSystem::applyMonsterBonus(MonsterInstance& monster, Character& target,
+                                     std::string& description)
+{
+    if (!gameWorld_)
+    {
+        return;
+    }
+    const auto it = monsterDefs_.find(monster.monsterId);
+    if (it == monsterDefs_.end())
+    {
+        return;
+    }
+    const std::string bonus = util::trim(it->second.bonus);
+    if (bonus.empty() || bonus == "0")
+    {
+        return;
+    }
+
+    const std::string name = normalizedToken(bonus);
+    int chance = std::clamp(20 + monster.level / 2, 10, 60);
+    if (name == "dead" || name == "errad" || name == "stone")
+    {
+        chance = 5;
+    }
+    if (randomInt(1, 100) > chance)
+    {
+        return;
+    }
+
+    if (const auto condition = conditionForBonus(bonus))
+    {
+        target.setCondition(*condition, gameWorld_->calendar().totalTicks);
+        description += " (" + bonus + ")";
+        return;
+    }
+
+    if (name == "drainsp")
+    {
+        target.spellPoints = std::max(0, target.spellPoints - std::max(1, monster.level));
+        description += " (spell points drained)";
+    }
+    else if (name == "agex2")
+    {
+        target.age += 2;
+        description += " (aged)";
+    }
+    else if (name == "stealx2")
+    {
+        auto& party = gameWorld_->party();
+        const int stolen = std::min(party.gold(), std::max(1, monster.level * 5));
+        party.spendGold(stolen);
+        description += " (" + std::to_string(stolen) + " gold stolen)";
+    }
+    else if (name == "brkarmor" || name == "brkweapon" || name == "brkitem")
+    {
+        description += " (equipment damaged)";
+    }
+}
+
+void CombatSystem::killMonster(MonsterInstance& monster)
+{
+    if (monster.deathHandled)
+    {
+        return;
+    }
+    monster.deathHandled = true;
+    monster.currentHP = 0;
+    monster.aiState = MonsterInstance::AIState::Dead;
+
+    distributeXP(monster.experience);
+    explodeOnDeath(monster);
+    dropTreasure(monster);
+
+    if (callbacks_.onMonsterKilled)
+    {
+        callbacks_.onMonsterKilled(monster, monster.experience);
+    }
+}
+
+void CombatSystem::explodeOnDeath(MonsterInstance& monster)
+{
+    if (!gameWorld_)
+    {
+        return;
+    }
+    const auto it = monsterDefs_.find(monster.monsterId);
+    if (it == monsterDefs_.end())
+    {
+        return;
+    }
+
+    std::string dice;
+    DamageElement element = DamageElement::Physical;
+    if (!parseExplode(it->second.special, dice, element))
+    {
+        return;
+    }
+    const int baseDamage = rollDamage(dice);
+    if (baseDamage <= 0)
+    {
+        return;
+    }
+
+    constexpr float kExplosionRadius = 512.0f;
+    auto& party = gameWorld_->party();
+    const float dx = party.worldX() - monster.x;
+    const float dy = party.worldY() - monster.y;
+    const float dz = party.worldZ() - monster.z;
+    if (dx * dx + dy * dy + dz * dz > kExplosionRadius * kExplosionRadius)
+    {
+        return;
+    }
+
+    for (int i = 0; i < kPartySize; ++i)
+    {
+        auto& ch = party.member(i);
+        if (!ch.isConscious())
+        {
+            continue;
+        }
+        const int damage = calculateMonsterDamage(baseDamage, element, i);
+        ch.takeDamage(damage);
+
+        AttackResult result;
+        result.hit = true;
+        result.damage = damage;
+        result.description = monster.name + " explodes, hitting " + ch.name + " for " +
+                             std::to_string(damage) + " damage";
+        if (callbacks_.onMonsterAttack)
+        {
+            callbacks_.onMonsterAttack(monster, i, result);
+        }
+        if (ch.hitPoints <= 0 && callbacks_.onCharacterDowned)
+        {
+            callbacks_.onCharacterDowned(i);
+        }
+    }
+}
+
+void CombatSystem::dropTreasure(MonsterInstance& monster)
+{
+    if (!gameWorld_ || !inventory_)
+    {
+        return;
+    }
+    const auto it = monsterDefs_.find(monster.monsterId);
+    if (it == monsterDefs_.end())
+    {
+        return;
+    }
+
+    const TreasureSpec spec = parseTreasure(it->second.treasure);
+    if (spec.dice.empty() && spec.itemLevel <= 0)
+    {
+        return;
+    }
+    if (spec.chancePercent <= 0 || randomInt(1, 100) > spec.chancePercent)
+    {
+        return;
+    }
+
+    const int gold = spec.dice.empty() ? 0 : rollDamage(spec.dice);
+    int itemId = 0;
+    if (spec.itemLevel > 0)
+    {
+        const std::string type = util::toLower(spec.itemType);
+        std::vector<const formats::ItemEntry*> candidates;
+        for (const auto& item : inventory_->itemTable())
+        {
+            if (item.value <= 0)
+            {
+                continue;
+            }
+            if (!type.empty() && type != "misc")
+            {
+                const std::string group = util::toLower(item.skillGroup);
+                const std::string stat = util::toLower(item.equipStat);
+                const std::string name = util::toLower(item.name);
+                if (group.find(type) == std::string::npos && stat.find(type) == std::string::npos &&
+                    name.find(type) == std::string::npos)
+                {
+                    continue;
+                }
+            }
+            candidates.push_back(&item);
+        }
+
+        if (!candidates.empty())
+        {
+            std::sort(candidates.begin(), candidates.end(),
+                      [](const formats::ItemEntry* a, const formats::ItemEntry* b)
+                      { return a->value < b->value; });
+            const float fraction =
+                std::clamp(static_cast<float>(spec.itemLevel) / 12.0f, 0.0f, 1.0f);
+            size_t index =
+                static_cast<size_t>(fraction * static_cast<float>(candidates.size() - 1));
+            const int spread = std::max<int>(1, static_cast<int>(candidates.size()) / 10);
+            const int jittered = static_cast<int>(index) + randomInt(-spread, spread);
+            index = static_cast<size_t>(
+                std::clamp(jittered, 0, static_cast<int>(candidates.size()) - 1));
+            itemId = candidates[index]->id;
+        }
+    }
+
+    if (gold <= 0 && itemId <= 0)
+    {
+        return;
+    }
+
+    const std::string& mapName = gameWorld_->currentMap();
+    if (mapName.empty())
+    {
+        return;
+    }
+
+    std::vector<SpawnedMapItem> items;
+    if (const auto* existing = gameWorld_->getSpawnedMapItems(mapName))
+    {
+        items = *existing;
+    }
+    const int64_t now = gameWorld_->calendar().totalTicks;
+    if (gold > 0)
+    {
+        items.push_back({0, gold, monster.x + randomInt(-32, 32), monster.y + randomInt(-32, 32),
+                         monster.z, now});
+    }
+    if (itemId > 0)
+    {
+        items.push_back({itemId, 1, monster.x + randomInt(-32, 32), monster.y + randomInt(-32, 32),
+                         monster.z, now});
+    }
+    gameWorld_->setSpawnedMapItems(mapName, std::move(items));
 }
 
 void CombatSystem::distributeXP(int xp)
@@ -1045,13 +1784,9 @@ void CombatSystem::distributeXP(int xp)
 
 void CombatSystem::awardMonsterKill(MonsterInstance& monster)
 {
-    // Mirror the kill-handling in playerAttack() so spell kills (resolved by
-    // SpellSystem) and melee kills share the same XP + death-callback path.
-    distributeXP(monster.experience);
-    if (callbacks_.onMonsterKilled)
-    {
-        callbacks_.onMonsterKilled(monster, monster.experience);
-    }
+    // Spell kills (resolved by SpellSystem) and melee kills share the same
+    // XP + explosion + loot + death-callback path.
+    killMonster(monster);
 }
 
 // -------- Turn-based combat --------

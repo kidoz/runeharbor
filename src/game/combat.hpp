@@ -4,13 +4,16 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "../formats/monsters_parser.hpp"
 #include "../util/ilogger.hpp"
+#include "character.hpp"
 #include "damage.hpp"
 
 namespace runeharbor::game
@@ -152,6 +155,10 @@ struct MonsterInstance
     float aggroRange = 2048.0f;
     bool hostile = true;
 
+    // Set once the death pipeline (XP, explosion, loot, callback) has run, so
+    // two kill paths cannot award the same monster twice.
+    bool deathHandled = false;
+
     // Resistances (copied from MonsterEntry)
     int resistFire = 0;
     int resistAir = 0;
@@ -191,6 +198,7 @@ struct AttackResult
 };
 
 class Inventory;
+class SpellSystem;
 
 // Combat event callbacks for UI
 struct CombatCallbacks
@@ -213,6 +221,7 @@ class CombatSystem
     // Set references
     void setGameWorld(GameWorld* world) { gameWorld_ = world; }
     void setInventory(Inventory* inventory) { inventory_ = inventory; }
+    void setSpellSystem(SpellSystem* spells) { spellSystem_ = spells; }
     void setCallbacks(const CombatCallbacks& callbacks) { callbacks_ = callbacks; }
 
     // Load monster definitions
@@ -239,6 +248,10 @@ class CombatSystem
 
     // Damage calculation
     static int rollDamage(const std::string& diceExpr);
+
+    // Exposed mapping helpers (used by tests and UI tooling).
+    static std::optional<ConditionIndex> conditionFromBonusName(std::string_view bonus);
+    static DamageElement damageElementFromMonsterType(std::string_view type);
     int calculateDamage(int baseDamage, DamageElement type, const MonsterInstance& target) const;
     int calculateMonsterDamage(int baseDamage, DamageElement type, int characterIndex) const;
 
@@ -311,11 +324,18 @@ class CombatSystem
   private:
     void updateMonsterAI(MonsterInstance& monster, float deltaMs);
     void monsterAttack(MonsterInstance& monster);
+    void monsterRangedAttack(MonsterInstance& monster, int shots);
+    bool tryMonsterSpellAttack(MonsterInstance& monster, int targetCharacter, float distance);
+    void applyMonsterBonus(MonsterInstance& monster, Character& target, std::string& description);
+    void killMonster(MonsterInstance& monster);
+    void explodeOnDeath(MonsterInstance& monster);
+    void dropTreasure(MonsterInstance& monster);
     void distributeXP(int xp);
 
     util::ILogger& logger_;
     GameWorld* gameWorld_ = nullptr;
     Inventory* inventory_ = nullptr;
+    SpellSystem* spellSystem_ = nullptr;
     CombatCallbacks callbacks_;
 
     std::unordered_map<int, formats::MonsterEntry> monsterDefs_;

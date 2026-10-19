@@ -3,7 +3,7 @@ title: "Combat System"
 summary: "Combat resolves attacks through hit checks, damage calculation, resistance, and recovery."
 doc_type: reference
 status: partial
-last_updated: 2026-08-01
+last_updated: 2026-10-19
 ---
 # Combat System
 
@@ -1125,6 +1125,21 @@ Read via: `GetPrivateProfileIntA("debug", "nodamage", 0, ...)`
 ---
 
 ## Integration notes
+
+### Current implementation notes
+
+- `attack1` and `attack2` are alternate attack definitions (often different damage
+  elements), not two guaranteed hits per action.
+- Monster `shot,xN` specials fire N ranged hits while out of melee reach;
+  `explode,NdM,element` damages the party on death; `Summon,...` is not implemented.
+- `spellAttack1/2` entries are resolved by name through `SpellSystem`. Beneficial
+  spells heal the monster; damage spells use the spell school's element and the
+  target character's resistances.
+- `bonus` conditions are applied on a successful hit.
+- Treasure drops parse `[chance%][NdM][+L<level><type>]` and spawn gold/items into
+  the existing world-item pickup list.
+- Monster melee attacks now respect a 256-unit reach; outside it the monster uses
+  a shot/spell if available and otherwise resumes pursuing.
 
 ### Architecture Mapping
 

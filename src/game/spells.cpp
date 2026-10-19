@@ -42,6 +42,14 @@ int resistanceForSchool(const Character& target, SpellSchool school)
         return 0;
     }
 }
+
+std::string toLowerCopy(std::string_view text)
+{
+    std::string result(text);
+    std::transform(result.begin(), result.end(), result.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return result;
+}
 } // namespace
 
 SpellSystem::SpellSystem(util::ILogger& logger) : logger_(logger) {}
@@ -96,6 +104,19 @@ const SpellInfo* SpellSystem::getSpell(int spellId) const
     if (it == spellIndex_.end())
         return nullptr;
     return &spells_[it->second];
+}
+
+std::optional<int> SpellSystem::findSpellIdByName(std::string_view name) const
+{
+    const std::string wanted = toLowerCopy(name);
+    for (const auto& spell : spells_)
+    {
+        if (toLowerCopy(spell.name) == wanted || toLowerCopy(spell.shortName) == wanted)
+        {
+            return spell.spellId;
+        }
+    }
+    return std::nullopt;
 }
 
 bool SpellSystem::canCast(int characterIndex, int spellId) const
@@ -405,6 +426,49 @@ SpellResult SpellSystem::castScriptSpell(int spellId, int power, int targetCharI
         result.description = spellName + " hits for " + std::to_string(result.damage) +
                              (result.resisted ? " (resisted)" : "");
     }
+
+    if (callbacks_.onSpellCast)
+    {
+        callbacks_.onSpellCast(spellId, -1, result);
+    }
+
+    return result;
+}
+
+SpellResult SpellSystem::castMonsterSpell(int spellId, int targetCharIndex, int casterLevel,
+                                          SkillMastery mastery)
+{
+    SpellResult result;
+    if (!gameWorld_ || targetCharIndex < 0 || targetCharIndex >= kPartySize)
+    {
+        result.description = "No valid spell target";
+        return result;
+    }
+
+    const auto* spell = getSpell(spellId);
+    if (!spell)
+    {
+        result.description = "Unknown monster spell #" + std::to_string(spellId);
+        return result;
+    }
+
+    auto& target = gameWorld_->party().member(targetCharIndex);
+    if (!target.isAlive())
+    {
+        result.description = spell->name + " has no effect";
+        return result;
+    }
+
+    const int rawDamage = calculateSpellDamage(spellId, std::max(1, casterLevel), mastery);
+    const int resistance = std::clamp(resistanceForSchool(target, spell->school), 0, 95);
+    const int damage = std::max(1, rawDamage * (100 - resistance) / 100);
+    result.resisted = resistance > 0;
+    result.damage = damage;
+    result.success = true;
+
+    target.takeDamage(damage);
+    result.description =
+        spell->name + " hits " + target.name + " for " + std::to_string(damage) + " damage";
 
     if (callbacks_.onSpellCast)
     {

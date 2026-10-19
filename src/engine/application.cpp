@@ -89,6 +89,7 @@ Application::Application(util::ILogger& logger, platform::IWindow& window)
     {
         combatSystem_->setGameWorld(gameWorld_.get());
         combatSystem_->setInventory(inventory_.get());
+        combatSystem_->setSpellSystem(spellSystem_.get());
     }
     if (spellSystem_)
     {

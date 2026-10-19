@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -153,6 +154,10 @@ class SpellSystem
     const SpellInfo* getSpell(int spellId) const;
     const std::vector<SpellInfo>& getAllSpells() const { return spells_; }
 
+    /// Resolve a spell by its display name (case-insensitive), used by the
+    /// monster tables' "Spl,Mas,Skil" entries (e.g. "Light Bolt,M,8").
+    std::optional<int> findSpellIdByName(std::string_view name) const;
+
     // Check if a character can cast a spell
     bool canCast(int characterIndex, int spellId) const;
 
@@ -175,6 +180,13 @@ class SpellSystem
     // Event/script spell cast path (opcode-driven): applies effect directly to party targets
     // without requiring caster skill/mana checks.
     SpellResult castScriptSpell(int spellId, int power, int targetCharIndex);
+
+    /// Monster spell attack path: no caster skill/mana checks. Applies damage
+    /// to a party member using the spell school's element and the character's
+    /// resistances. Beneficial spells are handled by the caller (monster
+    /// self-heal), not here.
+    SpellResult castMonsterSpell(int spellId, int targetCharIndex, int casterLevel,
+                                 SkillMastery mastery = SkillMastery::Normal);
 
     // Get spells available to a character (based on learned skills)
     std::vector<int> getAvailableSpells(int characterIndex) const;
