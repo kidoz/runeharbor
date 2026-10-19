@@ -1135,7 +1135,8 @@ Read via: `GetPrivateProfileIntA("debug", "nodamage", 0, ...)`
 - `spellAttack1/2` entries are resolved by name through `SpellSystem`. Beneficial
   spells heal the monster; damage spells use the spell school's element and the
   target character's resistances.
-- `bonus` conditions are applied on a successful hit.
+- `bonus` conditions are applied on a successful hit. Poison/disease deal hourly
+  damage and timed conditions expire in `GameWorld::processConditions()`.
 - Treasure drops parse `[chance%][NdM][+L<level><type>]` and spawn gold/items into
   the existing world-item pickup list.
 - Monster melee attacks now respect a 256-unit reach; outside it the monster uses

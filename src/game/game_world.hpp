@@ -263,6 +263,11 @@ class GameWorld
     const RuntimeConfig& runtimeConfig() const { return runtimeConfig_; }
     void setRuntimeConfig(const RuntimeConfig& config) { runtimeConfig_ = config; }
 
+    // Advance time-based condition effects: poison/disease damage per in-game
+    // hour and expiry of timed conditions (weak, afraid, asleep, paralyzed, ...).
+    // Safe to call every frame; it only does work once per in-game hour.
+    void processConditions();
+
     // Game state
     bool isGameOver() const;
     void reset();
@@ -280,6 +285,7 @@ class GameWorld
     std::unordered_map<std::string, std::vector<SpawnedMapItem>> spawnedMapItems_;
     EventInteractionContext lastEventInteraction_;
     RuntimeConfig runtimeConfig_;
+    int64_t lastConditionTick_ = 0;
 };
 
 } // namespace runeharbor::game

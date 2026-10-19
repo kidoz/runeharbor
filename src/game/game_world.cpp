@@ -12,6 +12,91 @@ GameWorld::GameWorld() = default;
 void GameWorld::advanceTime(int64_t minutes)
 {
     calendar_.advanceMinutes(minutes);
+    processConditions();
+}
+
+void GameWorld::processConditions()
+{
+    const int64_t now = calendar_.totalTicks;
+    if (lastConditionTick_ <= 0)
+    {
+        // First run after a new game or load: establish the baseline without
+        // retroactively applying damage for all elapsed game time.
+        lastConditionTick_ = now;
+        return;
+    }
+    if (now <= lastConditionTick_)
+    {
+        return;
+    }
+
+    const int64_t elapsedTicks = now - lastConditionTick_;
+    const int64_t wholeHours = elapsedTicks / GameCalendar::kTicksPerHour;
+    if (wholeHours <= 0)
+    {
+        return;
+    }
+    lastConditionTick_ += wholeHours * GameCalendar::kTicksPerHour;
+
+    const auto expireAfter = [&](Character& ch, ConditionIndex condition, int64_t hours)
+    {
+        const int64_t timestamp = ch.conditionTimestamps[static_cast<size_t>(condition)];
+        if (timestamp > 1 && now - timestamp >= hours * GameCalendar::kTicksPerHour)
+        {
+            ch.clearCondition(condition);
+        }
+    };
+
+    for (int i = 0; i < kPartySize; ++i)
+    {
+        auto& ch = party_.member(i);
+        if (!ch.isAlive())
+        {
+            continue;
+        }
+
+        // Timed conditions expire after their game-time duration.
+        expireAfter(ch, ConditionIndex::Weak, 8);
+        expireAfter(ch, ConditionIndex::Afraid, 8);
+        expireAfter(ch, ConditionIndex::Insane, 8);
+        expireAfter(ch, ConditionIndex::Drunk, 8);
+        expireAfter(ch, ConditionIndex::Cursed, 24);
+        expireAfter(ch, ConditionIndex::Asleep, 8);
+        expireAfter(ch, ConditionIndex::Paralyzed, 1);
+
+        // Poison and disease persist until cured and deal damage each hour.
+        int damagePerHour = 0;
+        if (ch.hasCondition(ConditionIndex::Poison3))
+        {
+            damagePerHour += 3;
+        }
+        else if (ch.hasCondition(ConditionIndex::Poison2))
+        {
+            damagePerHour += 2;
+        }
+        else if (ch.hasCondition(ConditionIndex::Poison1))
+        {
+            damagePerHour += 1;
+        }
+
+        if (ch.hasCondition(ConditionIndex::Disease3))
+        {
+            damagePerHour += 3;
+        }
+        else if (ch.hasCondition(ConditionIndex::Disease2))
+        {
+            damagePerHour += 2;
+        }
+        else if (ch.hasCondition(ConditionIndex::Disease1))
+        {
+            damagePerHour += 1;
+        }
+
+        if (damagePerHour > 0)
+        {
+            ch.takeDamage(static_cast<int>(damagePerHour * wholeHours));
+        }
+    }
 }
 
 void GameWorld::setCurrentMap(const std::string& name)
@@ -220,6 +305,7 @@ void GameWorld::reset()
     spawnedMapItems_.clear();
     lastEventInteraction_ = {};
     runtimeConfig_ = RuntimeConfig{};
+    lastConditionTick_ = calendar_.totalTicks;
 }
 
 } // namespace runeharbor::game

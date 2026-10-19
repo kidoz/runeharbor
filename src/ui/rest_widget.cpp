@@ -100,6 +100,10 @@ bool RestWidget::handleEvent(const UIEvent& event)
             auto& party = gameWorld_->party();
             if (party.rest(8))
             {
+                // Advance the world clock; this also applies the hourly
+                // poison/disease ticks and expires timed conditions.
+                gameWorld_->advanceTime(8 * 60);
+
                 if (party.checkRandomEncounter())
                 {
                     if (onStatus_)

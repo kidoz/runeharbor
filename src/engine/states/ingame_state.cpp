@@ -312,6 +312,7 @@ std::optional<GameStateId> InGameState::update()
         const int64_t deltaTicks =
             std::max<int64_t>(1, static_cast<int64_t>(deltaMs * kTicksPerMs));
         ctx.shared->gameWorld->calendar().advanceTicks(deltaTicks);
+        ctx.shared->gameWorld->processConditions();
     }
 
     if (ctx.shared && ctx.shared->eventEngine)
