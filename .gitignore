@@ -25,6 +25,16 @@ builddir-*
 .DS_Store
 Thumbs.db
 
-/subprojects/Catch2-3.8.0/
+/subprojects/Catch2-*/
+/subprojects/SDL-release-*/
+/subprojects/SDL_shadercross/
+/subprojects/packagecache/
 /tmp/
 /build/
+
+# Python / MkDocs
+__pycache__/
+*.pyc
+uv.lock
+site/
+*-hash.txt
