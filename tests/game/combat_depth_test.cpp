@@ -266,6 +266,71 @@ TEST_CASE("Unarmed attack cannot reach a distant target", "[game][combat][ranged
     CHECK(result.description.contains("cannot reach"));
 }
 
+TEST_CASE("Monster snapshots preserve health, AI, and event overrides", "[game][combat][state]")
+{
+    util::ConsoleLogger logger;
+    GameWorld world;
+    Inventory inventory(logger);
+    CombatSystem combat(logger);
+    combat.setGameWorld(&world);
+    combat.setInventory(&inventory);
+    world.setCurrentMap("test.odm");
+
+    combat.loadMonsterData({makeTarget(100)});
+    const int first = combat.spawnMonster(2, 10.0f, 20.0f, 30.0f, 7);
+    const int second = combat.spawnMonster(2, 40.0f, 50.0f, 60.0f, 8);
+    auto* alive = combat.getMonster(first);
+    REQUIRE(alive != nullptr);
+    alive->currentHP = 17;
+    alive->maxHP = 100;
+    alive->aiState = MonsterInstance::AIState::Pursuing;
+    alive->facingAngle = 512;
+    alive->topic = 9;
+    alive->hostilityLevel = 3;
+    alive->hostilityOverride = 1234;
+    alive->targetCharacter = 1;
+    alive->targetId = 99;
+    alive->flags = 0x8000;
+    alive->flagsExtended = 0x80000;
+    alive->scriptFields[2] = 42;
+    alive->velocityX = 5.0f;
+    alive->x = 11.0f;
+    alive->z = 31.0f;
+
+    auto* dead = combat.getMonster(second);
+    REQUIRE(dead != nullptr);
+    dead->currentHP = 0;
+    dead->aiState = MonsterInstance::AIState::Dead;
+
+    const auto snapshot = combat.snapshotAliveMonsters();
+    REQUIRE(snapshot.size() == 1); // dead monsters are not restored
+
+    combat.clearMonsters();
+    combat.restoreMonsters(snapshot);
+    REQUIRE(combat.getMonsters().size() == 1);
+    const auto* restored = combat.getMonster(0);
+    REQUIRE(restored != nullptr);
+    CHECK(restored->isAlive());
+    CHECK(restored->monsterId == 2);
+    CHECK(restored->currentHP == 17);
+    CHECK(restored->maxHP == 100);
+    CHECK(restored->x == 11.0f);
+    CHECK(restored->y == 20.0f);
+    CHECK(restored->z == 31.0f);
+    CHECK(restored->velocityX == 5.0f);
+    CHECK(restored->facingAngle == 512);
+    CHECK(restored->aiState == MonsterInstance::AIState::Pursuing);
+    CHECK(restored->group == 7);
+    CHECK(restored->topic == 9);
+    CHECK(restored->hostilityLevel == 3);
+    CHECK(restored->hostilityOverride == 1234);
+    CHECK(restored->targetCharacter == 1);
+    CHECK(restored->targetId == 99);
+    CHECK(restored->flags == 0x8000);
+    CHECK(restored->flagsExtended == 0x80000);
+    CHECK(restored->scriptFields[2] == 42);
+}
+
 TEST_CASE("Ranged attack rejects targets beyond the projectile range limit",
           "[game][combat][ranged]")
 {

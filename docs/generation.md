@@ -277,3 +277,16 @@ Content generation occurs at specific points:
   rather than crashing)
 - Chest state is serialized per-map in save files (200 bytes per chest)
 - Actor state is serialized per-map (5,324 bytes per actor)
+- RuneHarbor's native per-map runtime state:
+  - `GameWorld::savedMapMonsters()` holds one list per visited map. The list is
+    written in RHBV v19 and restored by `finalizeLoadingTask()` instead of
+    respawning the generated roster.
+  - Only living monsters are snapshotted; killed monsters stay gone and an
+    empty list marks a cleared map (distinct from a never-visited map).
+  - `InGameState` captures the live roster on map exit and before saving. Quick
+    load sets a skip flag so the outgoing roster cannot overwrite the loaded
+    save's monster state.
+  - Generated-content respawn (`respawnDays`) clears the saved monster list
+    before generating a fresh roster.
+- Still missing: full DLV/DDM file compatibility, named spawn-marker identity,
+  and per-map NPC/actor state beyond monsters/chests/doors.

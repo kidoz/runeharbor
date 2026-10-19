@@ -22,6 +22,7 @@
 #include "../../src/formats/game_lod_archive.hpp"
 #include "../../src/formats/quests_parser.hpp"
 #include "../../src/game/character.hpp"
+#include "../../src/game/combat.hpp"
 #include "../../src/game/game_world.hpp"
 #include "../../src/game/inventory.hpp"
 #include "../../src/game/quest_log.hpp"
@@ -651,6 +652,76 @@ TEST_CASE("Save/Load round-trips Lloyd's Beacon", "[game][save][utility]")
     CHECK(dst.beacon().y == -512.0f);
     CHECK(dst.beacon().z == 128.0f);
     CHECK(dst.beacon().yaw == 768.0f);
+}
+
+TEST_CASE("Save/Load round-trips per-map monster state", "[game][save][state]")
+{
+    NullLogger logger;
+    TempSaveDir dir;
+
+    SaveGame save(logger);
+    save.setSaveDirectory(dir.path.string());
+
+    GameWorld src;
+    SavedMonsterState monster;
+    monster.monsterId = 42;
+    monster.x = 11.0f;
+    monster.y = 22.0f;
+    monster.z = 33.0f;
+    monster.velocityX = 4.0f;
+    monster.velocityY = 5.0f;
+    monster.velocityZ = 6.0f;
+    monster.facingAngle = 768;
+    monster.currentHP = 17;
+    monster.maxHP = 90;
+    monster.group = 5;
+    monster.topic = 23;
+    monster.aiState = static_cast<uint8_t>(MonsterInstance::AIState::Attacking);
+    monster.hostilityLevel = 3;
+    monster.hostilityOverride = 1001;
+    monster.flags = 0x8000;
+    monster.flagsExtended = 0x80000;
+    monster.targetCharacter = 2;
+    monster.targetId = 77;
+    monster.scriptFields = {1, 2, 3, 4, 5, 6, 7, 8};
+    src.setSavedMapMonsters("out01.odm", {monster});
+    // Cleared maps keep an empty entry so the roster does not regenerate.
+    src.setSavedMapMonsters("out02.odm", {});
+
+    REQUIRE(save.save(src, 0));
+
+    GameWorld dst;
+    REQUIRE(save.load(dst, 0));
+
+    const auto* loaded = dst.getSavedMapMonsters("out01.odm");
+    REQUIRE(loaded != nullptr);
+    REQUIRE(loaded->size() == 1);
+    const auto& m = (*loaded)[0];
+    CHECK(m.monsterId == 42);
+    CHECK(m.x == 11.0f);
+    CHECK(m.y == 22.0f);
+    CHECK(m.z == 33.0f);
+    CHECK(m.velocityX == 4.0f);
+    CHECK(m.velocityY == 5.0f);
+    CHECK(m.velocityZ == 6.0f);
+    CHECK(m.facingAngle == 768);
+    CHECK(m.currentHP == 17);
+    CHECK(m.maxHP == 90);
+    CHECK(m.group == 5);
+    CHECK(m.topic == 23);
+    CHECK(m.aiState == static_cast<uint8_t>(MonsterInstance::AIState::Attacking));
+    CHECK(m.hostilityLevel == 3);
+    CHECK(m.hostilityOverride == 1001);
+    CHECK(m.flags == 0x8000);
+    CHECK(m.flagsExtended == 0x80000);
+    CHECK(m.targetCharacter == 2);
+    CHECK(m.targetId == 77);
+    CHECK(m.scriptFields[0] == 1);
+    CHECK(m.scriptFields[7] == 8);
+
+    const auto* cleared = dst.getSavedMapMonsters("out02.odm");
+    REQUIRE(cleared != nullptr);
+    CHECK(cleared->empty());
 }
 
 TEST_CASE("Save/Load round-trips acquired awards and autonotes", "[game][save][journal]")

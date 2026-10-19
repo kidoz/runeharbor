@@ -122,6 +122,7 @@ void InGameState::enter()
     fpsAccumulatorMs_ = 0.0f;
     fpsFrameCounter_ = 0;
     displayedFps_ = 0.0f;
+    skipActorCaptureOnExit_ = false;
 
     inventory_.setVisible(false);
     characterStats_.setVisible(false);
@@ -282,8 +283,31 @@ void InGameState::enter()
 
 void InGameState::exit()
 {
+    // Leaving the map (transition, title, save/load) persists the live monster
+    // roster so re-entry restores health/positions/AI instead of respawning.
+    if (!skipActorCaptureOnExit_ && ctx.shared && ctx.shared->mapScene &&
+        ctx.shared->mapScene->isLoaded() && ctx.shared->gameWorld &&
+        ctx.shared->gameWorld->currentMap() == ctx.shared->mapScene->getName())
+    {
+        captureCurrentMapActors();
+    }
     dialogue_.close();
     shopWindow_.close();
+}
+
+void InGameState::captureCurrentMapActors()
+{
+    if (!ctx.shared || !ctx.shared->gameWorld || !ctx.shared->combatSystem)
+    {
+        return;
+    }
+    const std::string& mapName = ctx.shared->gameWorld->currentMap();
+    if (mapName.empty())
+    {
+        return;
+    }
+    ctx.shared->gameWorld->setSavedMapMonsters(mapName,
+                                               ctx.shared->combatSystem->snapshotAliveMonsters());
 }
 
 graphics::Rect InGameState::worldViewportRect() const
@@ -1918,6 +1942,7 @@ bool InGameState::quickSaveToSlot(int slotIndex)
     }
 
     preserveCurrentMapStateForSave();
+    captureCurrentMapActors();
     std::vector<uint8_t> eventRuntimeState;
     if (ctx.shared->eventEngine)
     {
@@ -1938,16 +1963,21 @@ bool InGameState::quickLoadFromSlot(int slotIndex)
         return false;
     }
 
+    // The load replaces the world (including its per-map monster lists); do not
+    // let exit() snapshot the outgoing roster over the loaded state.
+    skipActorCaptureOnExit_ = true;
     std::vector<uint8_t> eventRuntimeState;
     if (!ctx.shared->saveGame->load(*ctx.shared->gameWorld, slotIndex, &eventRuntimeState,
                                     ctx.shared->inventory, ctx.shared->questLog))
     {
+        skipActorCaptureOnExit_ = false;
         return false;
     }
 
     const std::string mapName = ctx.shared->gameWorld->currentMap();
     if (mapName.empty())
     {
+        skipActorCaptureOnExit_ = false;
         return false;
     }
 

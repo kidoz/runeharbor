@@ -59,6 +59,7 @@ class InGameState : public IGameState
     int findActivePartyMember() const;
     int findFirstDamageSpell(int characterIndex) const;
     void preserveCurrentMapStateForSave();
+    void captureCurrentMapActors();
     bool quickSaveToSlot(int slotIndex);
     bool quickLoadFromSlot(int slotIndex);
     void openTownPortalChoices(int caster, int spellId);
@@ -94,6 +95,9 @@ class InGameState : public IGameState
     int choiceSpellId_ = 0;
     std::vector<game::TravelDestination> townPortalChoices_;
     uint64_t lastUpdateTicks_ = 0;
+    // Set while quick-loading so exit() does not snapshot the pre-load combat
+    // roster over the newly loaded save's per-map monster state.
+    bool skipActorCaptureOnExit_ = false;
     float fpsAccumulatorMs_ = 0.0f;
     int fpsFrameCounter_ = 0;
     float displayedFps_ = 0.0f;

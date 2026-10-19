@@ -527,6 +527,76 @@ void CombatSystem::clearMonsters()
     inCombat_ = false;
 }
 
+std::vector<SavedMonsterState> CombatSystem::snapshotAliveMonsters() const
+{
+    std::vector<SavedMonsterState> states;
+    states.reserve(monsters_.size());
+    for (const auto& monster : monsters_)
+    {
+        if (!monster.isAlive())
+        {
+            continue;
+        }
+
+        SavedMonsterState state;
+        state.monsterId = monster.monsterId;
+        state.x = monster.x;
+        state.y = monster.y;
+        state.z = monster.z;
+        state.velocityX = monster.velocityX;
+        state.velocityY = monster.velocityY;
+        state.velocityZ = monster.velocityZ;
+        state.facingAngle = monster.facingAngle;
+        state.currentHP = monster.currentHP;
+        state.maxHP = monster.maxHP;
+        state.group = monster.group;
+        state.topic = monster.topic;
+        state.aiState = static_cast<uint8_t>(monster.aiState);
+        state.hostilityLevel = monster.hostilityLevel;
+        state.hostilityOverride = monster.hostilityOverride;
+        state.flags = monster.flags;
+        state.flagsExtended = monster.flagsExtended;
+        state.targetCharacter = monster.targetCharacter;
+        state.targetId = monster.targetId;
+        state.scriptFields = monster.scriptFields;
+        states.push_back(state);
+    }
+    return states;
+}
+
+void CombatSystem::restoreMonsters(const std::vector<SavedMonsterState>& states)
+{
+    monsters_.clear();
+    inCombat_ = false;
+
+    for (const auto& state : states)
+    {
+        const int index = spawnMonster(state.monsterId, state.x, state.y, state.z, state.group);
+        auto* monster = getMonster(index);
+        if (monster == nullptr)
+        {
+            continue;
+        }
+
+        monster->velocityX = state.velocityX;
+        monster->velocityY = state.velocityY;
+        monster->velocityZ = state.velocityZ;
+        monster->facingAngle = state.facingAngle;
+        monster->currentHP = std::max(1, state.currentHP);
+        monster->maxHP = std::max(monster->currentHP, state.maxHP);
+        monster->topic = state.topic;
+        monster->aiState = static_cast<MonsterInstance::AIState>(state.aiState);
+        monster->hostilityLevel = state.hostilityLevel;
+        monster->hostilityOverride = state.hostilityOverride;
+        monster->flags = state.flags;
+        monster->flagsExtended = state.flagsExtended;
+        monster->targetCharacter = state.targetCharacter;
+        monster->targetId = state.targetId;
+        monster->scriptFields = state.scriptFields;
+        monster->deathHandled = false;
+    }
+}
+
 MonsterInstance* CombatSystem::getMonster(int instanceIndex)
 {
     if (instanceIndex < 0 || instanceIndex >= static_cast<int>(monsters_.size()))

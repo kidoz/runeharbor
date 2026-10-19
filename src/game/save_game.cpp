@@ -1677,6 +1677,50 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
     writeFloat(out, beacon.z);
     writeFloat(out, beacon.yaw);
 
+    // v19: per-map monster runtime state.
+    std::vector<std::string> monsterMaps;
+    monsterMaps.reserve(world.savedMapMonsters().size());
+    for (const auto& [mapName, monsters] : world.savedMapMonsters())
+    {
+        (void)monsters;
+        monsterMaps.push_back(mapName);
+    }
+    std::sort(monsterMaps.begin(), monsterMaps.end());
+
+    writeU32(out, static_cast<uint32_t>(monsterMaps.size()));
+    for (const auto& mapName : monsterMaps)
+    {
+        writeString(out, mapName);
+        const auto& monsters = world.savedMapMonsters().at(mapName);
+        writeU32(out, static_cast<uint32_t>(monsters.size()));
+        for (const auto& monster : monsters)
+        {
+            writeI32(out, monster.monsterId);
+            writeFloat(out, monster.x);
+            writeFloat(out, monster.y);
+            writeFloat(out, monster.z);
+            writeFloat(out, monster.velocityX);
+            writeFloat(out, monster.velocityY);
+            writeFloat(out, monster.velocityZ);
+            writeU16(out, monster.facingAngle);
+            writeI32(out, monster.currentHP);
+            writeI32(out, monster.maxHP);
+            writeI32(out, monster.group);
+            writeU16(out, monster.topic);
+            writeU8(out, monster.aiState);
+            writeI32(out, monster.hostilityLevel);
+            writeI32(out, monster.hostilityOverride);
+            writeU32(out, monster.flags);
+            writeU32(out, monster.flagsExtended);
+            writeI32(out, monster.targetCharacter);
+            writeU32(out, monster.targetId);
+            for (int field : monster.scriptFields)
+            {
+                writeI32(out, field);
+            }
+        }
+    }
+
     // v16: CRC-32 over the complete payload (header included), followed by a
     // trailer magic so a truncated or corrupted save is rejected before any
     // state is applied.
@@ -2407,6 +2451,66 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
             location.z = beaconZ;
             location.yaw = beaconYaw;
             world.setBeacon(std::move(location));
+        }
+    }
+
+    if (header.version >= 19)
+    {
+        constexpr uint32_t kMaxMonsterMaps = 4096;
+        constexpr uint32_t kMaxMonstersPerMap = 100000;
+
+        uint32_t mapCount = 0;
+        if (!readU32(ptr, end, mapCount) || mapCount > kMaxMonsterMaps)
+        {
+            return false;
+        }
+        for (uint32_t mapIndex = 0; mapIndex < mapCount; ++mapIndex)
+        {
+            std::string mapName;
+            uint32_t monsterCount = 0;
+            if (!readString(ptr, end, mapName) || !readU32(ptr, end, monsterCount) ||
+                monsterCount > kMaxMonstersPerMap)
+            {
+                return false;
+            }
+
+            std::vector<SavedMonsterState> monsters;
+            monsters.reserve(monsterCount);
+            for (uint32_t i = 0; i < monsterCount; ++i)
+            {
+                SavedMonsterState monster;
+                if (!readI32(ptr, end, monster.monsterId) || !readFloat(ptr, end, monster.x) ||
+                    !readFloat(ptr, end, monster.y) || !readFloat(ptr, end, monster.z) ||
+                    !readFloat(ptr, end, monster.velocityX) ||
+                    !readFloat(ptr, end, monster.velocityY) ||
+                    !readFloat(ptr, end, monster.velocityZ) ||
+                    !readU16(ptr, end, monster.facingAngle) ||
+                    !readI32(ptr, end, monster.currentHP) || !readI32(ptr, end, monster.maxHP) ||
+                    !readI32(ptr, end, monster.group) || !readU16(ptr, end, monster.topic) ||
+                    !readU8(ptr, end, monster.aiState) ||
+                    !readI32(ptr, end, monster.hostilityLevel) ||
+                    !readI32(ptr, end, monster.hostilityOverride) ||
+                    !readU32(ptr, end, monster.flags) ||
+                    !readU32(ptr, end, monster.flagsExtended) ||
+                    !readI32(ptr, end, monster.targetCharacter) ||
+                    !readU32(ptr, end, monster.targetId))
+                {
+                    return false;
+                }
+                for (int& field : monster.scriptFields)
+                {
+                    if (!readI32(ptr, end, field))
+                    {
+                        return false;
+                    }
+                }
+                monsters.push_back(std::move(monster));
+            }
+
+            if (!mapName.empty())
+            {
+                world.setSavedMapMonsters(mapName, std::move(monsters));
+            }
         }
     }
 

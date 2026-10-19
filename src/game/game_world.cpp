@@ -335,6 +335,34 @@ void GameWorld::setSpawnedMapItems(const std::string& mapName, std::vector<Spawn
     spawnedMapItems_[mapName] = std::move(items);
 }
 
+bool GameWorld::hasSavedMapMonsters(const std::string& mapName) const
+{
+    return savedMapMonsters_.contains(mapName);
+}
+
+void GameWorld::setSavedMapMonsters(const std::string& mapName,
+                                    std::vector<SavedMonsterState> monsters)
+{
+    if (mapName.empty())
+    {
+        return;
+    }
+    // Keep empty lists: they mark a visited map whose roster is cleared.
+    savedMapMonsters_[mapName] = std::move(monsters);
+}
+
+const std::vector<SavedMonsterState>*
+GameWorld::getSavedMapMonsters(const std::string& mapName) const
+{
+    auto it = savedMapMonsters_.find(mapName);
+    return it != savedMapMonsters_.end() ? &it->second : nullptr;
+}
+
+void GameWorld::clearSavedMapMonsters(const std::string& mapName)
+{
+    savedMapMonsters_.erase(mapName);
+}
+
 void GameWorld::setLastEventInteraction(EventInteractionContext context)
 {
     if (context.eventId <= 0)
@@ -391,6 +419,7 @@ void GameWorld::reset()
     generatedContent_.clear();
     savedMapStates_.clear();
     spawnedMapItems_.clear();
+    savedMapMonsters_.clear();
     lastEventInteraction_ = {};
     runtimeConfig_ = RuntimeConfig{};
     utilityEffects_ = {};

@@ -646,7 +646,7 @@ Each slot displays:
 
 ### 13.2 RuneHarbor save integrity (current)
 
-- `runeharbor.bin` holds an RHBV blob (currently **version 18**) with the full
+- `runeharbor.bin` holds an RHBV blob (currently **version 19**) with the full
   serialized world: header, calendar, party/characters, per-map state, and
   generated content. `party.bin` retains a headerless copy of the same payload
   for layouts that expect the original split.
@@ -660,7 +660,8 @@ Each slot displays:
   commit only after every blob validates. A corrupt save therefore leaves the
   running game untouched.
 - v17 added party utility spell state (Light/Fly/Water Walk); v18 added the
-  Lloyd's Beacon location (map, position, yaw).
+  Lloyd's Beacon location (map, position, yaw); v19 added per-map monster
+  runtime state (health, position, AI, topic, hostility/event overrides).
 - v1-v15 blobs (which have no trailer) still load. A raw blob reconstructed
   from a headerless `party.bin` is treated as a pre-v16 save even when
   `runeharbor.ver` reports a newer version.

@@ -2517,13 +2517,23 @@ void Application::finalizeLoadingTask()
                 generated.generatedAtTicks = gameWorld_->calendar().totalTicks;
                 generated.respawnDays = resolveMapRespawnDays(mapName, 0);
                 gameWorld_->setGeneratedContent(mapName, std::move(generated));
+                // A respawn replaces the old roster; drop any saved runtime state.
+                gameWorld_->clearSavedMapMonsters(mapName);
             }
 
             if (combatSystem_)
             {
                 combatSystem_->clearMonsters();
-                if (const auto* generated = gameWorld_->getGeneratedContent(mapName);
-                    generated != nullptr)
+                // An existing (even empty) monster list is authoritative: the
+                // map was visited before, so restore its runtime state instead
+                // of respawning the generated roster. Empty means "cleared".
+                if (const auto* savedMonsters = gameWorld_->getSavedMapMonsters(mapName);
+                    savedMonsters != nullptr)
+                {
+                    combatSystem_->restoreMonsters(*savedMonsters);
+                }
+                else if (const auto* generated = gameWorld_->getGeneratedContent(mapName);
+                         generated != nullptr)
                 {
                     for (const auto& monster : generated->monsters)
                     {

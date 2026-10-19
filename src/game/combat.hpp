@@ -15,6 +15,7 @@
 #include "../util/ilogger.hpp"
 #include "character.hpp"
 #include "damage.hpp"
+#include "monster_state.hpp"
 
 namespace runeharbor::game
 {
@@ -232,6 +233,11 @@ class CombatSystem
 
     // Remove all monsters
     void clearMonsters();
+
+    // Per-map runtime persistence: snapshot only living monsters, then restore
+    // them (health, position, AI, topic, hostility overrides) on map re-entry.
+    std::vector<SavedMonsterState> snapshotAliveMonsters() const;
+    void restoreMonsters(const std::vector<SavedMonsterState>& states);
 
     // Access active monsters
     const std::vector<MonsterInstance>& getMonsters() const { return monsters_; }

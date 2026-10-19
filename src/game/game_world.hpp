@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "generation.hpp"
+#include "monster_state.hpp"
 #include "party.hpp"
 
 namespace runeharbor::game
@@ -285,6 +286,18 @@ class GameWorld
         return savedMapStates_;
     }
 
+    // Per-map monster runtime state. An entry exists once the party has left a
+    // map (or saved while on it); an empty list means the map was cleared and
+    // monsters should not respawn until the content respawn timer expires.
+    bool hasSavedMapMonsters(const std::string& mapName) const;
+    void setSavedMapMonsters(const std::string& mapName, std::vector<SavedMonsterState> monsters);
+    const std::vector<SavedMonsterState>* getSavedMapMonsters(const std::string& mapName) const;
+    void clearSavedMapMonsters(const std::string& mapName);
+    const std::unordered_map<std::string, std::vector<SavedMonsterState>>& savedMapMonsters() const
+    {
+        return savedMapMonsters_;
+    }
+
     // Runtime spawned map items.
     void addSpawnedMapItem(const std::string& mapName, SpawnedMapItem item);
     bool hasSpawnedMapItems(const std::string& mapName) const;
@@ -356,6 +369,7 @@ class GameWorld
     std::unordered_map<std::string, GeneratedMapContent> generatedContent_;
     std::unordered_map<std::string, SavedMapState> savedMapStates_;
     std::unordered_map<std::string, std::vector<SpawnedMapItem>> spawnedMapItems_;
+    std::unordered_map<std::string, std::vector<SavedMonsterState>> savedMapMonsters_;
     EventInteractionContext lastEventInteraction_;
     RuntimeConfig runtimeConfig_;
     std::array<UtilityEffectState, static_cast<size_t>(UtilityEffect::Count)> utilityEffects_ = {};
