@@ -3,7 +3,7 @@ title: "LOD Archive System"
 summary: "LOD archives provide the container format for assets, maps, events, and save data."
 doc_type: reference
 status: partial
-last_updated: 2026-08-01
+last_updated: 2026-10-19
 ---
 # LOD Archive System
 
@@ -73,8 +73,18 @@ Offset  Size   Field               Description
 
 ```
 
-These archives derive directory entry count and data offsets from the file structure
-rather than from explicit header fields.
+The directory count is not in the 256-byte header. It is stored in the first
+directory entry — the archive container — whose second reserved field (`reserved[1]`
+for image LODs, `unknown2` for sprite LODs) holds the number of file entries that
+follow. The directory therefore occupies `(count + 1) * 32` bytes starting at
+`0x100`, and the data section begins at `0x100 + (count + 1) * 32`.
+
+Scanning for a zero-name terminator is unsafe: the data section begins immediately
+after the directory, and its bytes frequently look like valid 32-byte entries. In
+the retail archives, continuing past the declared count produces phantom entries
+and extraction failures (BITMAPS.LOD: 77 phantom records; SPRITES.LOD: 44 header
+failures). Hand-built archives may omit the count; parsers should use the declared
+count when it is present and fits the file, and only then fall back to scanning.
 
 ### 1c. Generic LOD Header (Events.lod)
 

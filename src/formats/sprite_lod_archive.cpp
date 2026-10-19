@@ -98,30 +98,80 @@ bool SpriteLODArchive::readDirectory()
 {
     // Directory starts at offset 0x100 (256 bytes)
     constexpr std::streamoff directoryOffset = 0x100;
+    constexpr uint32_t kMaxDirectoryEntries = 100000;
     file.seekg(directoryOffset, std::ios::beg);
 
-    while (file.good())
+    std::error_code sizeError;
+    const auto archiveSize = std::filesystem::file_size(archivePath, sizeError);
+    const uint64_t usableBytes = !sizeError && archiveSize > static_cast<uint64_t>(directoryOffset)
+                                     ? archiveSize - static_cast<uint64_t>(directoryOffset)
+                                     : 0;
+    const uint64_t maxEntriesBySize =
+        usableBytes / static_cast<uint64_t>(sizeof(SpriteLODDirectoryEntry));
+
+    // The metadata container is the first entry; its second unknown field holds
+    // the number of sprite entries that follow. Scanning past that count walks
+    // into sprite data, which can look like more directory entries.
+    SpriteLODDirectoryEntry first{};
+    file.read(reinterpret_cast<char*>(&first), sizeof(SpriteLODDirectoryEntry));
+    if (!file.good() || first.name[0] == '\0')
     {
-        std::streamoff entryPos = file.tellg();
-        SpriteLODDirectoryEntry entry;
-        file.read(reinterpret_cast<char*>(&entry), sizeof(SpriteLODDirectoryEntry));
-
-        if (!file.good())
-        {
-            break;
-        }
-
-        if (entry.name[0] == '\0')
-        {
-            dataSectionStart = entryPos + 8;
-            logger.debug(std::format("Sprite directory ends at 0x{:X}, data starts at 0x{:X}",
-                                     static_cast<uint64_t>(entryPos),
-                                     static_cast<uint64_t>(dataSectionStart)));
-            break;
-        }
-
-        entries.push_back(entry);
+        logger.error("No sprites found in archive directory");
+        return false;
     }
+
+    entries.push_back(first);
+
+    const uint32_t declaredSprites = first.unknown2;
+    const bool hasDeclaredCount = declaredSprites > 0 && declaredSprites < kMaxDirectoryEntries &&
+                                  static_cast<uint64_t>(declaredSprites) + 1 <= maxEntriesBySize;
+
+    if (hasDeclaredCount)
+    {
+        const size_t totalEntries = static_cast<size_t>(declaredSprites) + 1;
+        for (size_t i = 1; i < totalEntries; ++i)
+        {
+            SpriteLODDirectoryEntry entry{};
+            file.read(reinterpret_cast<char*>(&entry), sizeof(SpriteLODDirectoryEntry));
+            if (!file.good() || entry.name[0] == '\0')
+            {
+                logger.warning(std::format("Sprite directory ended after {} of {} entries",
+                                           entries.size(), totalEntries));
+                break;
+            }
+            entries.push_back(entry);
+        }
+    }
+    else
+    {
+        // Hand-built archives may not set the container count. Fall back to the
+        // historical zero-name terminator scan.
+        while (file.good())
+        {
+            std::streamoff entryPos = file.tellg();
+            SpriteLODDirectoryEntry entry{};
+            file.read(reinterpret_cast<char*>(&entry), sizeof(SpriteLODDirectoryEntry));
+
+            if (!file.good())
+            {
+                break;
+            }
+
+            if (entry.name[0] == '\0')
+            {
+                logger.debug(std::format("Sprite directory ends at 0x{:X}",
+                                         static_cast<uint64_t>(entryPos)));
+                break;
+            }
+
+            entries.push_back(entry);
+        }
+    }
+
+    dataSectionStart = directoryOffset + static_cast<std::streamoff>(entries.size()) *
+                                             sizeof(SpriteLODDirectoryEntry);
+    logger.debug(std::format("Directory holds {} entries; data section starts at 0x{:X}",
+                             entries.size(), static_cast<uint64_t>(dataSectionStart)));
 
     if (entries.size() <= 1)
     {

@@ -147,3 +147,56 @@ TEST_CASE("SpriteLODArchive reads MM7 sprite directory entries", "[sprite_lod]")
         REQUIRE((*data)[21] == 4);
     }
 }
+
+TEST_CASE("SpriteLODArchive stops at the declared directory count", "[sprite_lod]")
+{
+    const auto path =
+        std::filesystem::temp_directory_path() / "runeharbor_sprite_lod_count_test.lod";
+    {
+        SpriteLODHeader header{};
+        std::memcpy(header.magic, "LOD\0", 4);
+        std::memcpy(header.gameId, "MMVI", 4);
+
+        SpriteLODDirectoryEntry metadata{};
+        std::memcpy(metadata.name, "sprites08", 9);
+        metadata.offset = 0x1000;
+        metadata.unknown2 = 2; // two sprite entries follow
+
+        SpriteLODDirectoryEntry first{};
+        std::memcpy(first.name, "sprite_one", 10);
+        first.offset = 0x40;
+
+        SpriteLODDirectoryEntry second{};
+        std::memcpy(second.name, "sprite_two", 10);
+        second.offset = 0x80;
+
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        file.write(reinterpret_cast<const char*>(&header), sizeof(header));
+        file.seekp(0x100);
+        file.write(reinterpret_cast<const char*>(&metadata), sizeof(metadata));
+        file.write(reinterpret_cast<const char*>(&first), sizeof(first));
+        file.write(reinterpret_cast<const char*>(&second), sizeof(second));
+
+        // Bytes that look like more directory entries must not be read.
+        const std::array<uint8_t, 64> garbage = []
+        {
+            std::array<uint8_t, 64> value{};
+            value.fill(0xAA);
+            return value;
+        }();
+        file.write(reinterpret_cast<const char*>(garbage.data()),
+                   static_cast<std::streamsize>(garbage.size()));
+    }
+
+    TestLogger logger;
+    SpriteLODArchive archive(logger);
+    REQUIRE(archive.open(path));
+
+    const auto files = archive.listFiles();
+    REQUIRE(files.size() == 3);
+    CHECK(files[0] == "sprites08");
+    CHECK(files[1] == "sprite_one");
+    CHECK(files[2] == "sprite_two");
+
+    std::filesystem::remove(path);
+}

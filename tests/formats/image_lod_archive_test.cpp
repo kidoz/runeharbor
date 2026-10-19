@@ -187,3 +187,52 @@ TEST_CASE("ImageLODArchive extracts raw PAL entries from mixed archives", "[imag
     CHECK((*palette)[766] == 254);
     CHECK((*palette)[767] == 255);
 }
+
+TEST_CASE("ImageLODArchive stops at the declared directory count", "[image_lod]")
+{
+    const auto path =
+        std::filesystem::temp_directory_path() / "runeharbor_image_lod_count_test.lod";
+    {
+        ImageLODHeader header{};
+        std::memcpy(header.magic, "LOD\0", 4);
+        std::memcpy(header.gameId, "MMVI", 4);
+
+        ImageLODDirectoryEntry container{};
+        writeFixedName(container.name, sizeof(container.name), "bitmaps");
+        container.offset = 0x120;
+        container.reserved[1] = 2; // two file entries follow
+
+        ImageLODDirectoryEntry first{};
+        writeFixedName(first.name, sizeof(first.name), "one");
+        first.offset = 0x40;
+        first.size = 48;
+
+        ImageLODDirectoryEntry second{};
+        writeFixedName(second.name, sizeof(second.name), "two");
+        second.offset = 0x80;
+        second.size = 48;
+
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        file.write(reinterpret_cast<const char*>(&header), sizeof(header));
+        file.seekp(0x100);
+        file.write(reinterpret_cast<const char*>(&container), sizeof(container));
+        file.write(reinterpret_cast<const char*>(&first), sizeof(first));
+        file.write(reinterpret_cast<const char*>(&second), sizeof(second));
+
+        // Bytes that look like more directory entries must not be read.
+        const std::vector<uint8_t> garbage(64, 0xAA);
+        file.write(reinterpret_cast<const char*>(garbage.data()),
+                   static_cast<std::streamsize>(garbage.size()));
+    }
+
+    TestLogger logger;
+    ImageLODArchive archive(logger);
+    REQUIRE(archive.open(path));
+
+    const auto files = archive.listFiles();
+    REQUIRE(files.size() == 2);
+    CHECK(files[0] == "one");
+    CHECK(files[1] == "two");
+
+    std::filesystem::remove(path);
+}

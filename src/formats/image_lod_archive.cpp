@@ -120,7 +120,8 @@ bool ImageLODArchive::open(const std::filesystem::path& path)
 
     opened = true;
     logger.info(std::format("Successfully loaded image LOD archive with {} files ({})",
-                            entries.size(), externalOnly ? "external-only" : "mixed"));
+                            entries.empty() ? 0 : entries.size() - 1,
+                            externalOnly ? "external-only" : "mixed"));
 
     return true;
 }
@@ -173,38 +174,93 @@ bool ImageLODArchive::readHeader()
 bool ImageLODArchive::readDirectory()
 {
     constexpr std::streamoff directoryOffset = 0x100;
+    constexpr uint32_t kMaxDirectoryEntries = 100000;
 
     file.seekg(directoryOffset, std::ios::beg);
 
-    bool hasLib = false;
+    std::error_code sizeError;
+    const auto archiveSize = std::filesystem::file_size(archivePath, sizeError);
+    const uint64_t usableBytes = !sizeError && archiveSize > static_cast<uint64_t>(directoryOffset)
+                                     ? archiveSize - static_cast<uint64_t>(directoryOffset)
+                                     : 0;
+    const uint64_t maxEntriesBySize =
+        usableBytes / static_cast<uint64_t>(sizeof(ImageLODDirectoryEntry));
 
-    while (file.good())
+    // The first directory entry is the archive container. Its second reserved
+    // field stores the number of file entries that follow it. Real MM7 archives
+    // rely on this count; without it the scan runs into the data section, whose
+    // bytes frequently look like directory entries.
+    ImageLODDirectoryEntry first{};
+    file.read(reinterpret_cast<char*>(&first), sizeof(ImageLODDirectoryEntry));
+    if (!file.good() || first.name[0] == '\0')
     {
-        std::streamoff entryPos = file.tellg();
-        ImageLODDirectoryEntry entry;
-        file.read(reinterpret_cast<char*>(&entry), sizeof(ImageLODDirectoryEntry));
-
-        if (!file.good())
-        {
-            break;
-        }
-
-        if (entry.name[0] == '\0')
-        {
-            dataSectionStart = entryPos + 8;
-            logger.debug(std::format("End of directory at offset 0x{:X}, data starts at 0x{:X}",
-                                     static_cast<uint64_t>(entryPos),
-                                     static_cast<uint64_t>(dataSectionStart)));
-            break;
-        }
-
-        if (detectEntryType(entry) == ImageEntryType::CustomFormat)
-        {
-            hasLib = true;
-        }
-
-        entries.push_back(entry);
+        logger.error("No files found in image LOD archive directory");
+        return false;
     }
+
+    entries.push_back(first);
+
+    bool hasLib = detectEntryType(first) == ImageEntryType::CustomFormat;
+
+    const uint32_t declaredFiles = first.reserved[1];
+    const bool hasDeclaredCount = declaredFiles > 0 && declaredFiles < kMaxDirectoryEntries &&
+                                  static_cast<uint64_t>(declaredFiles) + 1 <= maxEntriesBySize;
+
+    if (hasDeclaredCount)
+    {
+        const size_t totalEntries = static_cast<size_t>(declaredFiles) + 1;
+        for (size_t i = 1; i < totalEntries; ++i)
+        {
+            ImageLODDirectoryEntry entry{};
+            file.read(reinterpret_cast<char*>(&entry), sizeof(ImageLODDirectoryEntry));
+            if (!file.good() || entry.name[0] == '\0')
+            {
+                logger.warning(std::format("Image LOD directory ended after {} of {} entries",
+                                           entries.size(), totalEntries));
+                break;
+            }
+            if (detectEntryType(entry) == ImageEntryType::CustomFormat)
+            {
+                hasLib = true;
+            }
+            entries.push_back(entry);
+        }
+    }
+    else
+    {
+        // Hand-built archives may not set the container count. Fall back to the
+        // historical zero-name terminator scan.
+        while (file.good())
+        {
+            std::streamoff entryPos = file.tellg();
+            ImageLODDirectoryEntry entry{};
+            file.read(reinterpret_cast<char*>(&entry), sizeof(ImageLODDirectoryEntry));
+
+            if (!file.good())
+            {
+                break;
+            }
+
+            if (entry.name[0] == '\0')
+            {
+                logger.debug(std::format("End of directory at offset 0x{:X}",
+                                         static_cast<uint64_t>(entryPos)));
+                break;
+            }
+
+            if (detectEntryType(entry) == ImageEntryType::CustomFormat)
+            {
+                hasLib = true;
+            }
+
+            entries.push_back(entry);
+        }
+    }
+
+    dataSectionStart = directoryOffset +
+                       static_cast<std::streamoff>(entries.size()) * sizeof(ImageLODDirectoryEntry);
+    logger.debug(std::format("Directory holds {} entries; data section starts at 0x{:X}",
+                             entries.size(), static_cast<uint64_t>(dataSectionStart)));
 
     if (entries.empty())
     {
@@ -297,8 +353,9 @@ std::vector<std::string> ImageLODArchive::listFiles() const
 
     for (size_t i = 0; i < entries.size(); i++)
     {
-        // Skip container entry (index 0) for external-only archives
-        if (externalOnly && i == 0)
+        // The first directory entry is the archive container metadata, not a
+        // file in the archive. It is true for mixed and external-only variants.
+        if (i == 0)
         {
             continue;
         }
