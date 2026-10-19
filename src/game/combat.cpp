@@ -1819,7 +1819,8 @@ int CombatSystem::playerActionSpeed(int charIdx) const
     // a follow-up.
     if (!gameWorld_ || charIdx < 0 || charIdx >= kPartySize)
         return kMinPlayerInitiative;
-    const int speed = gameWorld_->party().member(charIdx).effectiveStat(4); // Speed
+    // Stats index 5 is Speed (4 is Accuracy); haste buffs add to this value.
+    const int speed = gameWorld_->party().member(charIdx).effectiveStat(5);
     return std::max(kMinPlayerInitiative, speed * 2);
 }
 
