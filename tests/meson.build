@@ -91,6 +91,7 @@ test_sources = files(
     'graphics/texture_coordinates_test.cpp',
     'graphics/occlusion_test.cpp',
     'graphics/hud_test.cpp',
+    'ui/save_load_widget_test.cpp',
 )
 
 # Reuse source files from main build (without main.cpp)
@@ -200,6 +201,7 @@ test_ui_sources = files(
     '../src/ui/map_widget.cpp',
     '../src/ui/shop_window.cpp',
     '../src/ui/journal_widget.cpp',
+    '../src/ui/save_load_widget.cpp',
 )
 
 test_engine_sources = files(

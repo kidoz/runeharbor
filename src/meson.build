@@ -133,6 +133,7 @@ ui_sources = files(
     'ui/map_widget.cpp',
     'ui/shop_window.cpp',
     'ui/journal_widget.cpp',
+    'ui/save_load_widget.cpp',
 )
 
 # Dependencies

@@ -129,6 +129,7 @@ void InGameState::enter()
     restWidget_.setVisible(false);
     mapWidget_.setVisible(false);
     journalWidget_.setVisible(false);
+    saveLoadWidget_.setVisible(false);
 
     if (ctx.shared && ctx.shared->gameWorld)
     {
@@ -453,6 +454,7 @@ std::optional<GameStateId> InGameState::update()
             restWidget_.setVisible(false);
             mapWidget_.setVisible(false);
             journalWidget_.setVisible(false);
+            saveLoadWidget_.setVisible(false);
         }
     }
 
@@ -467,6 +469,7 @@ std::optional<GameStateId> InGameState::update()
             restWidget_.setVisible(false);
             mapWidget_.setVisible(false);
             journalWidget_.setVisible(false);
+            saveLoadWidget_.setVisible(false);
         }
     }
 
@@ -481,6 +484,7 @@ std::optional<GameStateId> InGameState::update()
             restWidget_.setVisible(false);
             mapWidget_.setVisible(false);
             journalWidget_.setVisible(false);
+            saveLoadWidget_.setVisible(false);
         }
     }
 
@@ -507,6 +511,7 @@ std::optional<GameStateId> InGameState::update()
             spellbook_.setVisible(false);
             restWidget_.setVisible(false);
             journalWidget_.setVisible(false);
+            saveLoadWidget_.setVisible(false);
         }
     }
 
@@ -522,7 +527,90 @@ std::optional<GameStateId> InGameState::update()
             spellbook_.setVisible(false);
             restWidget_.setVisible(false);
             mapWidget_.setVisible(false);
+            saveLoadWidget_.setVisible(false);
         }
+    }
+
+    // F5/F8 open the save/load slot picker. The picker is modal and reports its
+    // chosen slot through takeAction() below.
+    if (ctx.isKeyPressed(SDL_SCANCODE_F5))
+    {
+        if (saveLoadWidget_.visible() && saveLoadWidget_.mode() == ui::SaveLoadWidget::Mode::Save)
+        {
+            saveLoadWidget_.setVisible(false);
+        }
+        else
+        {
+            saveLoadWidget_.setSaveGame(ctx.shared ? ctx.shared->saveGame : nullptr);
+            saveLoadWidget_.open(ui::SaveLoadWidget::Mode::Save);
+            inventory_.setVisible(false);
+            characterStats_.setVisible(false);
+            spellbook_.setVisible(false);
+            restWidget_.setVisible(false);
+            mapWidget_.setVisible(false);
+            journalWidget_.setVisible(false);
+        }
+    }
+
+    if (ctx.isKeyPressed(SDL_SCANCODE_F8))
+    {
+        if (saveLoadWidget_.visible() && saveLoadWidget_.mode() == ui::SaveLoadWidget::Mode::Load)
+        {
+            saveLoadWidget_.setVisible(false);
+        }
+        else
+        {
+            saveLoadWidget_.setSaveGame(ctx.shared ? ctx.shared->saveGame : nullptr);
+            saveLoadWidget_.open(ui::SaveLoadWidget::Mode::Load);
+            inventory_.setVisible(false);
+            characterStats_.setVisible(false);
+            spellbook_.setVisible(false);
+            restWidget_.setVisible(false);
+            mapWidget_.setVisible(false);
+            journalWidget_.setVisible(false);
+        }
+    }
+
+    // Save/load picker navigation and confirmation. The picker is modal: it
+    // consumes the frame whether or not a key was handled.
+    if (saveLoadWidget_.visible())
+    {
+        for (const SDL_Scancode key :
+             {SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_PAGEUP, SDL_SCANCODE_PAGEDOWN,
+              SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER, SDL_SCANCODE_ESCAPE, SDL_SCANCODE_1,
+              SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_4, SDL_SCANCODE_5, SDL_SCANCODE_6,
+              SDL_SCANCODE_7, SDL_SCANCODE_8, SDL_SCANCODE_9, SDL_SCANCODE_0})
+        {
+            if (ctx.isKeyPressed(key))
+            {
+                ui::UIEvent ev{ui::UIEventType::KeyDown, 0, 0, platform::MouseButton::Left, key};
+                (void)saveLoadWidget_.handleEvent(ev);
+            }
+        }
+
+        const auto action = saveLoadWidget_.takeAction();
+        if (action.type == ui::SaveLoadWidget::ActionType::Save)
+        {
+            if (quickSaveToSlot(action.slotIndex))
+            {
+                statusLine_ = std::format("Saved to slot {}", action.slotIndex + 1);
+                saveLoadWidget_.setVisible(false);
+            }
+            else
+            {
+                statusLine_ = std::format("Save failed (slot {})", action.slotIndex + 1);
+            }
+        }
+        else if (action.type == ui::SaveLoadWidget::ActionType::Load)
+        {
+            if (quickLoadFromSlot(action.slotIndex))
+            {
+                saveLoadWidget_.setVisible(false);
+                return GameStateId::Loading;
+            }
+            statusLine_ = std::format("Load failed (slot {})", action.slotIndex + 1);
+        }
+        return std::nullopt;
     }
 
     // Spellbook keyboard navigation (Up/Down/Enter/Esc) when open.
@@ -564,7 +652,8 @@ std::optional<GameStateId> InGameState::update()
             return std::nullopt;
         }
         if (inventory_.visible() || characterStats_.visible() || spellbook_.visible() ||
-            restWidget_.visible() || mapWidget_.visible() || journalWidget_.visible())
+            restWidget_.visible() || mapWidget_.visible() || journalWidget_.visible() ||
+            saveLoadWidget_.visible())
         {
             inventory_.setVisible(false);
             characterStats_.setVisible(false);
@@ -572,6 +661,7 @@ std::optional<GameStateId> InGameState::update()
             restWidget_.setVisible(false);
             mapWidget_.setVisible(false);
             journalWidget_.setVisible(false);
+            saveLoadWidget_.setVisible(false);
             return std::nullopt;
         }
     }
@@ -580,7 +670,8 @@ std::optional<GameStateId> InGameState::update()
     // camera, and combat input while it is visible.
     const bool anyPanelOpen = inventory_.visible() || characterStats_.visible() ||
                               spellbook_.visible() || restWidget_.visible() ||
-                              mapWidget_.visible() || journalWidget_.visible();
+                              mapWidget_.visible() || journalWidget_.visible() ||
+                              saveLoadWidget_.visible();
     if (anyPanelOpen)
     {
         if (ctx.window.wasMousePressed(platform::MouseButton::Left))
@@ -625,6 +716,34 @@ std::optional<GameStateId> InGameState::update()
                 ui::UIEvent ev{ui::UIEventType::MouseDown, ms.x, ms.y, platform::MouseButton::Left,
                                SDL_SCANCODE_UNKNOWN};
                 (void)journalWidget_.handleEvent(ev);
+            }
+            else if (saveLoadWidget_.visible())
+            {
+                ui::UIEvent ev{ui::UIEventType::MouseDown, ms.x, ms.y, platform::MouseButton::Left,
+                               SDL_SCANCODE_UNKNOWN};
+                (void)saveLoadWidget_.handleEvent(ev);
+                const auto action = saveLoadWidget_.takeAction();
+                if (action.type == ui::SaveLoadWidget::ActionType::Save)
+                {
+                    if (quickSaveToSlot(action.slotIndex))
+                    {
+                        statusLine_ = std::format("Saved to slot {}", action.slotIndex + 1);
+                        saveLoadWidget_.setVisible(false);
+                    }
+                    else
+                    {
+                        statusLine_ = std::format("Save failed (slot {})", action.slotIndex + 1);
+                    }
+                }
+                else if (action.type == ui::SaveLoadWidget::ActionType::Load)
+                {
+                    if (quickLoadFromSlot(action.slotIndex))
+                    {
+                        saveLoadWidget_.setVisible(false);
+                        return GameStateId::Loading;
+                    }
+                    statusLine_ = std::format("Load failed (slot {})", action.slotIndex + 1);
+                }
             }
         }
         return std::nullopt;
@@ -786,28 +905,6 @@ std::optional<GameStateId> InGameState::update()
         {
             statusLine_ = "Event #1 not found";
         }
-    }
-
-    if (ctx.isKeyPressed(SDL_SCANCODE_F5))
-    {
-        if (quickSaveToSlot(0))
-        {
-            statusLine_ = "Saved to slot 1";
-        }
-        else
-        {
-            statusLine_ = "Save failed (slot 1)";
-        }
-    }
-
-    if (ctx.isKeyPressed(SDL_SCANCODE_F8))
-    {
-        if (quickLoadFromSlot(0))
-        {
-            statusLine_ = "Loaded slot 1";
-            return GameStateId::Loading;
-        }
-        statusLine_ = "Load failed (slot 1)";
     }
 
     // A travel service requested a map transition; hand off to the Loading state.
@@ -1268,6 +1365,11 @@ void InGameState::render()
                                  static_cast<int>(kGameWidth * scale),
                                  static_cast<int>(kGameHeight * scale));
         journalWidget_.render(*ctx.renderer, *ctx.debugText);
+
+        saveLoadWidget_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
+                                  static_cast<int>(kGameWidth * scale),
+                                  static_cast<int>(kGameHeight * scale));
+        saveLoadWidget_.render(*ctx.renderer, *ctx.debugText);
     }
 
     renderOverlay();

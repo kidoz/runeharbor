@@ -11,6 +11,7 @@
 #include "../../ui/journal_widget.hpp"
 #include "../../ui/map_widget.hpp"
 #include "../../ui/rest_widget.hpp"
+#include "../../ui/save_load_widget.hpp"
 #include "../../ui/shop_window.hpp"
 #include "../../ui/spellbook_widget.hpp"
 #include "../map_scene.hpp"
@@ -74,6 +75,7 @@ class InGameState : public IGameState
     ui::ShopWindow shopWindow_;
     ui::MapWidget mapWidget_;
     ui::JournalWidget journalWidget_;
+    ui::SaveLoadWidget saveLoadWidget_;
     uint64_t lastUpdateTicks_ = 0;
     float fpsAccumulatorMs_ = 0.0f;
     int fpsFrameCounter_ = 0;

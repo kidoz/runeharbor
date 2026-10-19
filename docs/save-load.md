@@ -662,6 +662,12 @@ Each slot displays:
 - v1-v15 blobs (which have no trailer) still load. A raw blob reconstructed
   from a headerless `party.bin` is treated as a pre-v16 save even when
   `runeharbor.ver` reports 16.
+- In-game `F5`/`F8` open a modal save/load picker with ten numbered slots per
+  page. Up/Down, PageUp/PageDown, and number keys navigate; Enter confirms.
+  Save mode requires a second Enter before overwriting an occupied slot, and
+  Load mode refuses empty slots. Loading hands off to the normal map-loading
+  flow; the picker itself performs no state mutation beyond calling
+  `SaveGame::save` / `SaveGame::load`.
 
 ### 13.3 Compatibility
 
