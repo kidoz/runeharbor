@@ -8,7 +8,6 @@
 #include <format>
 
 #include <cctype>
-#include <climits>
 
 #include "../../graphics/bitmap_font.hpp"
 #include "../../graphics/debug_text.hpp"
@@ -104,41 +103,6 @@ std::string getLowerExtension(const std::string& filename)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
     return ext;
-}
-
-// Pick a starter weapon itemId for a character from the loaded item table.
-// Returns the lowest-value weapon whose skillGroup matches the character's first
-// starting skill, or 0 if the table is empty / has no matching weapon.
-// `firstStartingSkill` is the SkillId of the class's first starting skill
-// (game::classStartingSkills(baseClassIndex)[0]).
-int pickStarterWeaponItemId(const game::Inventory& inventory, game::SkillId firstStartingSkill)
-{
-    const std::string_view wanted = game::skillDisplayName(firstStartingSkill);
-    // The item table's skillGroup uses the bare family name ("Sword", "Dagger",
-    // "Axe", "Spear", "Staff", "Mace"), so compare against the first token.
-    // "Fire Magic" -> "Fire" is never a weapon; weapons are single-word, and
-    // the starting-skill first slot is always a weapon family for the 9 base
-    // classes, so taking up to the first space is safe here.
-    auto space = wanted.find(' ');
-    std::string_view familyName =
-        space == std::string_view::npos ? wanted : wanted.substr(0, space);
-
-    int bestId = 0;
-    int bestValue = INT_MAX;
-    for (const auto& entry : inventory.itemTable())
-    {
-        if (entry.skillGroup != familyName)
-        {
-            continue;
-        }
-        // Cheapest matching weapon = basic starter tier; tie-break on lowest id.
-        if (entry.value < bestValue || (entry.value == bestValue && bestId == 0))
-        {
-            bestValue = entry.value;
-            bestId = entry.id;
-        }
-    }
-    return bestId;
 }
 
 void syncCreationSkills(Character& ch)
@@ -604,34 +568,11 @@ std::optional<GameStateId> CharacterCreationState::update()
                 party.setOrientation(0.0f, 0.0f);
 
                 // Starting provisions (RE: Party::initDefault sets gold=200,
-                // food=7; bump to a more playable starting amount and ensure
-                // each character begins with a basic weapon from their first
-                // starting skill).
+                // food=7). Starting equipment is granted once by
+                // Application::commitPartyToGameWorld() when the creation state
+                // hands off to Loading; granting it here too would duplicate it.
                 party.setGold(std::max(party.gold(), 200));
                 party.setFood(std::max(party.food(), 7));
-                if (ctx.shared->inventory)
-                {
-                    // Per RE FUN_00491375: a starting weapon per character from
-                    // their first starting skill. Pick the cheapest weapon in the
-                    // loaded item table whose skill family matches that skill; if
-                    // the table has no match, fall back to itemId 0 (empty slot)
-                    // rather than handing every class the same hardcoded weapon.
-                    for (int i = 0; i < game::kPartySize; i++)
-                    {
-                        const game::SkillId firstSkill =
-                            game::classStartingSkills(baseClassIndex(party[i].charClass))[0];
-                        const int starterId =
-                            pickStarterWeaponItemId(*ctx.shared->inventory, firstSkill);
-                        if (starterId <= 0)
-                        {
-                            continue;
-                        }
-                        game::Item starter;
-                        starter.itemId = starterId;
-                        starter.identified = true;
-                        ctx.shared->inventory->addToBackpack(i, starter);
-                    }
-                }
 
                 ctx.shared->arrivalOverrideActive = true;
                 ctx.shared->arrivalX = 12552.0f;
