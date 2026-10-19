@@ -355,6 +355,10 @@ SpellResult SpellSystem::castHealSpell(int characterIndex, int spellId, int targ
         calculateHealing(spellId, getEffectiveSkillLevel(characterIndex, spell->school), mastery);
 
     target.hitPoints = std::min(target.hitPoints + healing, target.maxHitPoints);
+    if (target.hitPoints > 0)
+    {
+        target.clearCondition(ConditionIndex::Unconscious);
+    }
     result.success = true;
     result.healing = healing;
     result.description = caster.name + " casts " + spell->name + " on " + target.name + " (+" +
