@@ -35,6 +35,19 @@ int randomInt(int min, int max)
     return dist(rng());
 }
 
+/// Fast 3D distance approximation used by projectile attacks
+/// (docs/combat-system.md §4.2): max + min/4 + mid*11/32.
+float approximateDistance(float ax, float ay, float az, float bx, float by, float bz)
+{
+    const float dx = std::abs(ax - bx);
+    const float dy = std::abs(ay - by);
+    const float dz = std::abs(az - bz);
+    const float maxD = std::max({dx, dy, dz});
+    const float minD = std::min({dx, dy, dz});
+    const float midD = dx + dy + dz - maxD - minD;
+    return maxD + minD * 0.25f + midD * (11.0f / 32.0f);
+}
+
 int pickFirstConscious(const Party& party)
 {
     for (int i = 0; i < kPartySize; i++)
@@ -613,8 +626,46 @@ AttackResult CombatSystem::playerAttack(int characterIndex, int monsterIndex)
         return result;
     }
 
-    // Calculate hit chance based on accuracy vs AC
-    int accuracy = ch.stats.accuracy;
+    const float distance = approximateDistance(party.worldX(), party.worldY(), party.worldZ(),
+                                               monster->x, monster->y, monster->z);
+
+    bool hasMeleeWeapon = false;
+    bool hasBow = false;
+    if (inventory_)
+    {
+        const auto& charInv = inventory_->getInventory(characterIndex);
+        const auto& mainHand = charInv.equipped[static_cast<size_t>(EquipSlot::MainHand)];
+        if (mainHand.valid() && !mainHand.broken)
+        {
+            const auto* def = inventory_->getItemDef(mainHand.itemId);
+            hasMeleeWeapon = def != nullptr && !def->mod1.empty();
+        }
+        const auto& bow = charInv.equipped[static_cast<size_t>(EquipSlot::Bow)];
+        if (bow.valid() && !bow.broken)
+        {
+            hasBow = inventory_->getItemDef(bow.itemId) != nullptr;
+        }
+    }
+
+    if (distance > kMeleeReach)
+    {
+        if (hasBow)
+        {
+            return playerRangedAttack(characterIndex, monsterIndex);
+        }
+        result.description = ch.name + " cannot reach " + monster->name;
+        return result;
+    }
+
+    // At melee range the bow is only used when no melee weapon is ready.
+    if (!hasMeleeWeapon && hasBow)
+    {
+        return playerRangedAttack(characterIndex, monsterIndex);
+    }
+
+    // Calculate hit chance based on accuracy vs AC. Effective accuracy includes
+    // timed buffs (Bless, Heroism, ...).
+    int accuracy = ch.effectiveStat(4);
     int chance = hitChance(ch.level, accuracy, monster->armorClass);
 
     if (!rollHit(chance))
@@ -627,7 +678,7 @@ AttackResult CombatSystem::playerAttack(int characterIndex, int monsterIndex)
     result.hit = true;
 
     // Base damage from might + weapon
-    int mightBonus = std::max(0, (ch.stats.might - 10) / 2);
+    int mightBonus = std::max(0, (ch.effectiveStat(0) - 10) / 2);
     int baseDamage = 1 + mightBonus; // Hand-to-hand base is 1 + might
 
     bool usingWeapon = false;
@@ -676,6 +727,96 @@ AttackResult CombatSystem::playerAttack(int characterIndex, int monsterIndex)
         result.description = ch.name + " hits " + monster->name + " for " +
                              std::to_string(result.damage) +
                              (result.critical ? " (critical!)" : "");
+    }
+
+    if (callbacks_.onCharacterAttack)
+    {
+        callbacks_.onCharacterAttack(characterIndex, *monster, result);
+    }
+
+    return result;
+}
+
+AttackResult CombatSystem::playerRangedAttack(int characterIndex, int monsterIndex)
+{
+    AttackResult result;
+
+    if (!gameWorld_ || !inventory_)
+        return result;
+
+    auto& party = gameWorld_->party();
+    if (characterIndex < 0 || characterIndex >= kPartySize)
+        return result;
+
+    auto& ch = party.member(characterIndex);
+    if (!ch.canAct())
+    {
+        result.description = ch.name + " is unable to act";
+        return result;
+    }
+
+    auto* monster = getMonster(monsterIndex);
+    if (!monster || !monster->isAlive())
+    {
+        result.description = "No valid target";
+        return result;
+    }
+
+    const auto& charInv = inventory_->getInventory(characterIndex);
+    const auto& bow = charInv.equipped[static_cast<size_t>(EquipSlot::Bow)];
+    if (!bow.valid() || bow.broken)
+    {
+        result.description = ch.name + " has no bow ready";
+        return result;
+    }
+    const auto* bowDef = inventory_->getItemDef(bow.itemId);
+    if (bowDef == nullptr)
+    {
+        result.description = ch.name + " has no bow ready";
+        return result;
+    }
+
+    const float distance = approximateDistance(party.worldX(), party.worldY(), party.worldZ(),
+                                               monster->x, monster->y, monster->z);
+    if (distance > kRangedMaxRange)
+    {
+        result.description = monster->name + " is out of range";
+        return result;
+    }
+
+    // RE (docs/combat-system.md §4.4): ranged damage is the weapon dice roll
+    // plus Master-rank training bonus; melee stat bonuses do not apply.
+    const auto& bowSkill = ch.skillLevels[static_cast<size_t>(SkillId::Bow)];
+    int baseDamage = rollDamage(bowDef->mod1) + bowDef->mod2;
+    if (bowSkill.mastery >= SkillMastery::Master)
+    {
+        baseDamage += bowSkill.effective() * 2;
+    }
+
+    // Bow training also improves the attack roll.
+    const int accuracy = ch.effectiveStat(4) + bowSkill.effective() * 2;
+    const int chance = hitChance(ch.level, accuracy, monster->armorClass);
+    if (!rollHit(chance))
+    {
+        result.hit = false;
+        result.description = ch.name + "'s shot misses " + monster->name;
+        return result;
+    }
+
+    result.hit = true;
+    result.damage = calculateDamage(std::max(1, baseDamage), DamageElement::Physical, *monster);
+    monster->currentHP -= result.damage;
+
+    if (monster->currentHP <= 0)
+    {
+        result.description = ch.name + " shoots down " + monster->name + " (" +
+                             std::to_string(result.damage) + " damage)";
+        killMonster(*monster);
+    }
+    else
+    {
+        result.description = ch.name + " shoots " + monster->name + " for " +
+                             std::to_string(result.damage) + " damage";
     }
 
     if (callbacks_.onCharacterAttack)

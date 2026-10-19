@@ -1141,6 +1141,15 @@ Read via: `GetPrivateProfileIntA("debug", "nodamage", 0, ...)`
   the existing world-item pickup list.
 - Monster melee attacks now respect a 256-unit reach; outside it the monster uses
   a shot/spell if available and otherwise resumes pursuing.
+- Player attacks now respect the same 256-unit melee reach. Beyond it, an
+  equipped bow (`EquipSlot::Bow`) fires instead; without a bow the attack is
+  rejected as out of reach. A bow is also used at point-blank range when no
+  melee weapon is ready.
+- Ranged attacks use the projectile range limit of 5,119 units and the RE fast
+  distance approximation (`max + min/4 + mid*11/32`). Damage is the bow dice
+  roll plus a Master-rank training bonus; bow training also improves accuracy.
+  Melee accuracy and might bonuses now use effective stats, so timed buffs
+  (Bless, Heroism, ...) affect attacks.
 
 ### Architecture Mapping
 

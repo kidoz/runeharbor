@@ -243,8 +243,19 @@ class CombatSystem
     // Update combat (called each frame with delta time in ms)
     void update(float deltaMs);
 
-    // Player initiates attack on monster
+    // Player initiates attack on monster. Uses the equipped bow when the
+    // target is beyond melee reach (or when no melee weapon is equipped).
     AttackResult playerAttack(int characterIndex, int monsterIndex);
+
+    // Explicit ranged attack with the equipped bow. Rejects targets outside
+    // kRangedMaxRange and characters without a usable bow.
+    AttackResult playerRangedAttack(int characterIndex, int monsterIndex);
+
+    // Melee reach used for player/monster attacks (RE: 256 units).
+    static constexpr float kMeleeReach = 256.0f;
+    // Projectile range threshold (RE: 0x13FF = 5,119 units,
+    // docs/combat-system.md §4.2).
+    static constexpr float kRangedMaxRange = 5119.0f;
 
     // Damage calculation
     static int rollDamage(const std::string& diceExpr);
