@@ -152,7 +152,7 @@ shaders_header = custom_target(
     'compile_shaders',
     input: shader_sources,
     output: 'shaders_compiled.hpp',
-    command: [python, meson.project_source_root() / 'tools/compile_shaders.py', '--output', '@OUTPUT@', '@INPUT@'],
+    command: [python, meson.current_source_dir() / 'tools/compile_shaders.py', '--output', '@OUTPUT@', '@INPUT@'],
 )
 
 # Main executable
@@ -177,7 +177,7 @@ executable(
 )
 
 asset_check_sources = files(
-    '../tools/asset_check.cpp',
+    'tools/asset_check.cpp',
     'util/string_utils.cpp',
     'formats/image_lod_archive.cpp',
     'formats/sprite_lod_archive.cpp',
