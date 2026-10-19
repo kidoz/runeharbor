@@ -434,6 +434,196 @@ std::optional<GameStateId> InGameState::update()
         return std::nullopt;
     }
 
+    // Panel toggles. These run before world input so the same key can open and
+    // close a panel even while it is modal.
+    if (ctx.isKeyPressed(SDL_SCANCODE_I))
+    {
+        inventory_.setVisible(!inventory_.visible());
+        if (inventory_.visible())
+        {
+            inventory_.setActiveCharacter(findActivePartyMember());
+            characterStats_.setVisible(false);
+            spellbook_.setVisible(false);
+            restWidget_.setVisible(false);
+            mapWidget_.setVisible(false);
+            journalWidget_.setVisible(false);
+        }
+    }
+
+    if (ctx.isKeyPressed(SDL_SCANCODE_C))
+    {
+        characterStats_.setVisible(!characterStats_.visible());
+        if (characterStats_.visible())
+        {
+            characterStats_.setActiveCharacter(findActivePartyMember());
+            inventory_.setVisible(false);
+            spellbook_.setVisible(false);
+            restWidget_.setVisible(false);
+            mapWidget_.setVisible(false);
+            journalWidget_.setVisible(false);
+        }
+    }
+
+    if (ctx.isKeyPressed(SDL_SCANCODE_S))
+    {
+        spellbook_.setVisible(!spellbook_.visible());
+        if (spellbook_.visible())
+        {
+            spellbook_.setActiveCharacter(findActivePartyMember());
+            inventory_.setVisible(false);
+            characterStats_.setVisible(false);
+            restWidget_.setVisible(false);
+            mapWidget_.setVisible(false);
+            journalWidget_.setVisible(false);
+        }
+    }
+
+    if (ctx.isKeyPressed(SDL_SCANCODE_R))
+    {
+        restWidget_.setVisible(!restWidget_.visible());
+        if (restWidget_.visible())
+        {
+            inventory_.setVisible(false);
+            characterStats_.setVisible(false);
+            spellbook_.setVisible(false);
+            mapWidget_.setVisible(false);
+            journalWidget_.setVisible(false);
+        }
+    }
+
+    if (ctx.isKeyPressed(SDL_SCANCODE_M))
+    {
+        mapWidget_.setVisible(!mapWidget_.visible());
+        if (mapWidget_.visible())
+        {
+            inventory_.setVisible(false);
+            characterStats_.setVisible(false);
+            spellbook_.setVisible(false);
+            restWidget_.setVisible(false);
+            journalWidget_.setVisible(false);
+        }
+    }
+
+    // Q toggles the journal. Tab switching lives in the journal's mouse handler.
+    if (ctx.isKeyPressed(SDL_SCANCODE_Q))
+    {
+        journalWidget_.setVisible(!journalWidget_.visible());
+        if (journalWidget_.visible())
+        {
+            journalWidget_.setActiveTab(ui::JournalWidget::JournalTab::Quests);
+            inventory_.setVisible(false);
+            characterStats_.setVisible(false);
+            spellbook_.setVisible(false);
+            restWidget_.setVisible(false);
+            mapWidget_.setVisible(false);
+        }
+    }
+
+    // Spellbook keyboard navigation (Up/Down/Enter/Esc) when open.
+    if (spellbook_.visible())
+    {
+        for (const SDL_Scancode key :
+             {SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_RETURN, SDL_SCANCODE_SPACE,
+              SDL_SCANCODE_ESCAPE, SDL_SCANCODE_1, SDL_SCANCODE_2})
+        {
+            if (ctx.isKeyPressed(key))
+            {
+                ui::UIEvent ev{ui::UIEventType::KeyDown, 0, 0, platform::MouseButton::Left, key};
+                (void)spellbook_.handleEvent(ev);
+            }
+        }
+    }
+
+    // Journal keyboard navigation (Up/Down/Esc) when open.
+    if (journalWidget_.visible())
+    {
+        for (const SDL_Scancode key : {SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_ESCAPE})
+        {
+            if (ctx.isKeyPressed(key))
+            {
+                ui::UIEvent ev{ui::UIEventType::KeyDown, 0, 0, platform::MouseButton::Left, key};
+                (void)journalWidget_.handleEvent(ev);
+            }
+        }
+    }
+
+    // Escape closes the topmost panel or cancels spell targeting. It never
+    // terminates the process; quitting is the window close request.
+    if (ctx.isKeyPressed(SDL_SCANCODE_ESCAPE))
+    {
+        if (targetingActive_)
+        {
+            targetingActive_ = false;
+            statusLine_ = "Cancelled spell.";
+            return std::nullopt;
+        }
+        if (inventory_.visible() || characterStats_.visible() || spellbook_.visible() ||
+            restWidget_.visible() || mapWidget_.visible() || journalWidget_.visible())
+        {
+            inventory_.setVisible(false);
+            characterStats_.setVisible(false);
+            spellbook_.setVisible(false);
+            restWidget_.setVisible(false);
+            mapWidget_.setVisible(false);
+            journalWidget_.setVisible(false);
+            return std::nullopt;
+        }
+    }
+
+    // Panels are modal: dispatch clicks to the open panel and swallow world,
+    // camera, and combat input while it is visible.
+    const bool anyPanelOpen = inventory_.visible() || characterStats_.visible() ||
+                              spellbook_.visible() || restWidget_.visible() ||
+                              mapWidget_.visible() || journalWidget_.visible();
+    if (anyPanelOpen)
+    {
+        if (ctx.window.wasMousePressed(platform::MouseButton::Left))
+        {
+            const auto ms = ctx.window.getMouseState();
+            if (inventory_.visible())
+            {
+                if (ctx.shared && ctx.shared->gameWorld && ctx.shared->inventory)
+                {
+                    ctx.shared->inventory->setParty(&ctx.shared->gameWorld->party());
+                }
+                ui::UIEvent ev{ui::UIEventType::MouseDown, ms.x, ms.y, platform::MouseButton::Left,
+                               SDL_SCANCODE_UNKNOWN};
+                (void)inventory_.handleEvent(ev);
+            }
+            else if (characterStats_.visible())
+            {
+                ui::UIEvent ev{ui::UIEventType::MouseDown, ms.x, ms.y, platform::MouseButton::Left,
+                               SDL_SCANCODE_UNKNOWN};
+                (void)characterStats_.handleEvent(ev);
+            }
+            else if (spellbook_.visible())
+            {
+                ui::UIEvent ev{ui::UIEventType::MouseDown, ms.x, ms.y, platform::MouseButton::Left,
+                               SDL_SCANCODE_UNKNOWN};
+                (void)spellbook_.handleEvent(ev);
+            }
+            else if (restWidget_.visible())
+            {
+                ui::UIEvent ev{ui::UIEventType::MouseDown, ms.x, ms.y, platform::MouseButton::Left,
+                               SDL_SCANCODE_UNKNOWN};
+                (void)restWidget_.handleEvent(ev);
+            }
+            else if (mapWidget_.visible())
+            {
+                ui::UIEvent ev{ui::UIEventType::MouseDown, ms.x, ms.y, platform::MouseButton::Left,
+                               SDL_SCANCODE_UNKNOWN};
+                (void)mapWidget_.handleEvent(ev);
+            }
+            else if (journalWidget_.visible())
+            {
+                ui::UIEvent ev{ui::UIEventType::MouseDown, ms.x, ms.y, platform::MouseButton::Left,
+                               SDL_SCANCODE_UNKNOWN};
+                (void)journalWidget_.handleEvent(ev);
+            }
+        }
+        return std::nullopt;
+    }
+
     // In turn-based combat, pause world exploration while awaiting player input.
     const bool tbPaused =
         ctx.shared && ctx.shared->combatSystem && ctx.shared->combatSystem->awaitingPlayerInput();
@@ -512,133 +702,6 @@ std::optional<GameStateId> InGameState::update()
         ctx.shared->combatSystem->update(deltaMs);
     }
 
-    // Toggle inventory
-    if (ctx.isKeyPressed(SDL_SCANCODE_I))
-    {
-        inventory_.setVisible(!inventory_.visible());
-        if (inventory_.visible())
-        {
-            inventory_.setActiveCharacter(findActivePartyMember());
-            characterStats_.setVisible(false);
-            spellbook_.setVisible(false);
-            restWidget_.setVisible(false);
-            mapWidget_.setVisible(false);
-        }
-    }
-
-    // Toggle character stats
-    if (ctx.isKeyPressed(SDL_SCANCODE_C))
-    {
-        characterStats_.setVisible(!characterStats_.visible());
-        if (characterStats_.visible())
-        {
-            characterStats_.setActiveCharacter(findActivePartyMember());
-            inventory_.setVisible(false);
-            spellbook_.setVisible(false);
-            restWidget_.setVisible(false);
-            mapWidget_.setVisible(false);
-        }
-    }
-
-    // Toggle spellbook
-    if (ctx.isKeyPressed(SDL_SCANCODE_S))
-    {
-        spellbook_.setVisible(!spellbook_.visible());
-        if (spellbook_.visible())
-        {
-            spellbook_.setActiveCharacter(findActivePartyMember());
-            inventory_.setVisible(false);
-            characterStats_.setVisible(false);
-            restWidget_.setVisible(false);
-            mapWidget_.setVisible(false);
-        }
-    }
-
-    // Spellbook keyboard navigation (Up/Down/Enter/Esc) when open.
-    if (spellbook_.visible())
-    {
-        for (const SDL_Scancode key :
-             {SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_RETURN, SDL_SCANCODE_SPACE,
-              SDL_SCANCODE_ESCAPE, SDL_SCANCODE_1, SDL_SCANCODE_2})
-        {
-            if (ctx.isKeyPressed(key))
-            {
-                ui::UIEvent ev{ui::UIEventType::KeyDown, 0, 0, platform::MouseButton::Left, key};
-                (void)spellbook_.handleEvent(ev);
-            }
-        }
-    }
-
-    // Toggle rest screen
-    if (ctx.isKeyPressed(SDL_SCANCODE_R))
-    {
-        restWidget_.setVisible(!restWidget_.visible());
-        if (restWidget_.visible())
-        {
-            inventory_.setVisible(false);
-            characterStats_.setVisible(false);
-            spellbook_.setVisible(false);
-            mapWidget_.setVisible(false);
-        }
-    }
-
-    // Toggle map screen
-    if (ctx.isKeyPressed(SDL_SCANCODE_M))
-    {
-        mapWidget_.setVisible(!mapWidget_.visible());
-        if (mapWidget_.visible())
-        {
-            inventory_.setVisible(false);
-            characterStats_.setVisible(false);
-            spellbook_.setVisible(false);
-            restWidget_.setVisible(false);
-            journalWidget_.setVisible(false);
-        }
-    }
-
-    // Toggle quest journal (Q = quests tab, A = autonotes tab)
-    if (ctx.isKeyPressed(SDL_SCANCODE_Q) || ctx.isKeyPressed(SDL_SCANCODE_A))
-    {
-        if (!journalWidget_.visible())
-        {
-            journalWidget_.setVisible(true);
-            // A opens straight to the Autonotes tab; Q to the default Quests tab.
-            if (ctx.isKeyPressed(SDL_SCANCODE_A))
-            {
-                journalWidget_.setActiveTab(ui::JournalWidget::JournalTab::Autonotes);
-            }
-            else
-            {
-                journalWidget_.setActiveTab(ui::JournalWidget::JournalTab::Quests);
-            }
-        }
-        else
-        {
-            journalWidget_.setVisible(false);
-        }
-        if (journalWidget_.visible())
-        {
-            inventory_.setVisible(false);
-            characterStats_.setVisible(false);
-            spellbook_.setVisible(false);
-            restWidget_.setVisible(false);
-            mapWidget_.setVisible(false);
-        }
-    }
-
-    // Journal keyboard navigation (Up/Down/Esc) when open.
-    if (journalWidget_.visible())
-    {
-        for (const SDL_Scancode key : {SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_ESCAPE})
-        {
-            if (ctx.isKeyPressed(key))
-            {
-                ui::UIEvent ev{ui::UIEventType::KeyDown, 0, 0, platform::MouseButton::Left, key};
-                (void)journalWidget_.handleEvent(ev);
-            }
-        }
-    }
-
     // Toggle render options
     if (ctx.isKeyPressed(SDL_SCANCODE_F))
     {
@@ -647,6 +710,10 @@ std::optional<GameStateId> InGameState::update()
     if (ctx.isKeyPressed(SDL_SCANCODE_V))
     {
         renderOptions.showWalls = !renderOptions.showWalls;
+    }
+    if (ctx.isKeyPressed(SDL_SCANCODE_B))
+    {
+        renderOptions.showCeilings = !renderOptions.showCeilings;
     }
     if (ctx.isKeyPressed(SDL_SCANCODE_P))
     {
@@ -676,7 +743,7 @@ std::optional<GameStateId> InGameState::update()
     {
         showHelpOverlay = !showHelpOverlay;
     }
-    if (ctx.isKeyPressed(SDL_SCANCODE_R) && ctx.camera)
+    if (ctx.isKeyPressed(SDL_SCANCODE_HOME) && ctx.camera)
     {
         if (ctx.shared && ctx.shared->mapScene && ctx.shared->mapScene->isLoaded())
         {
@@ -832,25 +899,6 @@ std::optional<GameStateId> InGameState::update()
             targetingActive_ = false;
         }
         return std::nullopt; // swallow input while targeting
-    }
-
-    // Inventory panel input: dispatch mouse clicks to the widget so the player
-    // can equip/unequip items. When the panel is open it consumes clicks (the
-    // click-pickup/place model from FUN_00468F8E), so they must not fall through
-    // to world-picking/combat below.
-    if (inventory_.visible() && ctx.window.wasMousePressed(platform::MouseButton::Left))
-    {
-        // Keep the inventory's party pointer current so the skill gate applies.
-        if (ctx.shared && ctx.shared->gameWorld && ctx.shared->inventory)
-        {
-            ctx.shared->inventory->setParty(&ctx.shared->gameWorld->party());
-        }
-        const auto ms = ctx.window.getMouseState();
-        ui::UIEvent ev{ui::UIEventType::MouseDown, ms.x, ms.y, platform::MouseButton::Left,
-                       SDL_SCANCODE_UNKNOWN};
-        (void)inventory_.handleEvent(ev);
-        // Skip the world interaction while the inventory is open.
-        return std::nullopt;
     }
 
     const bool primaryActionPressed = ctx.window.wasMousePressed(platform::MouseButton::Left) ||
@@ -1622,12 +1670,12 @@ void InGameState::renderOverlay()
     lines.push_back("SPACE/A ACTION  I INV  C CHARS  S SPELLS  R REST  M MAP  Q QUESTS");
     lines.push_back("CLICK PORTRAIT: SELECT MEMBER  S: SPELLBOOK -> CLICK SPELL -> CLICK TARGET");
     lines.push_back(
-        "RMB: QUICK DAMAGE SPELL  T: TOGGLE TURN-BASED/REAL-TIME  (TARGETING: ESC CANCELS)");
-    lines.push_back(std::format("F FLOORS:{}  V WALLS:{}  C CEIL:{}  P PORTAL:{}",
+        "RMB: QUICK DAMAGE SPELL  T: TOGGLE TURN-BASED/REAL-TIME  ESC: CLOSE PANEL/CANCEL");
+    lines.push_back(std::format("F FLOORS:{}  V WALLS:{}  B CEIL:{}  P PORTAL:{}",
                                 onOff(renderOptions.showFloors), onOff(renderOptions.showWalls),
                                 onOff(renderOptions.showCeilings),
                                 onOff(renderOptions.showPortals)));
-    lines.push_back(std::format("L LIGHTS:{}  G GRID:{}  X AXES:{}  H HELP:{}",
+    lines.push_back(std::format("L LIGHTS:{}  G GRID:{}  X AXES:{}  HOME RECENTER  H HELP:{}",
                                 onOff(renderOptions.showLights), onOff(showGrid), onOff(showAxes),
                                 onOff(showHelpOverlay)));
     if (ctx.shared && ctx.shared->combatSystem)

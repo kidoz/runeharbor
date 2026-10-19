@@ -107,10 +107,6 @@ void SdlWindow::processEvents()
         {
             closeRequested = true;
         }
-        else if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE)
-        {
-            closeRequested = true;
-        }
         else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
         {
             int buttonIndex = -1;
