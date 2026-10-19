@@ -85,6 +85,7 @@ graphics_sources = files(
     'graphics/indoor_renderer.cpp',
     'graphics/outdoor_renderer.cpp',
     'graphics/visibility.cpp',
+    'graphics/occlusion.cpp',
 )
 
 media_sources = files(

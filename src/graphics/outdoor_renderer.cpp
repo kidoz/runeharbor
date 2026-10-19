@@ -13,6 +13,7 @@
 #include "billboard.hpp"
 #include "clip_utils.hpp"
 #include "image.hpp"
+#include "occlusion.hpp"
 #include "shaders_compiled.hpp"
 #include "sprite_facing.hpp"
 #include "texture_coordinates.hpp"
@@ -780,6 +781,7 @@ void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Ca
 {
     const auto& viewProjection = camera.getViewProjectionMatrix();
     const Vec3 cameraPos = camera.getPosition();
+    const Vec3 gameplayCameraPos = renderToGameplayPosition(cameraPos);
     const float vpW = static_cast<float>(renderer.getViewportWidth());
     const float vpH = static_cast<float>(renderer.getViewportHeight());
     const detail::OutdoorLightingParams objectLighting =
@@ -808,6 +810,14 @@ void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Ca
     };
 
     std::vector<RenderOp> ops;
+
+    // Billboards are composited after the world geometry, so reject sprites
+    // whose base is behind terrain or an opaque building face.
+    const auto occludedByWorld = [&](const detail::SpawnBillboard& sprite)
+    {
+        return isOccludedByOutdoorGeometry(odmData, gameplayCameraPos,
+                                           renderToGameplayPosition(sprite.basePos));
+    };
 
     if (!skipBuildingFaces)
     {
@@ -902,6 +912,10 @@ void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Ca
             RenderOp op;
             op.billboard = detail::makeOutdoorSpawnBillboard(
                 spawn, cameraPos, runtimeConfig, monsterSpriteLookup, spriteFrameTable, ticks);
+            if (occludedByWorld(op.billboard))
+            {
+                continue;
+            }
             op.distanceSq = op.billboard.distanceSq;
             ops.push_back(std::move(op));
         }
@@ -917,6 +931,10 @@ void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Ca
             RenderOp op;
             op.billboard = detail::makeLiveActorBillboard(actor, cameraPos, monsterSpriteLookup,
                                                           spriteFrameTable);
+            if (occludedByWorld(op.billboard))
+            {
+                continue;
+            }
             op.distanceSq = op.billboard.distanceSq;
             ops.push_back(std::move(op));
         }
@@ -930,6 +948,10 @@ void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Ca
         {
             RenderOp op;
             op.billboard = detail::makeWorldItemBillboard(item, cameraPos, worldItemSpriteLookup_);
+            if (occludedByWorld(op.billboard))
+            {
+                continue;
+            }
             op.distanceSq = op.billboard.distanceSq;
             ops.push_back(std::move(op));
         }
@@ -957,6 +979,10 @@ void OutdoorRenderer::renderObjects(const formats::ODMMapData& odmData, const Ca
                 detail::makeOutdoorDecorationBillboard(deco, cameraPos, spriteFrameTable);
             if (op.billboard.textureName.empty() ||
                 (textureLookup && !textureLookup(op.billboard.textureName)))
+            {
+                continue;
+            }
+            if (occludedByWorld(op.billboard))
             {
                 continue;
             }

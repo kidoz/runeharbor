@@ -84,6 +84,7 @@ test_sources = files(
     'graphics/clip_utils_test.cpp',
     'graphics/sprite_facing_test.cpp',
     'graphics/texture_coordinates_test.cpp',
+    'graphics/occlusion_test.cpp',
     'graphics/hud_test.cpp',
 )
 
@@ -149,6 +150,7 @@ test_graphics_sources = files(
     '../src/graphics/indoor_renderer.cpp',
     '../src/graphics/outdoor_renderer.cpp',
     '../src/graphics/visibility.cpp',
+    '../src/graphics/occlusion.cpp',
 )
 
 test_media_sources = files(

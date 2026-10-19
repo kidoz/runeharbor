@@ -14,6 +14,7 @@
 #include "../game/game_world.hpp"
 #include "billboard.hpp"
 #include "clip_utils.hpp"
+#include "occlusion.hpp"
 #include "shaders_compiled.hpp"
 #include "sprite_facing.hpp"
 #include "texture_coordinates.hpp"
@@ -563,6 +564,14 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         return;
     }
 
+    // Billboards are composited after the world geometry (they cannot depth-test
+    // against the GPU target), so reject sprites whose base is behind a wall.
+    const auto occludedByWorld = [&](const BillboardSprite& sprite)
+    {
+        return isOccludedByIndoorGeometry(blvData, gameplayCameraPos,
+                                          renderToGameplayPosition(sprite.basePos), visibleSectors);
+    };
+
     // Build sorted face indices for painter's algorithm (back-to-front).
     enum class RenderOpType
     {
@@ -662,7 +671,7 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
 
         BillboardSprite sprite =
             makeIndoorDecorationBillboard(decoration, cameraPos, spriteFrameTable, SDL_GetTicks());
-        if (sprite.distanceSq > 100000000.0f)
+        if (sprite.distanceSq > 100000000.0f || occludedByWorld(sprite))
             continue;
 
         RenderOp op;
@@ -686,7 +695,7 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
 
             BillboardSprite sprite = makeIndoorSpawnBillboard(
                 spawn, cameraPos, runtimeConfig, monsterSpriteLookup, spriteFrameTable);
-            if (sprite.distanceSq > 100000000.0f)
+            if (sprite.distanceSq > 100000000.0f || occludedByWorld(sprite))
                 continue;
 
             RenderOp op;
@@ -705,6 +714,8 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         {
             BillboardSprite sprite = makeIndoorLiveActorBillboard(
                 actor, cameraPos, monsterSpriteLookup, spriteFrameTable);
+            if (occludedByWorld(sprite))
+                continue;
             RenderOp op;
             op.type = RenderOpType::Billboard;
             op.distanceSq = sprite.distanceSq;
@@ -721,6 +732,8 @@ void IndoorRenderer::render(const engine::MapScene& scene, const Camera& camera,
         {
             BillboardSprite sprite =
                 makeIndoorWorldItemBillboard(item, cameraPos, worldItemSpriteLookup_);
+            if (occludedByWorld(sprite))
+                continue;
             RenderOp op;
             op.type = RenderOpType::Billboard;
             op.distanceSq = sprite.distanceSq;
