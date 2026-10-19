@@ -51,6 +51,7 @@ test_sources = files(
     'formats/global_text_parser_test.cpp',
     'formats/spells_parser_test.cpp',
     'formats/items_parser_test.cpp',
+    'formats/placemon_parser_test.cpp',
     'formats/monsters_parser_test.cpp',
     'formats/mapstats_parser_test.cpp',
     'formats/quests_parser_test.cpp',

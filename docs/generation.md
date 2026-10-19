@@ -3,7 +3,7 @@ title: "Dungeon and Content Generation"
 summary: "Content generation places monsters, treasure, and other dynamic objects from map and data inputs."
 doc_type: reference
 status: partial
-last_updated: 2026-08-01
+last_updated: 2026-10-19
 ---
 # Dungeon and Content Generation
 
@@ -56,15 +56,30 @@ Error messages reveal the creation flow:
 | `"Can't create random monster: '%s'! See MapStats.txt and Monsters.txt!"` (at `004e81b8`) | Monster type not found in tables |
 | `"Can't create random monster: '%s' See MapStats!"` (at `004e8864`) | Map-specific monster lookup failure |
 
-### 1.3 Placement Data (placemon.txt)
+### 1.3 Placed Monster Names (placemon.txt)
 
-Monster placement rules are loaded from `placemon.txt` (at `004e8844`), parsed by
-`FUN_00454f7a`. This table defines:
+`placemon.txt` (at `004e8844`, parsed by `FUN_00454f7a`) is an id-to-name
+table for placed monsters, not a random placement rule table. The shipped
+file has two tab-separated columns and 198 rows:
 
-- Which monsters can appear in which maps
-- Encounter difficulty scaling
-- Group size ranges
-- Spawn probability weights
+```text
+	Placed Monster Names
+1	guard
+2	Cleric of Baa
+3	High Priest of Baa
+...
+14	0
+```
+
+Rows whose name is `0` are empty slots. The names label specific placed
+monsters — for example unique or named encounters — and do not define
+map eligibility, difficulty scaling, group sizes, or spawn weights. Random
+monster selection comes from the map spawn markers and `MapStats.txt` /
+`Monsters.txt`.
+
+> **Integration note:** RuneHarbor parses `placemon.txt` as an id-to-name
+> table. It does not use the table for random placement; earlier code that
+> treated it as a difficulty/weight rule table has been removed.
 
 ### 1.4 Monster List (monlist.txt / dmonlist.bin)
 

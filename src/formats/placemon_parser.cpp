@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "placemon_parser.hpp"
 
-#include <algorithm>
 #include <charconv>
 #include <sstream>
 #include <string>
@@ -100,67 +99,39 @@ bool PlacemonParser::parse(const std::vector<uint8_t>& data)
         }
 
         std::vector<std::string> cols = splitColumns(trimmed);
-        if (cols.size() < 3)
+        if (cols.size() < 2)
         {
             continue;
         }
 
-        PlacemonEntry entry;
-        size_t idx = 0;
-
-        int firstNumeric = 0;
-        if (!parseInt(cols[0], firstNumeric))
+        int id = 0;
+        if (!parseInt(cols[0], id) || id <= 0)
         {
-            entry.mapName = util::trim(cols[0]);
-            idx = 1;
-        }
-        else
-        {
-            entry.mapName = "*";
+            // Header row ("\tPlaced Monster Names") and blank/invalid ids.
+            continue;
         }
 
-        std::vector<int> numeric;
-        for (; idx < cols.size(); idx++)
+        std::string name = util::trim(cols[1]);
+        if (cols.size() > 2)
         {
-            int value = 0;
-            if (parseInt(cols[idx], value))
+            // Whitespace fallback splits the name; rejoin the remaining columns.
+            for (size_t i = 2; i < cols.size(); ++i)
             {
-                numeric.push_back(value);
+                const std::string part = util::trim(cols[i]);
+                if (!part.empty())
+                {
+                    name += ' ';
+                    name += part;
+                }
             }
         }
 
-        if (numeric.size() >= 4)
-        {
-            entry.minDifficulty = numeric[0];
-            entry.maxDifficulty = numeric[1];
-            entry.monsterId = numeric[2];
-            entry.weight = numeric[3];
-        }
-        else if (numeric.size() >= 3)
-        {
-            entry.minDifficulty = numeric[0];
-            entry.maxDifficulty = numeric[0];
-            entry.monsterId = numeric[1];
-            entry.weight = numeric[2];
-        }
-        else
+        if (name.empty() || name == "0")
         {
             continue;
         }
 
-        entry.minDifficulty = std::clamp(entry.minDifficulty, 1, 10);
-        entry.maxDifficulty = std::clamp(entry.maxDifficulty, 1, 10);
-        if (entry.maxDifficulty < entry.minDifficulty)
-        {
-            std::swap(entry.minDifficulty, entry.maxDifficulty);
-        }
-
-        if (entry.monsterId <= 0 || entry.weight <= 0)
-        {
-            continue;
-        }
-
-        entries_.push_back(std::move(entry));
+        entries_.push_back({id, std::move(name)});
     }
 
     logger_.info("Placemon parser: loaded " + std::to_string(entries_.size()) + " entries");

@@ -28,7 +28,6 @@
 #include "../formats/npctext_parser.hpp"
 #include "../formats/npctopic_parser.hpp"
 #include "../formats/pcx_image.hpp"
-#include "../formats/placemon_parser.hpp"
 #include "../formats/quests_parser.hpp"
 #include "../formats/rnditems_parser.hpp"
 #include "../formats/spells_parser.hpp"
@@ -3560,45 +3559,9 @@ void Application::loadDataTables()
 
     if (contentGenerator_)
     {
-        if (auto placeMonData = readFirstExisting({"placemon.txt", "PLACEMON.TXT", "PlaceMon.txt"});
-            placeMonData.has_value())
-        {
-            formats::PlacemonParser parser(logger);
-            if (parser.parse(*placeMonData))
-            {
-                std::vector<game::MonsterPlacementRule> rules;
-                std::unordered_map<std::string, size_t> ruleIndex;
-                rules.reserve(parser.getEntries().size());
-
-                for (const auto& entry : parser.getEntries())
-                {
-                    const std::string key = toLower(entry.mapName) + "|" +
-                                            std::to_string(entry.minDifficulty) + "|" +
-                                            std::to_string(entry.maxDifficulty);
-
-                    size_t idx = 0;
-                    if (auto it = ruleIndex.find(key); it != ruleIndex.end())
-                    {
-                        idx = it->second;
-                    }
-                    else
-                    {
-                        idx = rules.size();
-                        ruleIndex[key] = idx;
-                        game::MonsterPlacementRule rule;
-                        rule.mapName = toLower(entry.mapName);
-                        rule.minDifficulty = entry.minDifficulty;
-                        rule.maxDifficulty = entry.maxDifficulty;
-                        rules.push_back(std::move(rule));
-                    }
-
-                    rules[idx].entries.push_back({entry.monsterId, entry.weight});
-                }
-
-                contentGenerator_->setMonsterPlacementRules(std::move(rules));
-            }
-        }
-
+        // PlaceMon.txt is an id-to-name table for placed unique monsters, not a
+        // random placement rule table. It has no runtime consumer yet; monster
+        // generation uses the map spawn tables and RNDITEMS weights below.
         if (auto rndItemsData = readFirstExisting({"rnditems.txt", "RNDITEMS.TXT", "RndItems.txt"});
             rndItemsData.has_value())
         {

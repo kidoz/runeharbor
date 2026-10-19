@@ -12,13 +12,15 @@ class ILogger;
 namespace runeharbor::formats
 {
 
+/// A row from PlaceMon.txt: an id-to-name table for placed monsters.
+///
+/// The shipped file is a two-column table ("id<TAB>name"), not a random
+/// placement rule table. The header row starts with an empty first column and
+/// is ignored by the parser.
 struct PlacemonEntry
 {
-    std::string mapName;
-    int minDifficulty = 1;
-    int maxDifficulty = 10;
-    int monsterId = 0;
-    int weight = 0;
+    int id = 0;
+    std::string name;
 };
 
 class PlacemonParser
