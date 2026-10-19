@@ -3445,6 +3445,23 @@ void Application::configureGameplayCallbacks()
                 break;
             }
         };
+        callbacks.onGiveAward = [this](int id, int kind)
+        {
+            if (!questLog_ || id <= 0)
+            {
+                return;
+            }
+            if (kind == 0)
+            {
+                questLog_->acquireAward(id);
+                logger.info(std::format("Award acquired: {}", id));
+            }
+            else
+            {
+                questLog_->acquireAutonote(id);
+                logger.info(std::format("Autonote acquired: {}", id));
+            }
+        };
         callbacks.onSetGlobalVar = [this](int varIndex, int field, int value)
         {
             // Bridge quest-bit writes into the QuestLog. RE: setting a quest

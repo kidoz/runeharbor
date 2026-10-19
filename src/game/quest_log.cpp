@@ -199,6 +199,32 @@ int QuestLog::totalQuestCount() const
     return static_cast<int>(quests_.size());
 }
 
+void QuestLog::acquireAward(int awardBit)
+{
+    if (awardBit > 0)
+    {
+        acquiredAwards_.insert(awardBit);
+    }
+}
+
+bool QuestLog::hasAward(int awardBit) const
+{
+    return acquiredAwards_.contains(awardBit);
+}
+
+void QuestLog::acquireAutonote(int noteBit)
+{
+    if (noteBit > 0)
+    {
+        acquiredAutonotes_.insert(noteBit);
+    }
+}
+
+bool QuestLog::hasAutonote(int noteBit) const
+{
+    return acquiredAutonotes_.contains(noteBit);
+}
+
 void QuestLog::reset()
 {
     for (auto& [bit, quest] : quests_)
@@ -208,6 +234,8 @@ void QuestLog::reset()
         quest.endTime = 0;
     }
     journal_.clear();
+    acquiredAwards_.clear();
+    acquiredAutonotes_.clear();
 }
 
 } // namespace runeharbor::game

@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -80,6 +81,16 @@ class QuestLog
     const std::vector<JournalEntry>& getJournal() const { return journal_; }
     std::vector<const JournalEntry*> getJournalForQuest(int questBit) const;
 
+    // Awards and autonotes use their own acquired bitfields in the original
+    // (docs/quest-journal.md §4). RuneHarbor stores the acquired ids directly.
+    void acquireAward(int awardBit);
+    bool hasAward(int awardBit) const;
+    const std::set<int>& acquiredAwards() const { return acquiredAwards_; }
+
+    void acquireAutonote(int noteBit);
+    bool hasAutonote(int noteBit) const;
+    const std::set<int>& acquiredAutonotes() const { return acquiredAutonotes_; }
+
     // Statistics
     int activeQuestCount() const;
     int completedQuestCount() const;
@@ -93,6 +104,8 @@ class QuestLog
     QuestCallbacks callbacks_;
     std::unordered_map<int, QuestEntry> quests_;
     std::vector<JournalEntry> journal_;
+    std::set<int> acquiredAwards_;
+    std::set<int> acquiredAutonotes_;
 };
 
 } // namespace runeharbor::game

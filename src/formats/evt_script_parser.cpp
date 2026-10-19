@@ -577,6 +577,20 @@ game::EventCommand EvtScriptParser::decodeCommand(uint8_t opcodeByte,
         }
         break;
 
+    case game::EventOpcode::GiveAward:
+        // +5: award/autonote bit (u32), +9: kind flag (u8; 0=award, 1=autonote).
+        // The flag byte is present in the shipped scripts (e.g. D23 grants
+        // awards 1/2 with 0 and autonotes 1/2 with 1).
+        if (params.size() >= 4)
+        {
+            cmd.param1 = readI32(params, 0);
+        }
+        if (params.size() >= 5)
+        {
+            cmd.param2 = params[4];
+        }
+        break;
+
     case game::EventOpcode::GiveItem:
         // +5:player selector (u8), +6:sub-param (u8), +7:item data (u32)
         if (params.size() >= 1)

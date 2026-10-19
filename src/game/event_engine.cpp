@@ -829,6 +829,10 @@ size_t EventEngine::executeCommand(const EventScript& script, size_t index, bool
         {
             gameWorld_->setVar(markerVarKey(0x7500, cmd.param1), 1);
         }
+        if (callbacks_.onGiveAward)
+        {
+            callbacks_.onGiveAward(cmd.param1, std::clamp(cmd.param2, 0, 1));
+        }
         return nextIndex;
 
     case EventOpcode::ShowEffect:

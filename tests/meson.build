@@ -48,6 +48,7 @@ test_sources = files(
     'formats/frame_tables_test.cpp',
     'formats/tile_table_test.cpp',
     'formats/event_file_parser_test.cpp',
+    'formats/evt_script_parser_test.cpp',
     'formats/global_text_parser_test.cpp',
     'formats/spells_parser_test.cpp',
     'formats/items_parser_test.cpp',

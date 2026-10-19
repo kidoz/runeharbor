@@ -131,6 +131,9 @@ struct EventCallbacks
     std::function<void(int itemId)> onGiveItem;
     std::function<bool(int itemId)> onRemoveItem;
     std::function<void(const EventCommand& command)> onMapCommand;
+    // Fired by GiveAward: kind 0 = award bit, 1 = autonote bit (the trailing
+    // flag byte in the EVT command). The host records the acquired id.
+    std::function<void(int id, int kind)> onGiveAward;
     // Fired when a global/quest variable is set (SetGlobalVar/SetGlobalVar2).
     // The host bridges quest-bit writes into the QuestLog (RE: setting a quest
     // bit acquires the quest; the 0->nonzero transition is "New Quest!").
