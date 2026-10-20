@@ -3,7 +3,7 @@ title: "Character System"
 summary: "Character records combine identity, statistics, skills, conditions, inventory, and progression."
 doc_type: reference
 status: partial
-last_updated: 2026-08-01
+last_updated: 2026-10-20
 ---
 # Character System
 
@@ -424,6 +424,22 @@ The data file defines which skills each class can learn and to what mastery leve
 At runtime, the skill check functions validate whether a character's class permits
 a given skill before allowing training.
 
+### 4.6 Skill Point Progression
+
+Level-up training awards `(newLevel / 10) + 5` unspent skill points
+(`Character::levelUp`) and heals HP/SP to the new maximum. Raising a learned
+skill one level costs `current level + 1` points and caps at level 60
+(`Character::raiseSkill`, mirroring the original's `UIMSG_SkillUp`).
+
+Mastery training follows the NPC trainer path:
+Expert requires skill level 4; Master requires level 7, Expert mastery, and
+the special attribute gate (Merchant Personality 50, Bodybuilding Endurance 50,
+Learning Intellect 50); Grandmaster requires level 10, Master mastery, and
+either the Light/Dark class or the Dodging/Unarmed level-10 pair. Costs are the
+flat expert/master/grandmaster tables. The per-class mastery caps come from
+`skillMaxMasteryPerClass` (36 classes × 37 skills). Spell levels 1--4/7/10/11
+become learnable at Normal/Expert/Master/Grandmaster school mastery.
+
 ---
 
 ## 5. Class System
@@ -442,7 +458,7 @@ the promoted class ID at +0xB9 encode the current class state.
 | 3 | Paladin | Crusader | Hero / Villain |
 | 4 | Archer | Warrior Mage | Master Archer / Sniper |
 | 5 | Ranger | Hunter | Ranger Lord / Bounty Hunter |
-| 6 | Cleric | Priest | High Priest / Priest of Dark |
+| 6 | Cleric | Priest | Priest of the Sun / Priest of the Moon |
 | 7 | Druid | Great Druid | Arch Druid / Warlock |
 | 8 | Sorcerer | Wizard | Archmage / Lich |
 

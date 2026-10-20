@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <string>
 #include <string_view>
 
@@ -328,12 +329,49 @@ void Character::levelUp()
     }
 
     level++;
+
+    // FUN_004B4673 (0x4B4B4A): training grants (newLevel / 10) + 5 skill
+    // points and heals HP/SP to the new maximum.
+    skillPoints += (level / 10) + 5;
+
     recalculateDerived();
-    // In MM7 you gain HP/SP equal to class base + endurance/intellect bonus per level.
-    // The recalculateDerived() already handles the max HP/SP, so we just fill the new diff or
-    // restore. We'll fully restore HP/SP on level up as a simplification, or just leave it for
-    // rest? Let's just restore them for now, or just add the delta. Actually, levelUp in MM7
-    // requires training center. We'll just increment here.
+    hitPoints = maxHitPoints;
+    spellPoints = maxSpellPoints;
+}
+
+int Character::skillUpgradeCost(SkillId skill) const
+{
+    const size_t index = static_cast<size_t>(skill);
+    if (index >= skillLevels.size() || !skillLevels[index].learned())
+    {
+        return 0;
+    }
+    return skillLevels[index].level + 1;
+}
+
+bool Character::raiseSkill(SkillId skill)
+{
+    const size_t index = static_cast<size_t>(skill);
+    if (index >= skillLevels.size())
+    {
+        return false;
+    }
+
+    SkillValue& value = skillLevels[index];
+    if (!value.learned() || value.level >= kMaxSkillLevel)
+    {
+        return false;
+    }
+
+    const int cost = value.level + 1;
+    if (skillPoints < cost)
+    {
+        return false;
+    }
+
+    skillPoints -= cost;
+    value.level++;
+    return true;
 }
 
 void Character::rest(int hours)
@@ -390,16 +428,23 @@ void Character::clearAllConditions()
     conditionTimestamps.fill(0);
 }
 
-bool Character::learnSpell(int spellId, SkillId schoolSkill)
+bool Character::learnSpell(int spellId, SkillId schoolSkill, int requiredSpellLevel)
 {
     if (spellId <= 0 || spellId >= kSpellCount)
     {
         return false;
     }
-    // FUN_004680F1 book branch: the character must know the magic school
-    // (mastery >= Normal) to learn the spell.
+    // FUN_004680F1 book branch: the character must know the magic school and
+    // meet the spell's required mastery. pSpellDatas[].skillMastery groups the
+    // 11 spells of each school into 1-4 Normal, 5-7 Expert, 8-10 Master and 11
+    // Grandmaster, matching spellCountForMastery.
     const auto& skill = skillLevels[static_cast<size_t>(schoolSkill)];
     if (!skill.learned())
+    {
+        return false;
+    }
+    const int spellLevel = requiredSpellLevel > 0 ? requiredSpellLevel : ((spellId - 1) % 11 + 1);
+    if (spellLevel > spellsLearnableAtMastery(skill.mastery))
     {
         return false;
     }
@@ -427,7 +472,7 @@ std::optional<SkillId> skillIdFromName(std::string_view name)
 void learnSkill(Character& character, SkillId skillId, int level, SkillMastery mastery)
 {
     auto& skill = character.skillLevels[static_cast<size_t>(skillId)];
-    skill.level = static_cast<uint8_t>(std::clamp(level, 1, 63));
+    skill.level = static_cast<uint8_t>(std::clamp(level, 1, Character::kMaxSkillLevel));
     skill.mastery = mastery == SkillMastery::None ? SkillMastery::Normal : mastery;
 }
 
@@ -446,6 +491,269 @@ void syncSkillLevelsFromDisplaySkills(Character& character)
             learnSkill(character, *skillId);
         }
     }
+}
+
+namespace
+{
+// [36 classes][37 skills] maximum mastery, transcribed from the original's
+// skillMaxMasteryPerClass table. Values are the
+// SkillMastery enum: 0 = cannot learn, 1 = Normal, 2 = Expert, 3 = Master,
+// 4 = Grandmaster. Rows follow CharacterClass order; columns follow SkillId.
+// clang-format off
+constexpr uint8_t kClassMaxMastery[static_cast<size_t>(CharacterClass::Count)]
+                                  [static_cast<size_t>(SkillId::Count)] = {
+    {2, 3, 2, 3, 3, 2, 3, 4, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 3, 0, 2, 1, 0, 1, 2, 2, 0, 3, 0, 0, 1}, // Knight
+    {2, 3, 2, 3, 3, 2, 3, 4, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 3, 0, 2, 1, 0, 1, 2, 2, 0, 3, 0, 0, 1}, // Cavalier
+    {2, 4, 2, 3, 4, 2, 3, 4, 4, 3, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 4, 4, 0, 2, 1, 0, 1, 2, 2, 0, 4, 0, 0, 1}, // Champion
+    {2, 4, 2, 3, 4, 2, 3, 4, 4, 3, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 4, 4, 0, 2, 1, 0, 1, 2, 2, 0, 4, 0, 0, 1}, // Black Knight
+    {0, 3, 3, 0, 0, 2, 2, 4, 1, 3, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 1, 2, 0, 3, 0, 0, 3, 3, 2, 0, 3, 3, 2, 2}, // Thief
+    {0, 3, 3, 0, 0, 2, 2, 4, 1, 3, 2, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 3, 3, 1, 2, 0, 3, 0, 0, 3, 3, 2, 0, 3, 3, 2, 2}, // Rogue
+    {0, 3, 4, 0, 0, 2, 2, 4, 1, 4, 2, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 3, 3, 1, 2, 0, 3, 0, 0, 4, 3, 2, 0, 3, 4, 2, 2}, // Spy
+    {0, 3, 4, 0, 0, 2, 2, 4, 1, 4, 2, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 3, 3, 1, 2, 0, 3, 0, 0, 4, 3, 2, 0, 3, 4, 2, 2}, // Assassin
+    {3, 2, 2, 0, 2, 1, 0, 4, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 2, 1, 0, 1, 3, 3, 2, 3, 1, 0, 3}, // Monk
+    {3, 2, 2, 0, 2, 1, 0, 4, 0, 3, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 3, 0, 2, 1, 0, 2, 3, 3, 2, 3, 1, 0, 3}, // Initiate
+    {4, 2, 2, 0, 2, 1, 0, 4, 0, 3, 0, 0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 0, 0, 0, 4, 0, 2, 1, 0, 2, 4, 4, 2, 3, 1, 0, 4}, // Master
+    {4, 2, 2, 0, 2, 1, 0, 4, 0, 3, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 4, 0, 2, 1, 0, 3, 4, 4, 2, 3, 2, 0, 4}, // Ninja
+    {1, 3, 2, 2, 2, 2, 3, 4, 3, 2, 2, 3, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 2, 3, 3, 2, 1, 3, 0, 0, 1, 1, 0, 2, 0, 0, 1}, // Paladin
+    {1, 3, 2, 2, 2, 2, 3, 4, 3, 2, 2, 3, 0, 0, 0, 0, 2, 2, 2, 0, 0, 0, 2, 3, 3, 2, 1, 3, 0, 0, 1, 1, 0, 2, 0, 0, 1}, // Crusader
+    {1, 3, 2, 2, 2, 2, 4, 4, 4, 2, 2, 3, 0, 0, 0, 0, 3, 3, 3, 1, 0, 0, 2, 4, 3, 2, 1, 4, 0, 0, 1, 1, 0, 2, 0, 0, 1}, // Hero
+    {1, 3, 2, 2, 2, 2, 4, 4, 4, 2, 2, 3, 0, 0, 0, 0, 3, 3, 3, 0, 1, 0, 2, 4, 3, 2, 1, 4, 0, 0, 1, 1, 0, 2, 0, 0, 1}, // Villain
+    {1, 2, 2, 2, 3, 3, 0, 4, 0, 3, 3, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 3, 0, 0, 1, 2, 1, 0, 2, 0, 0, 3}, // Archer
+    {1, 2, 2, 2, 3, 3, 0, 4, 0, 3, 3, 0, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 3, 0, 0, 1, 2, 1, 0, 2, 0, 0, 3}, // Warrior Mage
+    {1, 2, 2, 2, 3, 4, 0, 4, 0, 3, 4, 0, 3, 3, 3, 3, 0, 0, 0, 1, 0, 0, 2, 2, 2, 2, 4, 0, 0, 2, 2, 1, 0, 2, 0, 0, 3}, // Master Archer
+    {1, 2, 2, 2, 3, 4, 0, 4, 0, 3, 4, 0, 3, 3, 3, 3, 0, 0, 0, 0, 1, 0, 2, 2, 2, 2, 4, 0, 0, 2, 2, 1, 0, 2, 0, 0, 3}, // Sniper
+    {1, 2, 2, 3, 2, 3, 0, 4, 2, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 1, 3, 2, 0, 2, 2, 1, 3, 2, 2, 1, 2}, // Ranger
+    {1, 2, 2, 3, 2, 3, 0, 4, 2, 3, 3, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 2, 1, 3, 2, 0, 2, 2, 1, 3, 2, 2, 1, 2}, // Hunter
+    {1, 2, 2, 4, 2, 3, 0, 4, 2, 3, 3, 0, 2, 2, 2, 2, 2, 2, 2, 0, 0, 1, 1, 1, 2, 1, 3, 2, 0, 2, 2, 1, 4, 2, 2, 1, 2}, // Ranger Lord
+    {1, 2, 2, 4, 2, 3, 0, 4, 2, 3, 3, 0, 2, 2, 2, 2, 2, 2, 2, 0, 0, 1, 1, 1, 2, 1, 3, 2, 0, 2, 2, 1, 4, 2, 2, 1, 2}, // Bounty Hunter
+    {1, 0, 0, 0, 0, 2, 3, 4, 3, 2, 2, 0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 0, 3, 3, 1, 3, 2, 3, 0, 0, 0, 0, 2, 0, 0, 2, 3}, // Cleric
+    {1, 0, 0, 0, 0, 2, 3, 4, 3, 2, 2, 0, 0, 0, 0, 0, 3, 3, 3, 0, 0, 0, 3, 3, 1, 3, 2, 3, 0, 0, 0, 0, 2, 0, 0, 2, 3}, // Priest
+    {1, 0, 0, 0, 0, 2, 3, 4, 3, 2, 2, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 4, 3, 1, 3, 2, 3, 0, 0, 0, 0, 2, 0, 0, 2, 3}, // Priest of Sun
+    {1, 0, 0, 0, 0, 2, 3, 4, 3, 2, 2, 0, 0, 0, 0, 0, 4, 4, 4, 0, 4, 0, 4, 3, 1, 3, 2, 3, 0, 0, 0, 0, 2, 0, 0, 2, 3}, // Priest of Moon
+    {1, 0, 3, 0, 0, 1, 2, 4, 2, 2, 0, 0, 2, 2, 2, 2, 2, 2, 2, 0, 0, 2, 2, 0, 0, 3, 2, 0, 0, 0, 0, 0, 2, 1, 0, 3, 3}, // Druid
+    {1, 0, 3, 0, 0, 1, 2, 4, 2, 2, 0, 0, 3, 3, 3, 3, 3, 3, 3, 0, 0, 2, 2, 0, 0, 3, 2, 0, 0, 0, 0, 0, 2, 1, 0, 3, 3}, // Great Druid
+    {1, 0, 3, 0, 0, 1, 2, 4, 2, 2, 0, 0, 3, 3, 3, 3, 3, 3, 3, 0, 0, 2, 2, 0, 0, 4, 2, 0, 0, 0, 0, 0, 2, 1, 0, 4, 3}, // Arch Druid
+    {1, 0, 3, 0, 0, 1, 2, 4, 2, 2, 0, 0, 3, 3, 3, 3, 3, 3, 3, 0, 0, 2, 2, 0, 0, 4, 2, 0, 0, 0, 0, 0, 2, 1, 0, 4, 3}, // Warlock
+    {3, 0, 2, 0, 0, 1, 0, 4, 0, 2, 0, 0, 2, 2, 2, 2, 0, 0, 0, 0, 0, 3, 1, 2, 0, 3, 2, 1, 0, 0, 0, 0, 3, 0, 0, 3, 3}, // Sorcerer
+    {3, 0, 2, 0, 0, 1, 0, 4, 0, 2, 0, 0, 3, 3, 3, 3, 0, 0, 0, 0, 0, 3, 1, 2, 0, 3, 2, 1, 0, 0, 0, 0, 3, 0, 0, 3, 3}, // Wizard
+    {3, 0, 2, 0, 0, 1, 0, 4, 0, 2, 0, 0, 4, 4, 4, 4, 0, 0, 0, 4, 0, 4, 1, 2, 0, 3, 2, 1, 0, 0, 0, 0, 4, 0, 0, 3, 3}, // Archmage
+    {3, 0, 2, 0, 0, 1, 0, 4, 0, 2, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 4, 4, 1, 2, 0, 3, 2, 1, 0, 0, 0, 0, 4, 0, 0, 3, 3}, // Lich
+};
+// clang-format on
+
+// Gold prices for the three trainable tiers, from the original's
+// expert/master/grandmaster cost tables. A zero means no trainer exists.
+constexpr int kExpertCost[static_cast<size_t>(SkillId::Count)] = {
+    2000, 2000, 2000, 2000, 2000, 2000, 2000, 0,    1000, 1000, 1000, 1000, 1000,
+    1000, 1000, 1000, 1000, 1000, 1000, 2000, 2000, 500,  2000, 500,  500,  500,
+    500,  0,    0,    500,  2000, 2000, 500,  2000, 500,  500,  2000,
+};
+constexpr int kMasterCost[static_cast<size_t>(SkillId::Count)] = {
+    5000, 5000, 5000, 5000, 5000, 5000, 5000, 0,    3000, 3000, 3000, 3000, 4000,
+    4000, 4000, 4000, 4000, 4000, 4000, 5000, 5000, 2500, 5000, 2500, 2500, 2500,
+    2500, 0,    0,    2500, 5000, 5000, 2500, 5000, 2500, 2500, 5000,
+};
+constexpr int kGrandmasterCost[static_cast<size_t>(SkillId::Count)] = {
+    8000, 8000, 8000, 8000, 8000, 8000, 8000, 0,    7000, 7000, 7000, 7000, 8000,
+    8000, 8000, 8000, 8000, 8000, 8000, 8000, 8000, 6000, 8000, 6000, 6000, 6000,
+    6000, 0,    0,    6000, 8000, 8000, 6000, 8000, 6000, 6000, 8000,
+};
+} // namespace
+
+SkillMastery maxMasteryForClass(CharacterClass charClass, SkillId skill)
+{
+    const size_t classIndex = static_cast<size_t>(charClass);
+    const size_t skillIndex = static_cast<size_t>(skill);
+    if (classIndex >= std::size(kClassMaxMastery) || skillIndex >= std::size(kClassMaxMastery[0]))
+    {
+        return SkillMastery::None;
+    }
+    return static_cast<SkillMastery>(kClassMaxMastery[classIndex][skillIndex]);
+}
+
+std::string_view masteryName(SkillMastery mastery)
+{
+    switch (mastery)
+    {
+    case SkillMastery::Normal:
+        return "Normal";
+    case SkillMastery::Expert:
+        return "Expert";
+    case SkillMastery::Master:
+        return "Master";
+    case SkillMastery::GrandMaster:
+        return "Grandmaster";
+    case SkillMastery::None:
+        return "None";
+    }
+    return "None";
+}
+
+int masteryTrainingCost(SkillId skill, SkillMastery target)
+{
+    const size_t index = static_cast<size_t>(skill);
+    if (index >= static_cast<size_t>(SkillId::Count))
+    {
+        return 0;
+    }
+
+    switch (target)
+    {
+    case SkillMastery::Expert:
+        return kExpertCost[index];
+    case SkillMastery::Master:
+        return kMasterCost[index];
+    case SkillMastery::GrandMaster:
+        return kGrandmasterCost[index];
+    case SkillMastery::None:
+    case SkillMastery::Normal:
+        return 0;
+    }
+    return 0;
+}
+
+bool meetsMasteryRequirements(const Character& character, SkillId skill, SkillMastery target)
+{
+    const size_t index = static_cast<size_t>(skill);
+    if (index >= character.skillLevels.size())
+    {
+        return false;
+    }
+
+    const SkillValue& value = character.skillLevels[index];
+    if (!value.learned() || static_cast<int>(target) <= static_cast<int>(value.mastery))
+    {
+        return false;
+    }
+    if (static_cast<int>(maxMasteryForClass(character.charClass, skill)) < static_cast<int>(target))
+    {
+        return false;
+    }
+
+    switch (target)
+    {
+    case SkillMastery::Expert:
+        // Expert training requires skill level 4.
+        return value.level >= 4;
+    case SkillMastery::Master:
+    {
+        // Master training requires level 7 and Expert mastery. Light and Dark
+        // retain the quest-bit gate in the original; the class cap already
+        // restricts them to the tier-3 path classes here.
+        if (value.level < 7 || value.mastery != SkillMastery::Expert)
+        {
+            return false;
+        }
+        switch (skill)
+        {
+        case SkillId::Merchant:
+            return character.baseStats.personality >= 50;
+        case SkillId::BodyBuilding:
+            return character.baseStats.endurance >= 50;
+        case SkillId::Learning:
+            return character.baseStats.intellect >= 50;
+        default:
+            return true;
+        }
+    }
+    case SkillMastery::GrandMaster:
+    {
+        // Grandmaster training requires level 10 and Master mastery.
+        if (value.level < 10 || value.mastery != SkillMastery::Master)
+        {
+            return false;
+        }
+        switch (skill)
+        {
+        case SkillId::Light:
+            return character.charClass == CharacterClass::Archmage ||
+                   character.charClass == CharacterClass::PriestOfSun;
+        case SkillId::Dark:
+            return character.charClass == CharacterClass::Lich ||
+                   character.charClass == CharacterClass::PriestOfMoon;
+        case SkillId::Dodging:
+            return character.skillLevels[static_cast<size_t>(SkillId::Unarmed)].level >= 10;
+        case SkillId::Unarmed:
+            return character.skillLevels[static_cast<size_t>(SkillId::Dodging)].level >= 10;
+        default:
+            return true;
+        }
+    }
+    case SkillMastery::None:
+    case SkillMastery::Normal:
+        return false;
+    }
+    return false;
+}
+
+std::optional<SkillMastery> nextMastery(const Character& character, SkillId skill)
+{
+    const size_t index = static_cast<size_t>(skill);
+    if (index >= character.skillLevels.size() || !character.skillLevels[index].learned())
+    {
+        return std::nullopt;
+    }
+
+    const int current = static_cast<int>(character.skillLevels[index].mastery);
+    const int cap = static_cast<int>(maxMasteryForClass(character.charClass, skill));
+    if (current >= cap || current >= static_cast<int>(SkillMastery::GrandMaster))
+    {
+        return std::nullopt;
+    }
+
+    return static_cast<SkillMastery>(current + 1);
+}
+
+int spellsLearnableAtMastery(SkillMastery mastery)
+{
+    switch (mastery)
+    {
+    case SkillMastery::Normal:
+        return 4;
+    case SkillMastery::Expert:
+        return 7;
+    case SkillMastery::Master:
+        return 10;
+    case SkillMastery::GrandMaster:
+        return 11;
+    case SkillMastery::None:
+        return 0;
+    }
+    return 0;
+}
+
+bool isPromotion(CharacterClass from, CharacterClass to)
+{
+    const int fromValue = static_cast<int>(from);
+    const int toValue = static_cast<int>(to);
+    if (fromValue < 0 || fromValue >= static_cast<int>(CharacterClass::Count) || toValue < 0 ||
+        toValue >= static_cast<int>(CharacterClass::Count))
+    {
+        return false;
+    }
+
+    const int base = fromValue & ~3;
+    const int tier = fromValue & 3;
+    if (tier == 0)
+    {
+        return toValue == base + 1;
+    }
+    if (tier == 1)
+    {
+        return toValue == base + 2 || toValue == base + 3;
+    }
+    return false;
+}
+
+bool promoteCharacter(Character& character, CharacterClass newClass)
+{
+    if (!isPromotion(character.charClass, newClass))
+    {
+        return false;
+    }
+    character.charClass = newClass;
+    character.recalculateDerived();
+    return true;
 }
 
 namespace

@@ -251,6 +251,210 @@ TEST_CASE("Character leveling", "[game][character]")
     }
 }
 
+TEST_CASE("Level-up awards skill points and heals", "[game][character][skills]")
+{
+    Character ch = makeSorcerer();
+    learnSkill(ch, SkillId::Fire);
+    ch.hitPoints = 1;
+    ch.spellPoints = 0;
+    ch.experience = 1000; // enough for level 2
+
+    ch.levelUp();
+
+    CHECK(ch.level == 2);
+    CHECK(ch.skillPoints == 5); // (2 / 10) + 5
+    CHECK(ch.hitPoints == ch.maxHitPoints);
+    CHECK(ch.spellPoints == ch.maxSpellPoints);
+
+    // Level 10 awards (10 / 10) + 5 = 6 points.
+    ch.level = 9;
+    ch.skillPoints = 0;
+    ch.experience = (10 * 9 / 2) * 1000;
+    ch.levelUp();
+    CHECK(ch.level == 10);
+    CHECK(ch.skillPoints == 6);
+}
+
+TEST_CASE("Raising a skill costs level + 1 points", "[game][character][skills]")
+{
+    Character ch = makeSorcerer();
+    learnSkill(ch, SkillId::Fire);
+    ch.skillPoints = 5;
+
+    CHECK(ch.skillUpgradeCost(SkillId::Fire) == 2);
+    CHECK(ch.raiseSkill(SkillId::Fire));
+    CHECK(ch.skillLevels[static_cast<size_t>(SkillId::Fire)].level == 2);
+    CHECK(ch.skillPoints == 3);
+
+    CHECK(ch.skillUpgradeCost(SkillId::Fire) == 3);
+    CHECK(ch.raiseSkill(SkillId::Fire));
+    CHECK(ch.skillLevels[static_cast<size_t>(SkillId::Fire)].level == 3);
+    CHECK(ch.skillPoints == 0);
+
+    // Next step costs 4, which the empty pool cannot pay.
+    CHECK_FALSE(ch.raiseSkill(SkillId::Fire));
+    CHECK(ch.skillLevels[static_cast<size_t>(SkillId::Fire)].level == 3);
+}
+
+TEST_CASE("Skill levels cap at 60", "[game][character][skills]")
+{
+    Character ch = makeSorcerer();
+    learnSkill(ch, SkillId::Fire, 59);
+    ch.skillPoints = 1000;
+
+    CHECK(ch.skillUpgradeCost(SkillId::Fire) == 60);
+    CHECK(ch.raiseSkill(SkillId::Fire));
+    CHECK(ch.skillLevels[static_cast<size_t>(SkillId::Fire)].level == 60);
+    CHECK_FALSE(ch.raiseSkill(SkillId::Fire));
+}
+
+TEST_CASE("Unlearned skills cannot be raised", "[game][character][skills]")
+{
+    Character ch = makeSorcerer();
+    ch.skillPoints = 100;
+    CHECK(ch.skillUpgradeCost(SkillId::Fire) == 0);
+    CHECK_FALSE(ch.raiseSkill(SkillId::Fire));
+    CHECK(ch.skillPoints == 100);
+}
+
+TEST_CASE("Class mastery caps match the original table", "[game][character][skills]")
+{
+    CHECK(maxMasteryForClass(CharacterClass::Sorcerer, SkillId::Fire) == SkillMastery::Expert);
+    CHECK(maxMasteryForClass(CharacterClass::Wizard, SkillId::Fire) == SkillMastery::Master);
+    CHECK(maxMasteryForClass(CharacterClass::Archmage, SkillId::Fire) == SkillMastery::GrandMaster);
+    CHECK(maxMasteryForClass(CharacterClass::Knight, SkillId::Fire) == SkillMastery::None);
+    CHECK(maxMasteryForClass(CharacterClass::Sorcerer, SkillId::Light) == SkillMastery::None);
+    CHECK(maxMasteryForClass(CharacterClass::Archmage, SkillId::Light) ==
+          SkillMastery::GrandMaster);
+    CHECK(maxMasteryForClass(CharacterClass::Lich, SkillId::Dark) == SkillMastery::GrandMaster);
+    CHECK(maxMasteryForClass(CharacterClass::Knight, SkillId::Sword) == SkillMastery::Master);
+}
+
+TEST_CASE("Mastery training levels and gates", "[game][character][skills]")
+{
+    Character ch = makeSorcerer();
+    learnSkill(ch, SkillId::Fire, 3, SkillMastery::Normal);
+
+    CHECK_FALSE(meetsMasteryRequirements(ch, SkillId::Fire, SkillMastery::Expert));
+    ch.skillLevels[static_cast<size_t>(SkillId::Fire)].level = 4;
+    CHECK(meetsMasteryRequirements(ch, SkillId::Fire, SkillMastery::Expert));
+    CHECK(nextMastery(ch, SkillId::Fire) == SkillMastery::Expert);
+    CHECK(masteryTrainingCost(SkillId::Fire, SkillMastery::Expert) == 1000);
+
+    // Master requires Expert and level 7; Sorcerer caps at Expert.
+    CHECK_FALSE(meetsMasteryRequirements(ch, SkillId::Fire, SkillMastery::Master));
+
+    ch.charClass = CharacterClass::Wizard; // Fire cap becomes Master
+    ch.skillLevels[static_cast<size_t>(SkillId::Fire)].mastery = SkillMastery::Expert;
+    ch.skillLevels[static_cast<size_t>(SkillId::Fire)].level = 6;
+    CHECK_FALSE(meetsMasteryRequirements(ch, SkillId::Fire, SkillMastery::Master));
+    ch.skillLevels[static_cast<size_t>(SkillId::Fire)].level = 7;
+    CHECK(meetsMasteryRequirements(ch, SkillId::Fire, SkillMastery::Master));
+    CHECK(masteryTrainingCost(SkillId::Fire, SkillMastery::Master) == 4000);
+
+    // Grandmaster requires Master and level 10.
+    ch.charClass = CharacterClass::Archmage;
+    ch.skillLevels[static_cast<size_t>(SkillId::Fire)].mastery = SkillMastery::Master;
+    ch.skillLevels[static_cast<size_t>(SkillId::Fire)].level = 9;
+    CHECK_FALSE(meetsMasteryRequirements(ch, SkillId::Fire, SkillMastery::GrandMaster));
+    ch.skillLevels[static_cast<size_t>(SkillId::Fire)].level = 10;
+    CHECK(meetsMasteryRequirements(ch, SkillId::Fire, SkillMastery::GrandMaster));
+    CHECK(masteryTrainingCost(SkillId::Fire, SkillMastery::GrandMaster) == 8000);
+}
+
+TEST_CASE("Mastery attribute and class gates", "[game][character][skills]")
+{
+    // Merchant Master: base Personality >= 50 (Rogue caps it at Master).
+    Character rogue;
+    rogue.charClass = CharacterClass::Rogue;
+    learnSkill(rogue, SkillId::Merchant, 7, SkillMastery::Expert);
+    rogue.baseStats.personality = 49;
+    CHECK_FALSE(meetsMasteryRequirements(rogue, SkillId::Merchant, SkillMastery::Master));
+    rogue.baseStats.personality = 50;
+    CHECK(meetsMasteryRequirements(rogue, SkillId::Merchant, SkillMastery::Master));
+
+    // Bodybuilding Master: base Endurance >= 50 (Champion caps it at GM).
+    Character champion;
+    champion.charClass = CharacterClass::Champion;
+    learnSkill(champion, SkillId::BodyBuilding, 7, SkillMastery::Expert);
+    champion.baseStats.endurance = 49;
+    CHECK_FALSE(meetsMasteryRequirements(champion, SkillId::BodyBuilding, SkillMastery::Master));
+    champion.baseStats.endurance = 50;
+    CHECK(meetsMasteryRequirements(champion, SkillId::BodyBuilding, SkillMastery::Master));
+
+    // Light Grandmaster is Archmage or Priest of Sun only.
+    Character archmage;
+    archmage.charClass = CharacterClass::Archmage;
+    learnSkill(archmage, SkillId::Light, 10, SkillMastery::Master);
+    CHECK(meetsMasteryRequirements(archmage, SkillId::Light, SkillMastery::GrandMaster));
+    archmage.charClass = CharacterClass::Lich;
+    CHECK_FALSE(meetsMasteryRequirements(archmage, SkillId::Light, SkillMastery::GrandMaster));
+
+    // Dark Grandmaster is Lich or Priest of Moon only.
+    Character lich;
+    lich.charClass = CharacterClass::Lich;
+    learnSkill(lich, SkillId::Dark, 10, SkillMastery::Master);
+    CHECK(meetsMasteryRequirements(lich, SkillId::Dark, SkillMastery::GrandMaster));
+    CHECK_FALSE(meetsMasteryRequirements(lich, SkillId::Light, SkillMastery::GrandMaster));
+
+    // Dodging and Unarmed Grandmaster require the other at level 10.
+    Character monk;
+    monk.charClass = CharacterClass::Master; // caps both at Grandmaster
+    learnSkill(monk, SkillId::Dodging, 10, SkillMastery::Master);
+    learnSkill(monk, SkillId::Unarmed, 9);
+    CHECK_FALSE(meetsMasteryRequirements(monk, SkillId::Dodging, SkillMastery::GrandMaster));
+    monk.skillLevels[static_cast<size_t>(SkillId::Unarmed)].level = 10;
+    CHECK(meetsMasteryRequirements(monk, SkillId::Dodging, SkillMastery::GrandMaster));
+}
+
+TEST_CASE("Spell learning respects the school mastery tier", "[game][character][skills]")
+{
+    Character ch = makeSorcerer();
+    learnSkill(ch, SkillId::Fire, 1, SkillMastery::Normal);
+
+    // Fire Bolt (spell 2, level 2) is within Normal's 1-4 range.
+    CHECK(ch.learnSpell(2, SkillId::Fire));
+    // Fireball (spell 6, level 6) needs Expert.
+    CHECK_FALSE(ch.learnSpell(6, SkillId::Fire));
+    // Incinerate (spell 11, level 11) needs Grandmaster.
+    CHECK_FALSE(ch.learnSpell(11, SkillId::Fire));
+
+    ch.skillLevels[static_cast<size_t>(SkillId::Fire)].mastery = SkillMastery::Expert;
+    CHECK(ch.learnSpell(6, SkillId::Fire));
+    CHECK_FALSE(ch.learnSpell(11, SkillId::Fire));
+
+    ch.skillLevels[static_cast<size_t>(SkillId::Fire)].mastery = SkillMastery::GrandMaster;
+    CHECK(ch.learnSpell(11, SkillId::Fire));
+
+    // A character without the school skill cannot learn any of its spells.
+    Character novice = makeSorcerer();
+    CHECK_FALSE(novice.learnSpell(1, SkillId::Fire));
+}
+
+TEST_CASE("Spell levels available per mastery", "[game][character][skills]")
+{
+    CHECK(spellsLearnableAtMastery(SkillMastery::None) == 0);
+    CHECK(spellsLearnableAtMastery(SkillMastery::Normal) == 4);
+    CHECK(spellsLearnableAtMastery(SkillMastery::Expert) == 7);
+    CHECK(spellsLearnableAtMastery(SkillMastery::Master) == 10);
+    CHECK(spellsLearnableAtMastery(SkillMastery::GrandMaster) == 11);
+}
+
+TEST_CASE("Class promotion paths", "[game][character][skills]")
+{
+    CHECK(isPromotion(CharacterClass::Knight, CharacterClass::Cavalier));
+    CHECK(isPromotion(CharacterClass::Cavalier, CharacterClass::Champion));
+    CHECK(isPromotion(CharacterClass::Cavalier, CharacterClass::BlackKnight));
+    CHECK_FALSE(isPromotion(CharacterClass::Knight, CharacterClass::Champion));
+    CHECK_FALSE(isPromotion(CharacterClass::Champion, CharacterClass::BlackKnight));
+
+    Character ch = makeKnight();
+    CHECK(promoteCharacter(ch, CharacterClass::Cavalier));
+    CHECK(ch.charClass == CharacterClass::Cavalier);
+    CHECK_FALSE(promoteCharacter(ch, CharacterClass::Sorcerer));
+    CHECK(ch.charClass == CharacterClass::Cavalier);
+}
+
 TEST_CASE("Character rest", "[game][character]")
 {
     Character ch = makeKnight();

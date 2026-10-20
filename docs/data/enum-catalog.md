@@ -143,7 +143,7 @@ Each base class occupies 4 IDs: base, 1st promotion, 2nd promotion path A, 2nd p
 | 0x0C-0x0F | Paladin | Crusader | Hero | Villain |
 | 0x10-0x13 | Archer | Warrior Mage | Master Archer | Sniper |
 | 0x14-0x17 | Ranger | Hunter | Ranger Lord | Bounty Hunter |
-| 0x18-0x1B | Cleric | Priest | High Priest | Priest of Dark |
+| 0x18-0x1B | Cleric | Priest | Priest of the Sun | Priest of the Moon |
 | 0x1C-0x1F | Druid | Great Druid | Arch Druid | Warlock |
 | 0x20-0x23 | Sorcerer | Wizard | Archmage | Lich |
 

@@ -47,8 +47,8 @@ enum class CharacterClass : uint8_t
     BountyHunter = 23,
     Cleric = 24,
     Priest = 25,
-    HighPriest = 26,
-    PriestOfDark = 27,
+    PriestOfSun = 26,
+    PriestOfMoon = 27,
     Druid = 28,
     GreatDruid = 29,
     ArchDruid = 30,
@@ -292,6 +292,20 @@ struct Character
     std::array<SkillValue, static_cast<size_t>(SkillId::Count)> skillLevels = {};
     std::vector<std::string> skills; // Display names (for character creation UI)
 
+    // Unspent skill points. Awarded by level-up training:
+    // (newLevel / 10) + 5 (FUN_004B4673 side effects).
+    int skillPoints = 0;
+    static constexpr int kMaxSkillLevel = 60;
+
+    // Skill points needed to raise this skill one level. MM7 charges the
+    // current level + 1 (UIMSG_SkillUp: `cost = skillValue.level() + 1`).
+    // Returns 0 for skills that are not learned.
+    int skillUpgradeCost(SkillId skill) const;
+
+    // Spends points to raise a learned skill by one level. False when the
+    // skill is unlearned, already at kMaxSkillLevel, or the pool is too small.
+    bool raiseSkill(SkillId skill);
+
     // Known spells (spellbook). MM7 stores one known-spell byte per spell at
     // charBase+0x192; RuneHarbor models it as a bool array indexed by spell id
     // (1..99). Books grant a spell here (FUN_004680F1 book branch).
@@ -301,9 +315,11 @@ struct Character
     {
         return spellId > 0 && spellId < kSpellCount && knownSpells[static_cast<size_t>(spellId)];
     }
-    // Learns a spell. Returns false if the character lacks the school skill at
-    // Normal mastery (the gate from the book branch), true on success.
-    bool learnSpell(int spellId, SkillId schoolSkill);
+    // Learns a spell. Returns false if the character lacks the school skill or
+    // its mastery is below the spell's tier (Normal 1-4, Expert 5-7, Master
+    // 8-10, Grandmaster 11), true on success. `requiredSpellLevel` defaults to
+    // the spell's position in the contiguous 11-spell school layout.
+    bool learnSpell(int spellId, SkillId schoolSkill, int requiredSpellLevel = 0);
 
     // Spell quickbar: 2 assignable spell slots (RE: per-character bytes at
     // +0x1A4E / +0x1A4F). 0 = empty.
@@ -471,5 +487,46 @@ void learnSkill(Character& character, SkillId skillId, int level = 1,
                 SkillMastery mastery = SkillMastery::Normal);
 void forgetSkill(Character& character, SkillId skillId);
 void syncSkillLevelsFromDisplaySkills(Character& character);
+
+// -------- Skill mastery progression --------
+
+/// Highest mastery a class may reach in a skill, from the original's
+/// [36 classes][37 skills] skillMaxMasteryPerClass table.
+/// SkillMastery::None means the class can never learn the skill.
+SkillMastery maxMasteryForClass(CharacterClass charClass, SkillId skill);
+
+/// Display name for a mastery tier ("Normal", "Expert", "Master",
+/// "Grandmaster").
+std::string_view masteryName(SkillMastery mastery);
+
+/// Gold charged by a mastery trainer for the tier. Values transcribed from the
+/// original's expert/master/grandmaster cost tables. 0 means no trainer exists
+/// for that skill/tier (Diplomacy and Thievery are unused in MM7).
+int masteryTrainingCost(SkillId skill, SkillMastery target);
+
+/// Whether `character` satisfies every non-gold requirement for training
+/// `skill` up to `target`: class cap, previous tier, minimum skill level, and
+/// the special Master/Grandmaster gates (Light/Dark class, Merchant
+/// personality 50, Bodybuilding endurance 50, Learning intellect 50, and the
+/// Dodging/Unarmed level-10 pair).
+bool meetsMasteryRequirements(const Character& character, SkillId skill, SkillMastery target);
+
+/// The next mastery tier this character can train toward, if the class cap
+/// allows another step. Requirements are not checked here; pair with
+/// meetsMasteryRequirements.
+std::optional<SkillMastery> nextMastery(const Character& character, SkillId skill);
+
+/// Number of spells (levels 1..N) a school mastery lets a character learn.
+/// Novice 4, Expert 7, Master 10, Grandmaster 11 (spellCountForMastery).
+int spellsLearnableAtMastery(SkillMastery mastery);
+
+/// Whether `to` is a valid promotion of `from`: base -> tier 1, tier 1 ->
+/// one of the two tier-2 paths.
+bool isPromotion(CharacterClass from, CharacterClass to);
+
+/// Applies a promotion, keeping learned skills and recalculating derived
+/// stats. Returns false (and leaves the character untouched) for an invalid
+/// promotion.
+bool promoteCharacter(Character& character, CharacterClass newClass);
 
 } // namespace runeharbor::game
