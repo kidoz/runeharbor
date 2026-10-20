@@ -214,7 +214,9 @@ struct BLVDoor
     int16_t padding;
 };
 
-// Spawn point (22 bytes)
+// Spawn point (24 bytes). `group` is a 32-bit field in MM7 (SpawnPoint_MM7);
+// treating it as int16 misaligned every record and pushed the outline section
+// 2 bytes per spawn past EOF.
 struct BLVSpawnPoint
 {
     int32_t x;
@@ -224,8 +226,9 @@ struct BLVSpawnPoint
     uint16_t objectType;
     uint16_t objectIndex;
     uint16_t attributes;
-    int16_t group;
+    uint32_t group;
 };
+static_assert(sizeof(BLVSpawnPoint) == 24, "BLVSpawnPoint must be 24 bytes");
 
 // Decoration record (32 bytes)
 struct BLVDecorationOnDisk

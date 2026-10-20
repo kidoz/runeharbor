@@ -4471,7 +4471,8 @@ void Application::applyMapEntryPoint()
             for (size_t i = 0; i < indoorSpawns.size(); i++)
             {
                 const auto& spawn = indoorSpawns[i];
-                if (spawn.group == spawnIndex || static_cast<int>(spawn.objectIndex) == spawnIndex)
+                if (static_cast<int>(spawn.group) == spawnIndex ||
+                    static_cast<int>(spawn.objectIndex) == spawnIndex)
                 {
                     selected = i;
                     matched = true;
@@ -4555,7 +4556,8 @@ void Application::applyMapEntryPoint()
             for (size_t i = 0; i < outdoorSpawns.size(); i++)
             {
                 const auto& spawn = outdoorSpawns[i];
-                if (spawn.group == spawnIndex || static_cast<int>(spawn.objectIndex) == spawnIndex)
+                if (static_cast<int>(spawn.group) == spawnIndex ||
+                    static_cast<int>(spawn.objectIndex) == spawnIndex)
                 {
                     selected = i;
                     matched = true;

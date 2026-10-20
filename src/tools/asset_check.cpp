@@ -559,6 +559,12 @@ CheckResult checkGameMaps(const fs::path& dataRoot, QuietLogger& logger)
                 result.metrics["blvFailures"]++;
                 addError(result, "failed to parse BLV " + filename);
             }
+            else
+            {
+                const auto& parsed = map.getData();
+                result.metrics["blvSpawns"] += parsed.spawns.size();
+                result.metrics["blvOutlines"] += parsed.outlines.size();
+            }
         }
         else if (endsWithIgnoreCase(lower, ".odm"))
         {
