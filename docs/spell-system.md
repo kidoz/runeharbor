@@ -3,7 +3,7 @@ title: "Spell System"
 summary: "The spell system combines spell data, mastery, targeting, cost, duration, and effect dispatch."
 doc_type: reference
 status: partial
-last_updated: 2026-10-19
+last_updated: 2026-10-20
 ---
 # Spell System
 
@@ -1018,8 +1018,12 @@ Offset +7: skill_level_override (byte)
 ### Current implementation
 
 - `SpellSystem::canCast` and `getAvailableSpells` require the spell to be in the
-  character's spellbook (`knownSpells`). Scrolls, potions, and EVT script casts use
-  `castScriptSpell`, which bypasses the spellbook gate.
+  character's spellbook (`knownSpells`) and the matching school skill to be
+  learned. Spell level gates *learning* through the required mastery (Normal
+  1-4, Expert 5-7, Master 8-10, Grandmaster 11); once known, a spell is
+  castable at any school skill level, with power scaling from that level.
+  Scrolls, potions, and EVT script casts use `castScriptSpell`, which bypasses
+  the spellbook gate.
 - Buff spells (Shield, Bless, Haste, Heroism, Stone Skin, Hour of Power,
   Day of Protection, Resist...) create `TimedEffect` entries carrying stat, AC, and
   resistance bonuses with a game-time expiry. `GameWorld::processConditions()`

@@ -67,6 +67,26 @@ TEST_CASE("Spellbook gates casting and available spells", "[game][spells]")
     CHECK(available[0] == 1);
 }
 
+TEST_CASE("Known spells are castable below the spell's level", "[game][spells]")
+{
+    // Mastery gates learning (a Normal school skill can only learn levels 1-4,
+    // Expert 1-7, and so on), but once a spell is in the book the original's
+    // CanCastSpell only checks mana/conditions. Skill level scales the effect.
+    util::ConsoleLogger logger;
+    GameWorld world;
+    SpellSystem spells(logger);
+    spells.setGameWorld(&world);
+    spells.loadSpellData({makeSpell(6, "Fireball", 6)});
+
+    auto& ch = world.party().member(0);
+    prepareCaster(ch);
+    learnSkill(ch, SkillId::Fire, 4, SkillMastery::Expert);
+    ch.knownSpells[6] = true;
+
+    CHECK(spells.canCast(0, 6));
+    CHECK(spells.getAvailableSpells(0).size() == 1);
+}
+
 TEST_CASE("Buff spells add timed effects that expire", "[game][spells][buffs]")
 {
     util::ConsoleLogger logger;

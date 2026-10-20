@@ -228,9 +228,11 @@ bool SpellSystem::canCast(int characterIndex, int spellId) const
     if (!ch.knowsSpell(spellId))
         return false;
 
-    // Check if character has the required school skill
-    int skillLevel = getEffectiveSkillLevel(characterIndex, spell->school);
-    if (skillLevel < spell->level)
+    // The school skill must be known. Spell level gates *learning* through the
+    // spell's required mastery, not casting: the original's CanCastSpell only
+    // checks mana/conditions once the spell is in the spellbook.
+    const auto& schoolSkill = ch.skillLevels[static_cast<size_t>(schoolToSkill(spell->school))];
+    if (!schoolSkill.learned())
         return false;
 
     // Check mana
@@ -859,8 +861,10 @@ std::vector<int> SpellSystem::getAvailableSpells(int characterIndex) const
         {
             continue;
         }
-        int skillLevel = getEffectiveSkillLevel(characterIndex, spell.school);
-        if (skillLevel >= spell.level)
+        // Known spells in a school the character has learned are usable. The
+        // spell's level only constrained learning (mastery gate).
+        const auto& schoolSkill = ch.skillLevels[static_cast<size_t>(schoolToSkill(spell.school))];
+        if (schoolSkill.learned())
         {
             available.push_back(spell.spellId);
         }

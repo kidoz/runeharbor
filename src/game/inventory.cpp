@@ -469,11 +469,13 @@ UseResult Inventory::useItem(int characterIndex, int backpackSlot, int targetCha
         // Resolve the school from the loaded spell table; fall back to the
         // contiguous 11-spell-per-school ID layout when the table is absent.
         SkillId school = SkillId::Fire;
+        int spellLevel = 0; // 0 = derive from the spell id layout
         if (spellSystem_)
         {
             if (const auto* info = spellSystem_->getSpell(spellId))
             {
                 school = schoolToSkill(info->school);
+                spellLevel = info->level;
             }
         }
         else
@@ -484,9 +486,10 @@ UseResult Inventory::useItem(int characterIndex, int backpackSlot, int targetCha
             };
             const int schoolBase = std::clamp((spellId - 1) / 11, 0, 8);
             school = kSchoolSkills[schoolBase];
+            spellLevel = (spellId - 1) % 11 + 1;
         }
 
-        if (reader.learnSpell(spellId, school))
+        if (reader.learnSpell(spellId, school, spellLevel))
         {
             result.spellLearned = spellId;
             result.used = true;
