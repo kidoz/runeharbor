@@ -57,15 +57,19 @@ class QuietLogger final : public runeharbor::util::ILogger
   public:
     void log(runeharbor::util::LogLevel level, std::string_view message) override
     {
-        if (level == runeharbor::util::LogLevel::Warning ||
-            level == runeharbor::util::LogLevel::Error ||
+        if (level == runeharbor::util::LogLevel::Error ||
             level == runeharbor::util::LogLevel::Critical)
+        {
+            errors.push_back(std::string(message));
+        }
+        else if (level == runeharbor::util::LogLevel::Warning)
         {
             warnings.push_back(std::string(message));
         }
     }
 
     std::vector<std::string> warnings;
+    std::vector<std::string> errors;
 };
 
 struct CheckResult
@@ -228,18 +232,28 @@ std::unordered_map<std::string, std::string> indexByLower(const std::vector<std:
     return result;
 }
 
-void absorbLoggerWarnings(CheckResult& result, QuietLogger& logger)
+void absorbLoggerMessages(CheckResult& result, QuietLogger& logger)
 {
     result.metrics["loggerWarnings"] += logger.warnings.size();
-    constexpr size_t kWarningLimit = 20;
+    result.metrics["loggerErrors"] += logger.errors.size();
+
+    constexpr size_t kMessageLimit = 20;
+    for (const auto& error : logger.errors)
+    {
+        if (result.errors.size() < kMessageLimit)
+        {
+            addError(result, error);
+        }
+    }
     for (const auto& warning : logger.warnings)
     {
-        if (result.warnings.size() < kWarningLimit)
+        if (result.warnings.size() < kMessageLimit)
         {
-            result.warnings.push_back(warning);
+            addWarning(result, warning);
         }
     }
     logger.warnings.clear();
+    logger.errors.clear();
 }
 
 bool parseKnownTxt(std::string_view lowerName, const std::vector<uint8_t>& data,
@@ -370,7 +384,7 @@ CheckResult checkImageArchive(const fs::path& dataRoot, std::string_view archive
     if (!archive.open(*path))
     {
         addError(result, "failed to open archive");
-        absorbLoggerWarnings(result, logger);
+        absorbLoggerMessages(result, logger);
         return result;
     }
 
@@ -432,7 +446,7 @@ CheckResult checkImageArchive(const fs::path& dataRoot, std::string_view archive
         result.metrics["decodedBytes"] += data->size();
     }
 
-    absorbLoggerWarnings(result, logger);
+    absorbLoggerMessages(result, logger);
     return result;
 }
 
@@ -454,7 +468,7 @@ CheckResult checkSprites(const fs::path& dataRoot, QuietLogger& logger)
     if (!archive.open(*path))
     {
         addError(result, "failed to open archive");
-        absorbLoggerWarnings(result, logger);
+        absorbLoggerMessages(result, logger);
         return result;
     }
 
@@ -490,7 +504,7 @@ CheckResult checkSprites(const fs::path& dataRoot, QuietLogger& logger)
         }
     }
 
-    absorbLoggerWarnings(result, logger);
+    absorbLoggerMessages(result, logger);
     return result;
 }
 
@@ -512,7 +526,7 @@ CheckResult checkGameMaps(const fs::path& dataRoot, QuietLogger& logger)
     if (!archive.open(*path))
     {
         addError(result, "failed to open archive");
-        absorbLoggerWarnings(result, logger);
+        absorbLoggerMessages(result, logger);
         return result;
     }
 
@@ -567,7 +581,7 @@ CheckResult checkGameMaps(const fs::path& dataRoot, QuietLogger& logger)
         result.metrics["decodedBytes"] += data->size();
     }
 
-    absorbLoggerWarnings(result, logger);
+    absorbLoggerMessages(result, logger);
     return result;
 }
 
@@ -589,7 +603,7 @@ CheckResult checkEvents(const fs::path& dataRoot, QuietLogger& logger)
     if (!archive.open(*path))
     {
         addError(result, "failed to open archive");
-        absorbLoggerWarnings(result, logger);
+        absorbLoggerMessages(result, logger);
         return result;
     }
 
@@ -689,7 +703,7 @@ CheckResult checkEvents(const fs::path& dataRoot, QuietLogger& logger)
         }
     }
 
-    absorbLoggerWarnings(result, logger);
+    absorbLoggerMessages(result, logger);
     return result;
 }
 
@@ -730,7 +744,7 @@ CheckResult checkSoundArchive(const fs::path& installRoot, const fs::path& dataR
     if (!archive.open(*path))
     {
         addError(result, "failed to open Audio.snd");
-        absorbLoggerWarnings(result, logger);
+        absorbLoggerMessages(result, logger);
         return result;
     }
 
@@ -741,6 +755,7 @@ CheckResult checkSoundArchive(const fs::path& installRoot, const fs::path& dataR
 
     const auto files = archive.listFiles();
     result.metrics["entries"] = files.size();
+    bool acceptedCorruptEntry = false;
     for (const auto& filename : files)
     {
         if (filename.empty())
@@ -754,6 +769,7 @@ CheckResult checkSoundArchive(const fs::path& installRoot, const fs::path& dataR
             if (isAcceptedFailure(filename))
             {
                 result.metrics["acceptedFailures"]++;
+                acceptedCorruptEntry = true;
                 addWarning(result, "accepted corrupt sound entry " + filename);
                 continue;
             }
@@ -770,7 +786,16 @@ CheckResult checkSoundArchive(const fs::path& installRoot, const fs::path& dataR
         result.metrics["decodedBytes"] += data->size();
     }
 
-    absorbLoggerWarnings(result, logger);
+    absorbLoggerMessages(result, logger);
+
+    // The accepted retail defect also logs a zlib error from SndArchive; it is
+    // the same 02Flame01.wav entry, not a new failure.
+    if (acceptedCorruptEntry)
+    {
+        std::erase_if(result.errors, [](const std::string& error)
+                      { return error.find("zlib decompression failed") != std::string::npos; });
+        result.ok = result.errors.empty();
+    }
     return result;
 }
 
