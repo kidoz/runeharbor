@@ -94,7 +94,48 @@ constexpr SkillAlias kSkillAliases[] = {
 
 int Character::effectiveStat(int statIndex) const
 {
-    return baseStats.byIndex(statIndex) + timedStatBonus(statIndex);
+    if (statIndex < 0 || statIndex >= Stats::kCount)
+    {
+        return 0;
+    }
+    return baseStats.byIndex(statIndex) + timedStatBonus(statIndex) +
+           equipmentBonuses.statBonus[static_cast<size_t>(statIndex)];
+}
+
+int Character::effectiveResistance(int index) const
+{
+    if (index < 0 || index >= 6)
+    {
+        return 0;
+    }
+
+    int base = 0;
+    switch (index)
+    {
+    case 0:
+        base = fireResistance;
+        break;
+    case 1:
+        base = airResistance;
+        break;
+    case 2:
+        base = waterResistance;
+        break;
+    case 3:
+        base = earthResistance;
+        break;
+    case 4:
+        base = mindResistance;
+        break;
+    case 5:
+        base = bodyResistance;
+        break;
+    default:
+        return 0;
+    }
+
+    return base + equipmentBonuses.resistanceBonus[static_cast<size_t>(index)] +
+           timedResistanceBonus(index);
 }
 
 void Character::addTimedEffect(TimedEffect effect)
@@ -249,7 +290,9 @@ void Character::recalculateDerived()
         classHpBase = 8;
         break;
     }
-    maxHitPoints = classHpBase + (classHpBase + endBonus) * (level - 1);
+    maxHitPoints =
+        classHpBase + (classHpBase + endBonus) * (level - 1) + equipmentBonuses.hitPoints;
+    maxHitPoints = std::max(1, maxHitPoints);
     hitPoints = std::min(hitPoints, maxHitPoints);
 
     // SP: base from intellect/personality + level + class bonus
@@ -290,11 +333,14 @@ void Character::recalculateDerived()
         break;
     }
     int spBonus = std::max(intBonus, perBonus); // Use whichever is higher
-    maxSpellPoints = classSpBase + (classSpBase > 0 ? (classSpBase + spBonus) * (level - 1) : 0);
+    maxSpellPoints = classSpBase + (classSpBase > 0 ? (classSpBase + spBonus) * (level - 1) : 0) +
+                     equipmentBonuses.spellPoints;
+    maxSpellPoints = std::max(0, maxSpellPoints);
     spellPoints = std::min(spellPoints, maxSpellPoints);
 
-    // AC: base from speed, plus timed buff bonuses (Shield, Stone Skin, ...).
-    armorClass = std::max(0, (stats.speed - 10) / 2) + timedArmorClassBonus();
+    // AC: base from speed, plus equipment, plus timed buffs (Shield, ...).
+    armorClass =
+        std::max(0, (stats.speed - 10) / 2) + equipmentBonuses.armorClass + timedArmorClassBonus();
     armorClass = std::max(0, armorClass);
 }
 

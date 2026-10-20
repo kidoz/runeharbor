@@ -1009,22 +1009,22 @@ int CombatSystem::calculateMonsterDamage(int baseDamage, DamageElement type,
     switch (type)
     {
     case DamageElement::Fire:
-        resistance = ch.fireResistance + ch.timedResistanceBonus(0);
+        resistance = ch.effectiveResistance(0);
         break;
     case DamageElement::Air:
-        resistance = ch.airResistance + ch.timedResistanceBonus(1);
+        resistance = ch.effectiveResistance(1);
         break;
     case DamageElement::Water:
-        resistance = ch.waterResistance + ch.timedResistanceBonus(2);
+        resistance = ch.effectiveResistance(2);
         break;
     case DamageElement::Earth:
-        resistance = ch.earthResistance + ch.timedResistanceBonus(3);
+        resistance = ch.effectiveResistance(3);
         break;
     case DamageElement::Mind:
-        resistance = ch.mindResistance + ch.timedResistanceBonus(4);
+        resistance = ch.effectiveResistance(4);
         break;
     case DamageElement::Body:
-        resistance = ch.bodyResistance + ch.timedResistanceBonus(5);
+        resistance = ch.effectiveResistance(5);
         break;
     case DamageElement::Physical:
         // Approximation: MM7 treats armor class as a hit-avoidance/damage-

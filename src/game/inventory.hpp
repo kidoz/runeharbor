@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -141,7 +142,23 @@ class Inventory
     // requirement (FUN_004926F8) — a sword needs Sword learned, plate needs
     // Plate, etc. When null, the skill gate is skipped (slot validity only).
     // Also used by useItem to mutate character HP/SP/conditions/spellbook.
-    void setParty(Party* party) { party_ = party; }
+    void setParty(Party* party)
+    {
+        party_ = party;
+        // Resolve bonuses only when something is equipped; binding an empty
+        // inventory must not clobber caller-set derived stats (tests, creation).
+        for (int i = 0; i < static_cast<int>(inventories_.size()); ++i)
+        {
+            const bool hasEquipped =
+                std::any_of(inventories_[static_cast<size_t>(i)].equipped.begin(),
+                            inventories_[static_cast<size_t>(i)].equipped.end(),
+                            [](const Item& item) { return item.valid(); });
+            if (hasEquipped)
+            {
+                refreshEquipmentBonuses(i);
+            }
+        }
+    }
 
     // Optional spell system: when set, useItem can apply spell effects (potion
     // heal/cure, scroll cast). When null, usable items are refused.
@@ -163,6 +180,12 @@ class Inventory
     bool canEquip(int characterIndex, int itemId) const;
     bool equip(int characterIndex, int backpackSlot);
     bool unequip(int characterIndex, EquipSlot slot);
+
+    // Recompute the character's EquipmentBonuses from its equipped items and
+    // recalculate derived stats. Called automatically by equip/unequip,
+    // removeItem and setInventories; expose it for explicit resyncs.
+    void refreshEquipmentBonuses(int characterIndex);
+    void refreshAllEquipmentBonuses();
 
     // Backpack operations
     bool addToBackpack(int characterIndex, const Item& item);
@@ -208,10 +231,15 @@ class Inventory
     void setInventories(std::array<CharacterInventory, 4> inventories)
     {
         inventories_ = std::move(inventories);
+        refreshAllEquipmentBonuses();
     }
 
     // Clear all runtime items while keeping the loaded item definition table.
-    void reset() { inventories_ = {}; }
+    void reset()
+    {
+        inventories_ = {};
+        refreshAllEquipmentBonuses();
+    }
 
   private:
     EquipType categorizeItem(const formats::ItemEntry& entry) const;

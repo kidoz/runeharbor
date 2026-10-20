@@ -205,6 +205,22 @@ void InGameState::enter()
         hud_.setMapScene(ctx.shared->mapScene);
     }
 
+    // QA/screenshot hook: equip every starting item that passes the skill gate.
+    if (SDL_getenv("RUNEHARBOR_AUTO_EQUIP") && ctx.shared && ctx.shared->inventory)
+    {
+        for (int c = 0; c < game::kPartySize; ++c)
+        {
+            for (int slot = 0; slot < game::kBackpackSlots; ++slot)
+            {
+                const auto& item = ctx.shared->inventory->getInventory(c).backpack[slot];
+                if (item.valid() && ctx.shared->inventory->canEquip(c, item.itemId))
+                {
+                    (void)ctx.shared->inventory->equip(c, slot);
+                }
+            }
+        }
+    }
+
     dialogue_.setOnDismiss([this]() { statusLine_ = "Dialogue closed"; });
     dialogue_.setOnChoice(
         [this](int choiceId)

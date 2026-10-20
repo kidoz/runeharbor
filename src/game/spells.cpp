@@ -28,18 +28,18 @@ int resistanceForSchool(const Character& target, SpellSchool school)
     switch (school)
     {
     case SpellSchool::Fire:
-        return target.fireResistance + target.timedResistanceBonus(0);
+        return target.effectiveResistance(0);
     case SpellSchool::Air:
-        return target.airResistance + target.timedResistanceBonus(1);
+        return target.effectiveResistance(1);
     case SpellSchool::Water:
-        return target.waterResistance + target.timedResistanceBonus(2);
+        return target.effectiveResistance(2);
     case SpellSchool::Earth:
-        return target.earthResistance + target.timedResistanceBonus(3);
+        return target.effectiveResistance(3);
     case SpellSchool::Mind:
     case SpellSchool::Spirit:
-        return target.mindResistance + target.timedResistanceBonus(4);
+        return target.effectiveResistance(4);
     case SpellSchool::Body:
-        return target.bodyResistance + target.timedResistanceBonus(5);
+        return target.effectiveResistance(5);
     default:
         return 0;
     }

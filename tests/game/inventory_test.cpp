@@ -220,6 +220,69 @@ TEST_CASE("Inventory ring slot logic", "[game][inventory]")
     }
 }
 
+TEST_CASE("Equipped armor and enchantments change derived stats", "[game][inventory][equipment]")
+{
+    NullLogger logger;
+    Inventory inv(logger);
+
+    ItemEntry armor;
+    armor.id = 10;
+    armor.name = "Leather Armor";
+    armor.equipStat = "armor";
+    armor.skillGroup = "Misc"; // no skill gate for the test
+    armor.mod1 = "4";          // base AC
+    armor.mod2 = 2;            // quality AC
+
+    ItemEntry ring;
+    ring.id = 11;
+    ring.name = "Gold Ring";
+    ring.equipStat = "ring";
+    ring.skillGroup = "Misc";
+
+    inv.loadItemData({armor, ring});
+
+    Party party;
+    inv.setParty(&party);
+    auto& ch = party.member(0);
+    const int baseAC = ch.armorClass;
+    const int baseMight = ch.stats.might;
+
+    REQUIRE(inv.addToBackpack(0, makeItem(10)));
+    REQUIRE(inv.equip(0, 0));
+    CHECK(ch.armorClass == baseAC + 6);
+    CHECK(ch.stats.might == baseMight);
+
+    REQUIRE(inv.unequip(0, EquipSlot::Armor));
+    CHECK(ch.armorClass == baseAC);
+
+    // Standard enchantment 1 ("of Might") on body armor gives +5 Might.
+    inv.reset();
+    Item enchantedArmor = makeItem(10);
+    enchantedArmor.enchantId = 1;
+    REQUIRE(inv.addToBackpack(0, enchantedArmor));
+    REQUIRE(inv.equip(0, 0));
+    CHECK(ch.stats.might == baseMight + 5);
+    CHECK(ch.effectiveStat(0) == baseMight + 5);
+
+    // Standard enchantment 10 ("of Defense") on a ring gives +10 AC.
+    inv.reset();
+    Item enchantedRing = makeItem(11);
+    enchantedRing.enchantId = 10;
+    REQUIRE(inv.addToBackpack(0, enchantedRing));
+    REQUIRE(inv.equip(0, 0));
+    CHECK(ch.armorClass == baseAC + 10);
+
+    // Broken armor stops contributing AC until repaired.
+    inv.reset();
+    Item brokenArmor = makeItem(10);
+    brokenArmor.broken = true;
+    REQUIRE(inv.addToBackpack(0, brokenArmor));
+    REQUIRE(inv.equip(0, 0));
+    CHECK(ch.armorClass == baseAC);
+    REQUIRE(inv.repairItem(0, EquipSlot::Armor));
+    CHECK(ch.armorClass == baseAC + 6);
+}
+
 TEST_CASE("Inventory canEquip", "[game][inventory]")
 {
     NullLogger logger;

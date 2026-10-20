@@ -77,6 +77,157 @@ std::optional<int> parseIntStrict(std::string_view raw)
     }
     return value;
 }
+
+// Armor items store their base AC in Mod1 (a flat number) and a quality bonus
+// in Mod2; weapons use Mod1 for damage dice. Decide by item type, not slot:
+// the off hand can hold a dagger/sword in MM7 as well as a shield.
+bool isArmorEquipType(EquipType type)
+{
+    switch (type)
+    {
+    case EquipType::Armor:
+    case EquipType::Shield:
+    case EquipType::Helmet:
+    case EquipType::Belt:
+    case EquipType::Cloak:
+    case EquipType::Gauntlets:
+    case EquipType::Boots:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Weapon Mod1 is dice ("3d3"); armor Mod1 is a flat AC number.
+int parseFlatModifier(std::string_view text)
+{
+    const std::string trimmed = util::trim(std::string(text));
+    if (trimmed.empty())
+    {
+        return 0;
+    }
+    int value = 0;
+    const char* begin = trimmed.data();
+    const char* end = trimmed.data() + trimmed.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, value);
+    if (ec != std::errc{} || ptr != end)
+    {
+        return 0;
+    }
+    return value;
+}
+
+// Column order in STDITEMS.TXT: Arm, Shld, Helm, Belt, Cape, Gaunt, Boot,
+// Ring, Amul.
+enum class StdSlot : uint8_t
+{
+    Arm = 0,
+    Shield,
+    Helm,
+    Belt,
+    Cape,
+    Gauntlets,
+    Boots,
+    Ring,
+    Amulet,
+};
+
+std::optional<StdSlot> standardSlotFor(EquipType type)
+{
+    switch (type)
+    {
+    case EquipType::Armor:
+        return StdSlot::Arm;
+    case EquipType::Shield:
+        return StdSlot::Shield;
+    case EquipType::Helmet:
+        return StdSlot::Helm;
+    case EquipType::Belt:
+        return StdSlot::Belt;
+    case EquipType::Cloak:
+        return StdSlot::Cape;
+    case EquipType::Gauntlets:
+        return StdSlot::Gauntlets;
+    case EquipType::Boots:
+        return StdSlot::Boots;
+    case EquipType::Ring:
+        return StdSlot::Ring;
+    case EquipType::Amulet:
+        return StdSlot::Amulet;
+    default:
+        return std::nullopt; // weapons have no standard-enchant columns
+    }
+}
+
+// Standard enchantment rows from STDITEMS.TXT, indexed by enchantId - 1.
+// Columns follow StdSlot order (Arm, Shld, Helm, Belt, Cape, Gaunt, Boot,
+// Ring, Amul). Item.enchantId is 1-based; 0 means no enchantment. The shipped
+// table is truncated after Fire Resistance, so later rows are not modelled.
+constexpr std::array<std::array<int, 9>, 11> kStandardEnchantValues = {{
+    {5, 0, 10, 10, 10, 10, 5, 10, 10},  // 1  of Might
+    {5, 0, 10, 10, 10, 10, 5, 10, 10},  // 2  of Thought
+    {5, 0, 10, 10, 10, 10, 10, 10, 10}, // 3  of Charm
+    {5, 0, 10, 10, 10, 10, 5, 10, 10},  // 4  of Vigor
+    {5, 0, 10, 10, 10, 10, 5, 10, 10},  // 5  of Precision
+    {5, 0, 10, 10, 10, 10, 25, 10, 10}, // 6  of Speed
+    {5, 0, 10, 10, 10, 10, 10, 10, 10}, // 7  of Luck
+    {10, 5, 5, 0, 10, 5, 10, 10, 10},   // 8  of Health
+    {10, 5, 10, 0, 10, 10, 10, 10, 10}, // 9  of Magic
+    {20, 20, 10, 0, 10, 10, 5, 10, 10}, // 10 of Defense
+    {10, 10, 5, 0, 10, 15, 5, 10, 10},  // 11 of Fire Resistance
+}};
+
+void applyStandardEnchantment(EquipmentBonuses& bonuses, int enchantId, std::optional<StdSlot> slot)
+{
+    if (enchantId <= 0 || enchantId > static_cast<int>(kStandardEnchantValues.size()) ||
+        !slot.has_value())
+    {
+        return;
+    }
+
+    const int value =
+        kStandardEnchantValues[static_cast<size_t>(enchantId - 1)][static_cast<size_t>(*slot)];
+
+    switch (enchantId)
+    {
+    case 1:
+        bonuses.statBonus[0] += value; // Might
+        break;
+    case 2:
+        bonuses.statBonus[1] += value; // Intellect
+        break;
+    case 3:
+        bonuses.statBonus[2] += value; // Personality
+        break;
+    case 4:
+        bonuses.statBonus[3] += value; // Endurance
+        break;
+    case 5:
+        bonuses.statBonus[4] += value; // Accuracy
+        break;
+    case 6:
+        bonuses.statBonus[5] += value; // Speed
+        break;
+    case 7:
+        bonuses.statBonus[6] += value; // Luck
+        break;
+    case 8:
+        bonuses.hitPoints += value;
+        break;
+    case 9:
+        bonuses.spellPoints += value;
+        break;
+    case 10:
+        bonuses.armorClass += value;
+        break;
+    case 11:
+        bonuses.resistanceBonus[0] += value; // Fire
+        break;
+    default:
+        break;
+    }
+}
+
 } // namespace
 
 Inventory::Inventory(util::ILogger& logger) : logger_(logger) {}
@@ -306,6 +457,7 @@ bool Inventory::equip(int characterIndex, int backpackSlot)
             // No other free slot: swap into the source slot.
             inv.backpack[static_cast<size_t>(backpackSlot)] = inv.equipped[slotIdx];
             inv.equipped[slotIdx] = item;
+            refreshEquipmentBonuses(characterIndex);
             return true;
         }
         inv.backpack[static_cast<size_t>(freeSlot)] = inv.equipped[slotIdx];
@@ -313,6 +465,7 @@ bool Inventory::equip(int characterIndex, int backpackSlot)
 
     inv.equipped[slotIdx] = item;
     inv.backpack[static_cast<size_t>(backpackSlot)] = Item{};
+    refreshEquipmentBonuses(characterIndex);
     return true;
 }
 
@@ -331,12 +484,61 @@ bool Inventory::unequip(int characterIndex, EquipSlot slot)
         {
             inv.backpack[static_cast<size_t>(i)] = inv.equipped[slotIdx];
             inv.equipped[slotIdx] = Item{};
+            refreshEquipmentBonuses(characterIndex);
             return true;
         }
     }
 
     logger_.warning("No free backpack slot to unequip item");
     return false;
+}
+
+void Inventory::refreshEquipmentBonuses(int characterIndex)
+{
+    if (party_ == nullptr || characterIndex < 0 ||
+        characterIndex >= static_cast<int>(inventories_.size()))
+    {
+        return;
+    }
+
+    EquipmentBonuses bonuses;
+    const auto& inv = inventories_[static_cast<size_t>(characterIndex)];
+
+    for (size_t i = 0; i < inv.equipped.size(); ++i)
+    {
+        const Item& item = inv.equipped[i];
+        if (!item.valid() || item.broken)
+        {
+            continue; // broken gear stops contributing until repaired
+        }
+
+        const auto* def = getItemDef(item.itemId);
+        if (def == nullptr)
+        {
+            continue;
+        }
+
+        const EquipType type = getEquipType(item.itemId);
+        if (isArmorEquipType(type))
+        {
+            // Armor Mod1 is base AC and Mod2 is the quality bonus.
+            bonuses.armorClass += std::max(0, parseFlatModifier(def->mod1) + def->mod2);
+        }
+
+        applyStandardEnchantment(bonuses, item.enchantId, standardSlotFor(type));
+    }
+
+    Character& character = party_->member(characterIndex);
+    character.equipmentBonuses = bonuses;
+    character.recalculateDerived();
+}
+
+void Inventory::refreshAllEquipmentBonuses()
+{
+    for (int i = 0; i < static_cast<int>(inventories_.size()); ++i)
+    {
+        refreshEquipmentBonuses(i);
+    }
 }
 
 int Inventory::spellIdForScroll(int itemId) const
@@ -582,6 +784,7 @@ bool Inventory::repairItem(int characterIndex, EquipSlot slot)
     if (!item.valid() || !item.broken)
         return false;
     item.broken = false;
+    refreshEquipmentBonuses(characterIndex);
     return true;
 }
 
@@ -650,6 +853,7 @@ bool Inventory::removeItem(int itemId)
     if (loc->equipped)
     {
         inv.equipped[static_cast<size_t>(loc->slotIndex)] = Item{};
+        refreshEquipmentBonuses(loc->characterIndex);
     }
     else
     {

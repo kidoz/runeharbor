@@ -97,6 +97,12 @@ Application::Application(util::ILogger& logger, platform::IWindow& window)
     {
         spellSystem_->setGameWorld(gameWorld_.get());
     }
+    if (inventory_ && gameWorld_)
+    {
+        // Bind once at startup so equip/useItem skill checks and equipment
+        // bonuses work without requiring the inventory panel to be opened.
+        inventory_->setParty(&gameWorld_->party());
+    }
 
     configureGameplayCallbacks();
     initDefaultParty();

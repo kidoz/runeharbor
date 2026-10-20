@@ -235,9 +235,9 @@ void CharacterStatsWidget::renderStatsTab(graphics::IRenderer&, const graphics::
     textY += 4;
 
     line(std::format("Resistances: Fire {}  Air {}  Water {}  Earth {}  Mind {}  Body {}",
-                     character.fireResistance, character.airResistance, character.waterResistance,
-                     character.earthResistance, character.mindResistance,
-                     character.bodyResistance));
+                     character.effectiveResistance(0), character.effectiveResistance(1),
+                     character.effectiveResistance(2), character.effectiveResistance(3),
+                     character.effectiveResistance(4), character.effectiveResistance(5)));
     textY += 4;
 
     const game::ConditionIndex worst = character.worstActiveCondition();

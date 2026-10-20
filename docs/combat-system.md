@@ -1161,6 +1161,10 @@ Read via: `GetPrivateProfileIntA("debug", "nodamage", 0, ...)`
   roll plus a Master-rank training bonus; bow training also improves accuracy.
   Melee accuracy and might bonuses now use effective stats, so timed buffs
   (Bless, Heroism, ...) affect attacks.
+- Equipped armor contributes AC through `Character::equipmentBonuses`; monster
+  hit chance and physical damage reduction read the resulting `armorClass`.
+  Elemental damage uses `Character::effectiveResistance()`, which sums base,
+  equipment, and timed buffs.
 
 ### Architecture Mapping
 

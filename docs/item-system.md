@@ -3,7 +3,7 @@ title: "Item System"
 summary: "The item system defines item records, equipment, enchantments, generation, and merchant behavior."
 doc_type: reference
 status: partial
-last_updated: 2026-08-01
+last_updated: 2026-10-20
 ---
 # Item System
 
@@ -811,6 +811,23 @@ They also have fixed enchantments and unique names. The distinction affects:
 | `DAT_005c84f8` | char[] | Formatted item name buffer (used by GetFormattedName) |
 
 ---
+
+## Integration notes (RuneHarbor)
+
+- `Inventory::refreshEquipmentBonuses()` resolves equipped gear into
+  `Character::equipmentBonuses` and recalculates derived stats. It runs after
+  equip/unequip/remove/repair, after `setInventories()` (save load), and when a
+  party is bound with items already equipped.
+- Armor slots (body, shield, helm, belt, cloak, gauntlets, boots) contribute
+  `Mod1 + Mod2` AC. Broken items contribute nothing until repaired.
+- Standard enchantments 1-11 from `STDITEMS.TXT` are resolved per slot
+  (Might/Intellect/Personality/Endurance/Accuracy/Speed/Luck, HP, SP, AC, Fire
+  Resistance). The shipped table is truncated after Fire Resistance, so later
+  standard rows and special enchantments (`SPCITEMS.TXT`) are not modelled yet.
+- Weapon damage already comes from the equipped main-hand/bow item's `Mod1`
+  dice plus `Mod2` in `CombatSystem::playerMeleeAttack` / `playerRangedAttack`.
+- `Character::effectiveStat()` and `effectiveResistance()` include equipment;
+  the character sheet shows the resulting AC, stats, and resistances.
 
 ## Notes
 

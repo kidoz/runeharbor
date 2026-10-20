@@ -258,6 +258,17 @@ struct TimedEffect
     std::array<int, 6> resistanceBonus = {};
 };
 
+/// Additive bonuses resolved from currently equipped items. The Inventory
+/// refreshes this whenever equipment changes; `recalculateDerived` applies it.
+struct EquipmentBonuses
+{
+    std::array<int, Stats::kCount> statBonus = {};
+    std::array<int, 6> resistanceBonus = {}; // Fire, Air, Water, Earth, Mind, Body
+    int armorClass = 0;
+    int hitPoints = 0;
+    int spellPoints = 0;
+};
+
 struct Character
 {
     std::string name = "New Hero";
@@ -360,6 +371,13 @@ struct Character
     int timedStatBonus(int statIndex) const;
     int timedArmorClassBonus() const;
     int timedResistanceBonus(int index) const; // 0..5 = Fire..Body
+
+    // Equipment bonuses resolved by Inventory::refreshEquipmentBonuses().
+    EquipmentBonuses equipmentBonuses;
+
+    // Base resistance + equipment + timed buffs. Use this for combat and the
+    // character sheet; the raw `*Resistance` fields are base values only.
+    int effectiveResistance(int index) const; // 0..5 = Fire..Body
 
     // Returns the most severe active condition per the MM7 priority order
     // (Eradicated > Stoned > Dead > Zombie > Unconscious > Asleep > Paralyzed >
