@@ -1,5 +1,6 @@
 site_name: RuneHarbor Documentation
 site_description: Engine and contributor documentation for RuneHarbor.
+site_author: Aleksandr Pavlov
 repo_url: https://github.com/apavlov/runeharbor
 repo_name: apavlov/runeharbor
 edit_uri: edit/main/docs/
