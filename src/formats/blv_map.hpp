@@ -399,6 +399,9 @@ struct ParsedDecoration
     int32_t x = 0;
     int32_t y = 0;
     int32_t z = 0;
+    // Facing direction in MM7 turn-units (0..2047). The "Party Start" /
+    // "North Start" / ... markers store the party's initial facing here.
+    uint16_t direction = 0;
     uint32_t eventId = 0;
     std::string name;
     bool hidden = false;

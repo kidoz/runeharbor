@@ -426,6 +426,10 @@ class Application
 
     // Character helpers (used by initDefaultParty)
     void initDefaultParty();
+    // Fresh CLI/quick-start boot: apply class skills, derived stats, and the
+    // starting kit to the GameWorld's default party. The normal title ->
+    // character-creation path fills this in through commitPartyToGameWorld().
+    void prepareDefaultGameParty();
     void resetForNewGame();
     void commitPartyToGameWorld();
     void updateCharacterForFace(Character& ch);

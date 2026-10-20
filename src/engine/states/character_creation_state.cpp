@@ -562,10 +562,12 @@ std::optional<GameStateId> CharacterCreationState::update()
             if (ctx.shared->gameWorld)
             {
                 auto& party = ctx.shared->gameWorld->party();
-                // MM7 starts the new game at this exact coordinate on Emerald Island
-                // RE doc 27-game-flow.md §7.2: X=12552, Y=1816, Z=512, angles=0
-                party.setWorldPosition(12552.0f, 1816.0f, 512.0f);
-                party.setOrientation(0.0f, 0.0f);
+                // Fallback start transform. The authoritative new-game position
+                // and facing come from the map's "Party Start" decoration (the
+                // engine applies it in Application::applyMapEntryPoint); this
+                // copy is only used if a map has no start marker.
+                party.setWorldPosition(12552.0f, 800.0f, 193.0f);
+                party.setOrientation(512.0f, 0.0f);
 
                 // Starting provisions (RE: Party::initDefault sets gold=200,
                 // food=7). Starting equipment is granted once by
@@ -574,11 +576,9 @@ std::optional<GameStateId> CharacterCreationState::update()
                 party.setGold(std::max(party.gold(), 200));
                 party.setFood(std::max(party.food(), 7));
 
-                ctx.shared->arrivalOverrideActive = true;
-                ctx.shared->arrivalX = 12552.0f;
-                ctx.shared->arrivalY = 1816.0f;
-                ctx.shared->arrivalZ = 512.0f;
-                ctx.shared->arrivalYaw = 0.0f;
+                // Do not seed an arrival override: the map's named start marker
+                // supplies both the correct spawn point and the intended facing.
+                ctx.shared->arrivalOverrideActive = false;
             }
 
             ctx.shared->quickStartReady = true;

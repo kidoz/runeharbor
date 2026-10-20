@@ -672,18 +672,20 @@ ParsedFace ODMMap::convertFace(const ODMFaceOnDisk& df, const std::string& texNa
 {
     ParsedFace face;
 
-    // Plane (fixed-point integer, /65536 for float)
+    // Plane (fixed-point integer, /65536 for float). MM7 stores the plane as
+    // Nx*x + Ny*y + Nz*z + D = 0; ParsedFace/physics use the equivalent
+    // N.dot(p) - normalFDist = 0 form, so the stored D is negated here.
     face.normalX = df.normalX;
     face.normalY = df.normalY;
     face.normalZ = df.normalZ;
-    face.normalDistance = df.normalDist;
+    face.normalDistance = -df.normalDist;
 
     // Compute float normal from fixed-point
     constexpr float kFixedPointScale = 1.0f / 65536.0f;
     face.normalFX = static_cast<float>(df.normalX) * kFixedPointScale;
     face.normalFY = static_cast<float>(df.normalY) * kFixedPointScale;
     face.normalFZ = static_cast<float>(df.normalZ) * kFixedPointScale;
-    face.normalFDist = static_cast<float>(df.normalDist) * kFixedPointScale;
+    face.normalFDist = -static_cast<float>(df.normalDist) * kFixedPointScale;
 
     // Z calculation
     face.zCalc1 = df.zCalc1;
@@ -783,6 +785,7 @@ bool ODMMap::parseDecorations(const std::vector<uint8_t>& data, size_t& offset)
         dec.x = disk.x;
         dec.y = disk.y;
         dec.z = disk.z;
+        dec.direction = disk.direction;
         dec.eventId = disk.eventId;
         dec.hidden = (disk.flags & 0x0020) != 0; // Invisible flag
 
@@ -790,6 +793,12 @@ bool ODMMap::parseDecorations(const std::vector<uint8_t>& data, size_t& offset)
         {
             dec.name = extractString(reinterpret_cast<const char*>(names + i * kDecorNameSize),
                                      kDecorNameSize);
+        }
+
+        if (dec.name.find("Start") != std::string::npos)
+        {
+            logger.debug(std::format("ODM start marker '{}' at ({},{},{}) direction={}", dec.name,
+                                     dec.x, dec.y, dec.z, dec.direction));
         }
 
         mapData.decorations.push_back(std::move(dec));

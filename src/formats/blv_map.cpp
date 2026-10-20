@@ -690,6 +690,7 @@ bool BLVMap::parseTrailingData(const std::vector<uint8_t>& data, size_t& offset)
         out.x = decor->x;
         out.y = decor->y;
         out.z = decor->z;
+        out.direction = decor->direction;
         out.eventId = decor->eventId;
         offset += decorSize;
     }

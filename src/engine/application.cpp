@@ -174,14 +174,16 @@ void groundPartyToOutdoorTerrain(game::Party& party, const MapScene* scene,
     }
 
     const float beforeZ = party.worldZ();
+    const auto& odm = scene->getODMData();
+    // Use the combined terrain + model floor sampler: Emerald Island's start
+    // marker sits on the pier model, not on the heightmap.
     const float floor =
-        sampleOutdoorTerrainHeight(scene->getODMData(), party.worldX(), party.worldY());
-    const float newZ =
-        clampOutdoorPartyZ(scene->getODMData(), party.worldX(), party.worldY(), party.worldZ());
+        sampleOutdoorFloorHeight(odm, party.worldX(), party.worldY(), beforeZ + 48.0f);
+    const float newZ = clampOutdoorPartyZ(odm, party.worldX(), party.worldY(), party.worldZ());
     party.setWorldPosition(party.worldX(), party.worldY(), newZ);
 
-    fprintf(stderr, "[GROUND/%s] pos=(%.1f,%.1f) z: %.1f -> %.1f (terrain floor=%.1f) yaw=%.1f\n",
-            tag, party.worldX(), party.worldY(), beforeZ, newZ, floor, party.yaw());
+    fprintf(stderr, "[GROUND/%s] pos=(%.1f,%.1f) z: %.1f -> %.1f (floor=%.1f) yaw=%.1f\n", tag,
+            party.worldX(), party.worldY(), beforeZ, newZ, floor, party.yaw());
 }
 } // namespace
 
@@ -737,23 +739,20 @@ void Application::configureBootFlow(const std::string& mapName, bool preferOutdo
     pendingArrivalOverride_.active = false;
     pendingTransition_ = {};
 
-    // A direct boot of the party's current map is equivalent to resuming the
-    // current world state, not entering through a map transition. Preserve the
-    // canonical new-game position and yaw instead of replacing them with a
-    // nearby "Party Start" decoration intended for transition fallback.
-    if (autoLoad && gameWorld_ && !mapName.empty())
+    // A direct map boot starts a fresh party, so the map's named start marker
+    // ("Party Start" / "North Start" / ...) is authoritative for both position
+    // and facing. Do not seed an arrival override from the party's hard-coded
+    // new-game transform: that transform is only a fallback (and the post-death
+    // respawn point), not the actual Emerald Island start.
+    //
+    // Saved games carry their own arrival override through the load path.
+
+    // A CLI/quick-start map boot starts a fresh party. Give it the class
+    // skills and starting kit that character creation normally supplies, so
+    // the inventory and spellbook are not empty on first entry.
+    if (autoLoad && !mapName.empty())
     {
-        const std::string bootMap = toLower(normalizeMapName(mapName, preferOutdoor));
-        const std::string partyMap =
-            toLower(normalizeMapName(gameWorld_->party().currentMap(), preferOutdoor));
-        if (bootMap == partyMap)
-        {
-            pendingArrivalOverride_.active = true;
-            pendingArrivalOverride_.x = gameWorld_->party().worldX();
-            pendingArrivalOverride_.y = gameWorld_->party().worldY();
-            pendingArrivalOverride_.z = gameWorld_->party().worldZ();
-            pendingArrivalOverride_.yaw = gameWorld_->party().yaw();
-        }
+        prepareDefaultGameParty();
     }
 
     // Sync to shared data
@@ -1105,6 +1104,18 @@ void Application::captureDevScreenshot()
     if (++devFrameCounter_ < targetFrame)
     {
         return;
+    }
+
+    if (gameWorld_ && mapScene)
+    {
+        const auto& party = gameWorld_->party();
+        const auto eye = camera.getPosition();
+        const auto target = camera.getTarget();
+        fprintf(stderr,
+                "[SHOT] party=(%.1f,%.1f,%.1f) yaw=%.1f pitch=%.1f map=%s "
+                "cam=(%.1f,%.1f,%.1f) target=(%.1f,%.1f,%.1f)\n",
+                party.worldX(), party.worldY(), party.worldZ(), party.yaw(), party.pitch(),
+                mapScene->getName().c_str(), eye.x, eye.y, eye.z, target.x, target.y, target.z);
     }
 
     if (SDL_Surface* surface = SDL_RenderReadPixels(renderer->getSDLRenderer(), nullptr))
@@ -2896,6 +2907,38 @@ void Application::initDefaultParty()
     updateSkillsForClass(party[3]);
 }
 
+void Application::prepareDefaultGameParty()
+{
+    if (!gameWorld_)
+    {
+        return;
+    }
+
+    // Start from an empty inventory so repeated quick starts do not stack kits.
+    if (inventory_)
+    {
+        inventory_->reset();
+    }
+
+    auto& gp = gameWorld_->party();
+    for (int i = 0; i < game::kPartySize; i++)
+    {
+        Character& ch = gp.member(i);
+        updateCharacterForFace(ch);
+        updateSkillsForClass(ch);
+        ch.baseStats = ch.stats;
+        ch.recalculateDerived();
+        ch.hitPoints = ch.maxHitPoints;
+        ch.spellPoints = ch.maxSpellPoints;
+        if (inventory_)
+        {
+            game::grantStartingEquipment(*inventory_, i, ch);
+        }
+    }
+    gp.setActiveMemberIndex(0);
+    logger.info("Prepared default party for quick start");
+}
+
 void Application::updateCharacterForFace(Character& ch)
 {
     const int groupIdx = game::faceGroupFromFaceId(ch.faceId);
@@ -4453,13 +4496,32 @@ void Application::applyMapEntryPoint()
         return;
     }
 
-    // Outdoor maps mark the default arrival point with a "Party Start" decoration.
-    // ODM spawn points are monster generators, so falling through to them drops the
-    // party wherever the first generator happens to sit (usually far offshore).
+    // Outdoor maps mark named arrival points with decorations. ODM spawn points
+    // are monster generators, so falling through to them drops the party
+    // wherever the first generator happens to sit (usually far offshore).
+    const char* startName = "party start";
+    switch (spawnIndex)
+    {
+    case 1:
+        startName = "north start";
+        break;
+    case 2:
+        startName = "south start";
+        break;
+    case 3:
+        startName = "east start";
+        break;
+    case 4:
+        startName = "west start";
+        break;
+    default:
+        break;
+    }
+
     const auto& outdoorDecorations = mapScene->getODMData().decorations;
     for (const auto& decoration : outdoorDecorations)
     {
-        if (toLower(decoration.name) != "party start")
+        if (toLower(decoration.name) != startName)
         {
             continue;
         }
@@ -4468,7 +4530,18 @@ void Application::applyMapEntryPoint()
                                              static_cast<float>(decoration.y),
                                              static_cast<float>(decoration.z));
         groundPartyToOutdoorTerrain(gameWorld_->party(), mapScene.get(), &logger, "party-start");
-        applyEntryOrientation();
+        // The marker's direction is the party's intended facing (RE: the
+        // decoration record's +0x10 "direction" field). Fall back to the
+        // transition-derived yaw when the marker has no usable direction.
+        const float markerYaw = static_cast<float>(decoration.direction & 0x7FFu);
+        if (decoration.direction <= 2047)
+        {
+            gameWorld_->party().setOrientation(markerYaw, gameWorld_->party().pitch());
+        }
+        else
+        {
+            applyEntryOrientation();
+        }
         return;
     }
 
