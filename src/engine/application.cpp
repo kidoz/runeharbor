@@ -50,6 +50,7 @@
 #include "../ui/dialogue.hpp"
 #include "../util/ilogger.hpp"
 #include "map_transition_resolver.hpp"
+#include "monster_collision.hpp"
 #include "outdoor_terrain.hpp"
 #include "states/character_creation_state.hpp"
 #include "states/credits_state.hpp"
@@ -3549,6 +3550,21 @@ void Application::configureGameplayCallbacks()
         callbacks.onCharacterDowned = [this](int characterIndex)
         { logger.warning(std::format("Combat: party member {} downed", characterIndex)); };
         combatSystem_->setCallbacks(callbacks);
+
+        // Keep monster AI inside the map geometry. The lambda reads the
+        // currently mounted scene, so it follows map transitions automatically.
+        combatSystem_->setMovementValidator(
+            [this](float fromX, float fromY, float fromZ, float toX, float toY, float toZ)
+            {
+                if (!mapScene || !mapScene->isLoaded())
+                {
+                    return true;
+                }
+                const bool indoor = gameWorld_ != nullptr && gameWorld_->isIndoorMap();
+                const formats::BLVMapData* blv = indoor ? &mapScene->getBLVData() : nullptr;
+                const formats::ODMMapData* odm = indoor ? nullptr : &mapScene->getODMData();
+                return canMonsterMove(blv, odm, fromX, fromY, fromZ, toX, toY, toZ);
+            });
     }
 
     if (spellSystem_)

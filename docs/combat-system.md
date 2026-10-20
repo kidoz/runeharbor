@@ -1141,6 +1141,17 @@ Read via: `GetPrivateProfileIntA("debug", "nodamage", 0, ...)`
   the existing world-item pickup list.
 - Monster melee attacks now respect a 256-unit reach; outside it the monster uses
   a shot/spell if available and otherwise resumes pursuing.
+- Monster AI movement is geometry-checked through a host-installed validator
+  (`CombatSystem::setMovementValidator`). Application wires it to
+  `engine::canMonsterMove`:
+  - Indoor: non-portal vertical walls and closed doors block; floors, ceilings,
+    portals, water/lava, invisible faces, and typed ramps/transition faces are
+    passable.
+  - Outdoor: water cells and terrain rises above the 48-unit step height block
+    ground monsters; building walls block. High-flying monsters skip the
+    water/step checks but still collide with walls.
+  - Blocked direct steps fall back to single-axis sliding, so pursuers follow
+    walls instead of stopping dead at corners.
 - Player attacks now respect the same 256-unit melee reach. Beyond it, an
   equipped bow (`EquipSlot::Bow`) fires instead; without a bow the attack is
   rejected as out of reach. A bow is also used at point-blank range when no

@@ -16,6 +16,7 @@ engine_sources = files(
     'engine/ini_config.cpp',
     'engine/map_transition_resolver.cpp',
     'engine/map_scene.cpp',
+    'engine/monster_collision.cpp',
     'engine/physics.cpp',
     'engine/virtual_filesystem.cpp',
     'engine/states/state_context.cpp',

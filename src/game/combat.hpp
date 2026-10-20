@@ -9,6 +9,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "../formats/monsters_parser.hpp"
@@ -225,6 +226,16 @@ class CombatSystem
     void setSpellSystem(SpellSystem* spells) { spellSystem_ = spells; }
     void setCallbacks(const CombatCallbacks& callbacks) { callbacks_ = callbacks; }
 
+    // Optional geometry check for AI movement. Returns true when moving from
+    // (fromX,fromY,fromZ) to (toX,toY,toZ) is allowed. The host installs this so
+    // combat stays independent of map formats.
+    using MovementValidator = std::function<bool(float, float, float, float, float, float)>;
+    void setMovementValidator(MovementValidator validator)
+    {
+        movementValidator_ = std::move(validator);
+    }
+    void clearMovementValidator() { movementValidator_ = {}; }
+
     // Load monster definitions
     void loadMonsterData(const std::vector<formats::MonsterEntry>& monsters);
 
@@ -340,6 +351,9 @@ class CombatSystem
 
   private:
     void updateMonsterAI(MonsterInstance& monster, float deltaMs);
+    // Moves horizontally, sliding along one axis when the direct path is
+    // blocked. Returns true if either movement was applied.
+    bool tryMoveMonster(MonsterInstance& monster, float targetX, float targetY);
     void monsterAttack(MonsterInstance& monster);
     void monsterRangedAttack(MonsterInstance& monster, int shots);
     bool tryMonsterSpellAttack(MonsterInstance& monster, int targetCharacter, float distance);
@@ -354,6 +368,7 @@ class CombatSystem
     Inventory* inventory_ = nullptr;
     SpellSystem* spellSystem_ = nullptr;
     CombatCallbacks callbacks_;
+    MovementValidator movementValidator_;
 
     std::unordered_map<int, formats::MonsterEntry> monsterDefs_;
     std::unordered_set<int> warnedUnknownMonsterIds_;

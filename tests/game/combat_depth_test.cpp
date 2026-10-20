@@ -331,6 +331,44 @@ TEST_CASE("Monster snapshots preserve health, AI, and event overrides", "[game][
     CHECK(restored->scriptFields[2] == 42);
 }
 
+TEST_CASE("Monster AI slides along blocking geometry", "[game][combat][movement]")
+{
+    util::ConsoleLogger logger;
+    GameWorld world;
+    Inventory inventory(logger);
+    CombatSystem combat(logger);
+    combat.setGameWorld(&world);
+    combat.setInventory(&inventory);
+    world.setCurrentMap("test.odm");
+    world.party().setWorldPosition(0.0f, 1000.0f, 0.0f);
+
+    combat.loadMonsterData({makeTarget(100)});
+    const int index = combat.spawnMonster(2, -22.0f, 0.0f, 0.0f, 0);
+    auto* monster = combat.getMonster(index);
+    REQUIRE(monster != nullptr);
+    monster->aiState = MonsterInstance::AIState::Pursuing;
+    monster->hostile = true;
+    monster->targetCharacter = 0;
+    monster->speed = 100;
+    monster->recoveryTime = 0;
+
+    // Reject any horizontal move whose destination lies past the wall at x=-20.
+    combat.setMovementValidator([](float, float, float, float toX, float, float)
+                                { return toX <= -20.0f; });
+    combat.setInCombat(true);
+
+    const float beforeY = monster->y;
+    combat.update(100.0f);
+    CHECK(monster->x <= -20.0f);
+    CHECK(monster->y > beforeY);
+
+    // Without a validator the same step moves straight toward the party.
+    combat.clearMovementValidator();
+    const float beforeX = monster->x;
+    combat.update(100.0f);
+    CHECK(monster->x > beforeX);
+}
+
 TEST_CASE("Ranged attack rejects targets beyond the projectile range limit",
           "[game][combat][ranged]")
 {

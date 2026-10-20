@@ -1262,6 +1262,49 @@ void CombatSystem::setMonsterAiByGroup(int group, MonsterInstance::AIState state
     }
 }
 
+bool CombatSystem::tryMoveMonster(MonsterInstance& monster, float targetX, float targetY)
+{
+    if (targetX == monster.x && targetY == monster.y)
+    {
+        return true;
+    }
+
+    const float fromX = monster.x;
+    const float fromY = monster.y;
+    const float fromZ = monster.z;
+
+    if (!movementValidator_ || movementValidator_(fromX, fromY, fromZ, targetX, targetY, fromZ))
+    {
+        monster.x = targetX;
+        monster.y = targetY;
+        return true;
+    }
+
+    const float dx = targetX - fromX;
+    const float dy = targetY - fromY;
+    const bool canMoveX =
+        std::abs(dx) > 1e-4f && movementValidator_(fromX, fromY, fromZ, targetX, fromY, fromZ);
+    const bool canMoveY =
+        std::abs(dy) > 1e-4f && movementValidator_(fromX, fromY, fromZ, fromX, targetY, fromZ);
+
+    if (canMoveX && (!canMoveY || std::abs(dx) >= std::abs(dy)))
+    {
+        monster.x = targetX;
+        return true;
+    }
+    if (canMoveY)
+    {
+        monster.y = targetY;
+        return true;
+    }
+    if (canMoveX)
+    {
+        monster.x = targetX;
+        return true;
+    }
+    return false;
+}
+
 void CombatSystem::updateMonsterAI(MonsterInstance& monster, float deltaMs)
 {
     if (!gameWorld_)
@@ -1320,8 +1363,8 @@ void CombatSystem::updateMonsterAI(MonsterInstance& monster, float deltaMs)
                     std::max(4.0f, static_cast<float>(monster.speed) * (deltaMs / 1000.0f));
                 const float randX = static_cast<float>(randomInt(-100, 100)) / 100.0f;
                 const float randY = static_cast<float>(randomInt(-100, 100)) / 100.0f;
-                monster.x += randX * moveUnits;
-                monster.y += randY * moveUnits;
+                tryMoveMonster(monster, monster.x + randX * moveUnits,
+                               monster.y + randY * moveUnits);
             }
             break;
         }
@@ -1399,8 +1442,8 @@ void CombatSystem::updateMonsterAI(MonsterInstance& monster, float deltaMs)
         if (dist2d > 0.001f)
         {
             const float inv = 1.0f / dist2d;
-            monster.x += dx * inv * moveAmount;
-            monster.y += dy * inv * moveAmount;
+            tryMoveMonster(monster, monster.x + dx * inv * moveAmount,
+                           monster.y + dy * inv * moveAmount);
         }
         break;
     }
@@ -1427,8 +1470,8 @@ void CombatSystem::updateMonsterAI(MonsterInstance& monster, float deltaMs)
         if (dist2d > 0.001f)
         {
             const float inv = 1.0f / dist2d;
-            monster.x -= dx * inv * moveAmount;
-            monster.y -= dy * inv * moveAmount;
+            tryMoveMonster(monster, monster.x - dx * inv * moveAmount,
+                           monster.y - dy * inv * moveAmount);
         }
         break;
     }
