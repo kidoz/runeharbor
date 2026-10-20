@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "hud.hpp"
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <string>
 
@@ -26,7 +28,6 @@ namespace
 // over the view's inclusive right-edge column — a quirk of the original.
 constexpr int kViewLeft = 8;
 constexpr int kViewTop = 8;
-constexpr int kViewBottom = 351; // inclusive
 constexpr int kSidePanelH = 344; // ib-l-A height
 constexpr int kRightPanelX = 468;
 constexpr int kRightPanelW = 172;
@@ -76,6 +77,30 @@ constexpr int kMinimapH = 112;
 // Time display below minimap
 constexpr int kTimeX = 520;
 constexpr int kTimeY = 124;
+
+// Action buttons. The shipped ib-r-A panel has two empty beige panels below
+// the clock; RuneHarbor places the interactive labels there so they do not
+// cover the original icon artwork. Positions are 640x480 game coordinates.
+struct ActionButtonDef
+{
+    HudAction action;
+    const char* label;
+    int x;
+    int y;
+    int w;
+    int h;
+};
+
+constexpr ActionButtonDef kActionButtons[] = {
+    {HudAction::Inventory, "INV", 478, 162, 70, 17},
+    {HudAction::Spellbook, "SPELLS", 478, 181, 70, 17},
+    {HudAction::Map, "MAP", 478, 200, 70, 17},
+    {HudAction::Save, "SAVE", 478, 219, 70, 17},
+    {HudAction::Rest, "REST", 558, 162, 70, 17},
+    {HudAction::Journal, "QUEST", 558, 181, 70, 17},
+    {HudAction::Character, "CHARS", 558, 200, 70, 17},
+    {HudAction::Load, "LOAD", 558, 219, 70, 17},
+};
 
 const char* kMonthNames[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
                              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
@@ -205,6 +230,27 @@ void* HUD::lookupCached(const std::string& name, int& w, int& h)
     return c.tex;
 }
 
+HudAction HUD::actionAt(float scale, float offsetX, float offsetY, int screenX, int screenY) const
+{
+    if (scale <= 0.0f)
+    {
+        return HudAction::None;
+    }
+    const float gameX = (static_cast<float>(screenX) - offsetX) / scale;
+    const float gameY = (static_cast<float>(screenY) - offsetY) / scale;
+    for (const auto& button : kActionButtons)
+    {
+        if (gameX >= static_cast<float>(button.x) &&
+            gameX < static_cast<float>(button.x + button.w) &&
+            gameY >= static_cast<float>(button.y) &&
+            gameY < static_cast<float>(button.y + button.h))
+        {
+            return button.action;
+        }
+    }
+    return HudAction::None;
+}
+
 int HUD::portraitAt(float scale, float offsetX, float offsetY, int screenX, int screenY) const
 {
     if (scale <= 0.0f)
@@ -270,6 +316,43 @@ void HUD::render(graphics::IRenderer& renderer, const graphics::DebugText& debug
     renderResourceBar(renderer, debugText, scale, offsetX, offsetY);
     renderMinimap(renderer, debugText, scale, offsetX, offsetY);
     renderTimeDisplay(renderer, debugText, scale, offsetX, offsetY);
+    renderActionButtons(renderer, debugText, scale, offsetX, offsetY);
+}
+
+void HUD::renderActionButtons(graphics::IRenderer& renderer, const graphics::DebugText& debugText,
+                              float scale, float offsetX, float offsetY)
+{
+    SDL_Renderer* sdl = renderer.getSDLRenderer();
+    if (!sdl)
+    {
+        return;
+    }
+
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+    SDL_GetMouseState(&mouseX, &mouseY);
+    const HudAction hovered =
+        actionAt(scale, offsetX, offsetY, static_cast<int>(mouseX), static_cast<int>(mouseY));
+
+    for (const auto& button : kActionButtons)
+    {
+        const bool isHovered = hovered == button.action;
+        const int x = sx(button.x, scale, offsetX);
+        const int y = sy(button.y, scale, offsetY);
+        const int w = sw(button.w, scale);
+        const int h = sh(button.h, scale);
+
+        renderer.drawFilledRect(x, y, w, h, isHovered ? 95 : 42, isHovered ? 82 : 32,
+                                isHovered ? 48 : 22, 225);
+        renderer.drawRect(x, y, w, h, isHovered ? 240 : 150, isHovered ? 214 : 126,
+                          isHovered ? 110 : 82, 255);
+
+        const int textWidth = debugText.measureTextWidth(button.label, 1);
+        const int textX = x + (w - textWidth) / 2;
+        const int textY = y + (h - debugText.lineHeight(1)) / 2;
+        debugText.drawText(sdl, textX, textY, 1, isHovered ? 255 : 235, isHovered ? 235 : 216,
+                           isHovered ? 170 : 168, button.label);
+    }
 }
 
 void HUD::renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugText& debugText,
@@ -603,7 +686,9 @@ void HUD::renderMinimap(graphics::IRenderer& renderer, const graphics::DebugText
         const float yawRad = yaw * (3.14159265f / 1024.0f);
         const int arrowLen = static_cast<int>(8 * scale);
         const int ax = cx + static_cast<int>(std::cos(yawRad) * arrowLen);
-        const int ay = cy + static_cast<int>(std::sin(yawRad) * arrowLen);
+        // World +Y is north, but minimap screen Y grows downward; negate the
+        // sine so the arrow points north/up on the map.
+        const int ay = cy - static_cast<int>(std::sin(yawRad) * arrowLen);
         if (sdl)
         {
             SDL_SetRenderDrawColor(sdl, 255, 255, 100, 255);

@@ -83,6 +83,40 @@ TEST_CASE("HUD portraitAt maps screen clicks to member indices", "[ui][hud]")
     }
 }
 
+TEST_CASE("HUD actionAt maps screen clicks to right-panel buttons", "[ui][hud]")
+{
+    HUD hud;
+
+    // 1:1 scale, no offset: game coords == screen coords. Button centers are
+    // (478+35, 162+8) etc. in the 640x480 layout.
+    SECTION("each action button center hits")
+    {
+        REQUIRE(hud.actionAt(1.0f, 0.0f, 0.0f, 513, 170) == HudAction::Inventory);
+        REQUIRE(hud.actionAt(1.0f, 0.0f, 0.0f, 513, 189) == HudAction::Spellbook);
+        REQUIRE(hud.actionAt(1.0f, 0.0f, 0.0f, 513, 208) == HudAction::Map);
+        REQUIRE(hud.actionAt(1.0f, 0.0f, 0.0f, 513, 227) == HudAction::Save);
+        REQUIRE(hud.actionAt(1.0f, 0.0f, 0.0f, 593, 170) == HudAction::Rest);
+        REQUIRE(hud.actionAt(1.0f, 0.0f, 0.0f, 593, 189) == HudAction::Journal);
+        REQUIRE(hud.actionAt(1.0f, 0.0f, 0.0f, 593, 208) == HudAction::Character);
+        REQUIRE(hud.actionAt(1.0f, 0.0f, 0.0f, 593, 227) == HudAction::Load);
+    }
+
+    SECTION("clicks outside the buttons miss")
+    {
+        REQUIRE(hud.actionAt(1.0f, 0.0f, 0.0f, 470, 170) == HudAction::None);
+        REQUIRE(hud.actionAt(1.0f, 0.0f, 0.0f, 513, 150) == HudAction::None);
+        REQUIRE(hud.actionAt(1.0f, 0.0f, 0.0f, 513, 245) == HudAction::None);
+        REQUIRE(hud.actionAt(1.0f, 0.0f, 0.0f, 640, 170) == HudAction::None);
+    }
+
+    SECTION("scaled + offset window maps correctly")
+    {
+        // 2x scale, offset (50, 30): inventory center (513,170) -> (1076, 370).
+        REQUIRE(hud.actionAt(2.0f, 50.0f, 30.0f, 1076, 370) == HudAction::Inventory);
+        REQUIRE(hud.actionAt(0.0f, 0.0f, 0.0f, 513, 170) == HudAction::None);
+    }
+}
+
 TEST_CASE("HUD caches border texture lookups between frames", "[ui][hud]")
 {
     HUD hud;

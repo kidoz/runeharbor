@@ -24,6 +24,20 @@ class MapScene;
 namespace runeharbor::ui
 {
 
+/// Clickable action buttons baked into the right-hand HUD panel.
+enum class HudAction : uint8_t
+{
+    None = 0,
+    Inventory,
+    Spellbook,
+    Map,
+    Rest,
+    Journal,
+    Character,
+    Save,
+    Load,
+};
+
 /// In-game HUD rendering.
 /// Draws party portraits, HP/SP bars, gold/food, time, and a simple minimap.
 /// Operates in game coordinates (640x480); caller provides scaling.
@@ -52,7 +66,12 @@ class HUD
     /// @param scale/offsetX/offsetY the same letterbox transform passed to render()
     int portraitAt(float scale, float offsetX, float offsetY, int screenX, int screenY) const;
 
+    /// Hit-test a screen-space point against the right-panel action buttons.
+    HudAction actionAt(float scale, float offsetX, float offsetY, int screenX, int screenY) const;
+
   private:
+    void renderActionButtons(graphics::IRenderer& renderer, const graphics::DebugText& debugText,
+                             float scale, float offsetX, float offsetY);
     void renderPartyBar(graphics::IRenderer& renderer, const graphics::DebugText& debugText,
                         float scale, float offsetX, float offsetY);
     void renderResourceBar(graphics::IRenderer& renderer, const graphics::DebugText& debugText,

@@ -64,6 +64,9 @@ class InGameState : public IGameState
     bool quickLoadFromSlot(int slotIndex);
     void openTownPortalChoices(int caster, int spellId);
     void resolveChoice(int choiceId);
+    void closeAllPanels();
+    void handleHudAction(ui::HudAction action);
+    bool handleInventoryTabClick(int screenX, int screenY);
 
     StateContext& ctx;
 

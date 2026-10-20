@@ -134,6 +134,40 @@ void InGameState::enter()
     choiceWidget_.setVisible(false);
     choiceMode_ = ChoiceMode::None;
 
+    // QA/screenshot hook: open a panel immediately for deterministic captures.
+    // Does nothing in normal play when the variable is unset.
+    if (const char* panel = SDL_getenv("RUNEHARBOR_OPEN_PANEL"))
+    {
+        const std::string name = panel;
+        if (name == "inventory")
+        {
+            inventory_.setActiveCharacter(findActivePartyMember());
+            inventory_.setVisible(true);
+        }
+        else if (name == "spellbook")
+        {
+            spellbook_.setActiveCharacter(findActivePartyMember());
+            spellbook_.setVisible(true);
+        }
+        else if (name == "character")
+        {
+            characterStats_.setActiveCharacter(findActivePartyMember());
+            characterStats_.setVisible(true);
+        }
+        else if (name == "map")
+        {
+            mapWidget_.setVisible(true);
+        }
+        else if (name == "journal")
+        {
+            journalWidget_.setVisible(true);
+        }
+        else if (name == "rest")
+        {
+            restWidget_.setVisible(true);
+        }
+    }
+
     if (ctx.shared && ctx.shared->gameWorld)
     {
         hud_.setGameWorld(ctx.shared->gameWorld);
@@ -359,6 +393,172 @@ graphics::Rect InGameState::worldViewportRect() const
     return graphics::Rect{x, y, w, h};
 }
 
+void InGameState::closeAllPanels()
+{
+    inventory_.setVisible(false);
+    characterStats_.setVisible(false);
+    spellbook_.setVisible(false);
+    restWidget_.setVisible(false);
+    mapWidget_.setVisible(false);
+    journalWidget_.setVisible(false);
+    saveLoadWidget_.setVisible(false);
+}
+
+void InGameState::handleHudAction(ui::HudAction action)
+{
+    if (!ctx.shared)
+    {
+        return;
+    }
+
+    switch (action)
+    {
+    case ui::HudAction::Inventory:
+    {
+        const bool wasOpen = inventory_.visible();
+        closeAllPanels();
+        if (!wasOpen)
+        {
+            inventory_.setActiveCharacter(findActivePartyMember());
+            inventory_.setVisible(true);
+        }
+        break;
+    }
+    case ui::HudAction::Spellbook:
+    {
+        const bool wasOpen = spellbook_.visible();
+        closeAllPanels();
+        if (!wasOpen)
+        {
+            spellbook_.setActiveCharacter(findActivePartyMember());
+            spellbook_.setVisible(true);
+        }
+        break;
+    }
+    case ui::HudAction::Map:
+    {
+        const bool wasOpen = mapWidget_.visible();
+        closeAllPanels();
+        mapWidget_.setVisible(!wasOpen);
+        break;
+    }
+    case ui::HudAction::Rest:
+    {
+        const bool wasOpen = restWidget_.visible();
+        closeAllPanels();
+        restWidget_.setVisible(!wasOpen);
+        break;
+    }
+    case ui::HudAction::Journal:
+    {
+        const bool wasOpen = journalWidget_.visible();
+        closeAllPanels();
+        if (!wasOpen)
+        {
+            journalWidget_.setActiveTab(ui::JournalWidget::JournalTab::Quests);
+            journalWidget_.setVisible(true);
+        }
+        break;
+    }
+    case ui::HudAction::Character:
+    {
+        const bool wasOpen = characterStats_.visible();
+        closeAllPanels();
+        if (!wasOpen)
+        {
+            characterStats_.setActiveCharacter(findActivePartyMember());
+            characterStats_.setVisible(true);
+        }
+        break;
+    }
+    case ui::HudAction::Save:
+    {
+        const bool wasOpen =
+            saveLoadWidget_.visible() && saveLoadWidget_.mode() == ui::SaveLoadWidget::Mode::Save;
+        closeAllPanels();
+        if (!wasOpen)
+        {
+            saveLoadWidget_.setSaveGame(ctx.shared->saveGame);
+            saveLoadWidget_.open(ui::SaveLoadWidget::Mode::Save);
+        }
+        break;
+    }
+    case ui::HudAction::Load:
+    {
+        const bool wasOpen =
+            saveLoadWidget_.visible() && saveLoadWidget_.mode() == ui::SaveLoadWidget::Mode::Load;
+        closeAllPanels();
+        if (!wasOpen)
+        {
+            saveLoadWidget_.setSaveGame(ctx.shared->saveGame);
+            saveLoadWidget_.open(ui::SaveLoadWidget::Mode::Load);
+        }
+        break;
+    }
+    case ui::HudAction::None:
+        break;
+    }
+}
+
+bool InGameState::handleInventoryTabClick(int screenX, int screenY)
+{
+    if (!inventory_.visible())
+    {
+        return false;
+    }
+
+    const auto& bounds = inventory_.bounds();
+    if (bounds.width <= 0 || bounds.height <= 0 || !bounds.contains(screenX, screenY))
+    {
+        return false;
+    }
+
+    // FR_inven is a 460x344 screen. Its five tabs ("Stats", "Skills",
+    // "Inven", "Awards", "Exit") occupy the bottom ~28 pixels.
+    const float designX =
+        static_cast<float>(screenX - bounds.x) * 460.0f / static_cast<float>(bounds.width);
+    const float designY =
+        static_cast<float>(screenY - bounds.y) * 344.0f / static_cast<float>(bounds.height);
+    if (designY < 314.0f)
+    {
+        return false;
+    }
+
+    int tab = -1;
+    if (designX < 96.0f)
+        tab = 0; // Stats
+    else if (designX < 187.0f)
+        tab = 1; // Skills
+    else if (designX < 278.0f)
+        tab = 2; // Inven
+    else if (designX < 369.0f)
+        tab = 3; // Awards
+    else
+        tab = 4; // Exit
+
+    switch (tab)
+    {
+    case 0:
+    case 1:
+        closeAllPanels();
+        characterStats_.setActiveCharacter(findActivePartyMember());
+        characterStats_.setVisible(true);
+        return true;
+    case 2:
+        return true; // already on the inventory tab
+    case 3:
+        closeAllPanels();
+        journalWidget_.setActiveTab(ui::JournalWidget::JournalTab::Awards);
+        journalWidget_.setVisible(true);
+        return true;
+    case 4:
+        closeAllPanels();
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool InGameState::mapMouseToWorldViewport(int screenX, int screenY, int& localX, int& localY) const
 {
     const graphics::Rect worldVp = worldViewportRect();
@@ -544,6 +744,28 @@ std::optional<GameStateId> InGameState::update()
             resolveChoice(selection);
         }
         return std::nullopt;
+    }
+
+    // Clickable HUD action buttons in the right panel. These are handled
+    // before the modal-panel dispatch so the buttons remain usable while an
+    // inventory/spellbook/etc. panel is open (the panels only cover the
+    // viewport, not the right-hand chrome).
+    if (ctx.window.wasMousePressed(platform::MouseButton::Left))
+    {
+        const auto ms = ctx.window.getMouseState();
+        const float hudScale =
+            std::min(static_cast<float>(ctx.viewportWidth) / static_cast<float>(kGameWidth),
+                     static_cast<float>(ctx.viewportHeight) / static_cast<float>(kGameHeight));
+        const float hudOffsetX =
+            (ctx.viewportWidth - static_cast<float>(kGameWidth) * hudScale) * 0.5f;
+        const float hudOffsetY =
+            (ctx.viewportHeight - static_cast<float>(kGameHeight) * hudScale) * 0.5f;
+        const ui::HudAction action = hud_.actionAt(hudScale, hudOffsetX, hudOffsetY, ms.x, ms.y);
+        if (action != ui::HudAction::None)
+        {
+            handleHudAction(action);
+            return std::nullopt;
+        }
     }
 
     // Panel toggles. These run before world input so the same key can open and
@@ -784,6 +1006,10 @@ std::optional<GameStateId> InGameState::update()
             const auto ms = ctx.window.getMouseState();
             if (inventory_.visible())
             {
+                if (handleInventoryTabClick(ms.x, ms.y))
+                {
+                    return std::nullopt;
+                }
                 if (ctx.shared && ctx.shared->gameWorld && ctx.shared->inventory)
                 {
                     ctx.shared->inventory->setParty(&ctx.shared->gameWorld->party());
@@ -1462,25 +1688,22 @@ void InGameState::render()
         hud_.setMapScene(ctx.shared->mapScene);
         hud_.render(*ctx.renderer, *ctx.debugText, scale, offsetX, offsetY);
 
+        // Panels replace the 3D viewport; they do not cover the HUD chrome.
+        const graphics::Rect panelVp = worldViewportRect();
+
         inventory_.setGameWorld(ctx.shared->gameWorld);
         inventory_.setInventory(ctx.shared->inventory);
         inventory_.setSpellSystem(ctx.shared->spellSystem);
-        inventory_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
-                             static_cast<int>(kGameWidth * scale),
-                             static_cast<int>(kGameHeight * scale));
+        inventory_.setBounds(panelVp);
         inventory_.render(*ctx.renderer, *ctx.debugText);
 
         characterStats_.setGameWorld(ctx.shared->gameWorld);
-        characterStats_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
-                                  static_cast<int>(kGameWidth * scale),
-                                  static_cast<int>(kGameHeight * scale));
+        characterStats_.setBounds(panelVp);
         characterStats_.render(*ctx.renderer, *ctx.debugText);
 
         spellbook_.setGameWorld(ctx.shared->gameWorld);
         spellbook_.setSpellSystem(ctx.shared->spellSystem);
-        spellbook_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
-                             static_cast<int>(kGameWidth * scale),
-                             static_cast<int>(kGameHeight * scale));
+        spellbook_.setBounds(panelVp);
         spellbook_.render(*ctx.renderer, *ctx.debugText);
 
         restWidget_.setGameWorld(ctx.shared->gameWorld);
@@ -1492,25 +1715,19 @@ void InGameState::render()
                 if (ctx.shared)
                     ctx.shared->statusMessage = msg;
             });
-        restWidget_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
-                              static_cast<int>(kGameWidth * scale),
-                              static_cast<int>(kGameHeight * scale));
+        restWidget_.setBounds(panelVp);
         restWidget_.render(*ctx.renderer, *ctx.debugText);
 
         mapWidget_.setGameWorld(ctx.shared->gameWorld);
         mapWidget_.setMapScene(ctx.shared->mapScene);
-        mapWidget_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
-                             static_cast<int>(kGameWidth * scale),
-                             static_cast<int>(kGameHeight * scale));
+        mapWidget_.setBounds(panelVp);
         mapWidget_.render(*ctx.renderer, *ctx.debugText);
 
         journalWidget_.setGameWorld(ctx.shared->gameWorld);
         journalWidget_.setQuestLog(ctx.shared->questLog);
         journalWidget_.setAutonoteCatalog(ctx.shared->autonoteCatalog);
         journalWidget_.setAwardCatalog(ctx.shared->awardCatalog);
-        journalWidget_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),
-                                 static_cast<int>(kGameWidth * scale),
-                                 static_cast<int>(kGameHeight * scale));
+        journalWidget_.setBounds(panelVp);
         journalWidget_.render(*ctx.renderer, *ctx.debugText);
 
         saveLoadWidget_.setBounds(static_cast<int>(offsetX), static_cast<int>(offsetY),

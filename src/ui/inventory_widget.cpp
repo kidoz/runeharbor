@@ -48,14 +48,15 @@ constexpr SlotRect kPaperDollSlots[] = {
     {game::EquipSlot::Bow, 30, 60, 50, 80},       // far left
 };
 
-// Backpack grid. MM7's pool is large, but the on-screen grid RuneHarbor renders
-// is a compact placeholder; both render and hit-test derive rows/cols from here
-// so they agree on the cell layout. cellSize/origin are in design space.
-constexpr int kBackpackGridCols = 7;
-constexpr int kBackpackGridOriginX = 180;
-constexpr int kBackpackGridOriginY = 20;
-constexpr int kBackpackCellSize = 30;
-constexpr int kBackpackCellStride = kBackpackCellSize + 2; // 2px gap between cells
+// Backpack grid. The shipped FR_inven art is a 14-column inventory screen; use
+// the same origin/cell metrics so the 14 modelled backpack slots land in the
+// first row of the visible grid instead of floating in the middle of it. Both
+// render and hit-test derive rows/cols from here so they agree.
+constexpr int kBackpackGridCols = 14;
+constexpr int kBackpackGridOriginX = 2;
+constexpr int kBackpackGridOriginY = 2;
+constexpr int kBackpackCellSize = 31;
+constexpr int kBackpackCellStride = 32;
 
 } // namespace
 

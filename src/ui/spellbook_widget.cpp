@@ -104,14 +104,18 @@ void SpellbookWidget::render(graphics::IRenderer& renderer, const graphics::Debu
     text.drawText(sdl, textX, textY, 2, 255, 220, 120, character.name + "'s Spellbook");
     textY += 36;
 
-    // Build the spell list from the character's available spells.
+    // Build the spell list from every spell the character has learned. Unlike
+    // the old available-spell filter, this also lists known spells whose school
+    // level is still too low; casting them reports the skill gate instead of
+    // silently hiding them.
     rows_.clear();
     rowY_.clear();
     if (spellSystem_ != nullptr)
     {
-        const auto spellIds = spellSystem_->getAvailableSpells(activeCharacterIndex_);
-        for (int id : spellIds)
+        for (int id = 1; id < game::Character::kSpellCount; ++id)
         {
+            if (!character.knowsSpell(id))
+                continue;
             const auto* info = spellSystem_->getSpell(id);
             if (info == nullptr)
                 continue;
@@ -126,8 +130,27 @@ void SpellbookWidget::render(graphics::IRenderer& renderer, const graphics::Debu
 
     if (rows_.empty())
     {
-        text.drawText(sdl, textX, textY, 1, 200, 200, 200,
-                      "No spells known. Read a spell book to learn one.");
+        text.drawText(sdl, textX, textY, 1, 220, 220, 220, "No spells known.");
+        textY += 20;
+        text.drawText(sdl, textX, textY, 1, 190, 190, 190,
+                      "Learn spells at a guild or by reading a spell book.");
+        textY += 28;
+
+        std::string schools;
+        for (const game::SkillId school :
+             {game::SkillId::Fire, game::SkillId::Air, game::SkillId::Water, game::SkillId::Earth,
+              game::SkillId::Spirit, game::SkillId::Mind, game::SkillId::Body, game::SkillId::Light,
+              game::SkillId::Dark})
+        {
+            if (!character.skillLevels[static_cast<size_t>(school)].learned())
+                continue;
+            if (!schools.empty())
+                schools += ", ";
+            schools += game::skillDisplayName(school);
+        }
+        const std::string schoolLine =
+            schools.empty() ? "Magic skills: none" : "Magic skills: " + schools;
+        text.drawText(sdl, textX, textY, 1, 160, 200, 160, schoolLine);
         return;
     }
 
