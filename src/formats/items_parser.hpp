@@ -21,10 +21,15 @@ struct ItemEntry
     std::string mod1; // e.g., "3d3", "4"
     int mod2 = 0;
     int material = 0;
+    // Artifacts/relics/specials put a quality token ("Artifact", "Relic",
+    // "Special") in the numeric material column instead of a number.
+    std::string materialName;
     int idRepSt = 0; // ID/Rep/St
     std::string notIdentifiedName;
     int spriteIndex = 0;
     int varA = 0;
+    // Special-enchant rows put a name ("of Alchemy", "of the Dragon") in VarA.
+    std::string varAName;
     int varB = 0;
     int equipX = 0;
     int equipY = 0;

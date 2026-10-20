@@ -1,13 +1,42 @@
 // SPDX-License-Identifier: MIT
 #include "items_parser.hpp"
 
+#include <charconv>
 #include <format>
+#include <optional>
 #include <sstream> // For std::istringstream and std::getline
+#include <string_view>
 
 #include "../util/string_utils.hpp"
 
 namespace runeharbor::formats
 {
+
+namespace
+{
+
+// Strict integer parse after trimming. std::stoi throws on "Artifact" /
+// "of Alchemy", which used to drop entire artifact/relic/special rows.
+std::optional<int> parseInt(std::string_view text)
+{
+    const std::string trimmed = util::trim(std::string(text));
+    if (trimmed.empty())
+    {
+        return 0;
+    }
+
+    int value = 0;
+    const char* begin = trimmed.data();
+    const char* end = trimmed.data() + trimmed.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, value);
+    if (ec != std::errc{} || ptr != end)
+    {
+        return std::nullopt;
+    }
+    return value;
+}
+
+} // namespace
 
 ItemsParser::ItemsParser(util::ILogger& logger) : logger(logger) {}
 
@@ -74,9 +103,28 @@ bool ItemsParser::parse(const std::vector<uint8_t>& data)
         {
             size_t fieldIndex = 0;
 
+            const auto parseNum = [&](size_t index, const char* fieldName, int fallback = 0) -> int
+            {
+                if (index >= fields.size())
+                {
+                    return fallback;
+                }
+                const std::string raw = util::trim(fields[index]);
+                if (raw.empty())
+                {
+                    return fallback;
+                }
+                if (const auto parsed = parseInt(raw))
+                {
+                    return *parsed;
+                }
+                logger.warning(std::format("Item {} field '{}' ('{}') is not numeric", entry.id,
+                                           fieldName, raw));
+                return fallback;
+            };
+
             // 1. id
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.id = std::stoi(util::trim(fields[fieldIndex]));
+            entry.id = parseNum(fieldIndex, "id");
             fieldIndex++;
 
             // 2. picFile
@@ -90,8 +138,7 @@ bool ItemsParser::parse(const std::vector<uint8_t>& data)
             fieldIndex++;
 
             // 4. value
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.value = std::stoi(util::trim(fields[fieldIndex]));
+            entry.value = parseNum(fieldIndex, "value");
             fieldIndex++;
 
             // 5. equipStat
@@ -110,18 +157,27 @@ bool ItemsParser::parse(const std::vector<uint8_t>& data)
             fieldIndex++;
 
             // 8. mod2
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.mod2 = std::stoi(util::trim(fields[fieldIndex]));
+            entry.mod2 = parseNum(fieldIndex, "mod2");
             fieldIndex++;
 
-            // 9. material
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.material = std::stoi(util::trim(fields[fieldIndex]));
+            // 9. material: numeric for ordinary items, but artifacts/relics/
+            // specials put a quality token here ("Artifact", "Relic", "Special").
+            if (fieldIndex < fields.size())
+            {
+                const std::string raw = util::trim(fields[fieldIndex]);
+                if (const auto parsed = parseInt(raw))
+                {
+                    entry.material = *parsed;
+                }
+                else
+                {
+                    entry.materialName = raw;
+                }
+            }
             fieldIndex++;
 
             // 10. idRepSt
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.idRepSt = std::stoi(util::trim(fields[fieldIndex]));
+            entry.idRepSt = parseNum(fieldIndex, "idRepSt");
             fieldIndex++;
 
             // 11. notIdentifiedName
@@ -130,28 +186,35 @@ bool ItemsParser::parse(const std::vector<uint8_t>& data)
             fieldIndex++;
 
             // 12. spriteIndex
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.spriteIndex = std::stoi(util::trim(fields[fieldIndex]));
+            entry.spriteIndex = parseNum(fieldIndex, "spriteIndex");
             fieldIndex++;
 
-            // 13. varA
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.varA = std::stoi(util::trim(fields[fieldIndex]));
+            // 13. varA: numeric for ordinary items, but special-enchant rows
+            // put a name here ("of Alchemy", "of the Dragon").
+            if (fieldIndex < fields.size())
+            {
+                const std::string raw = util::trim(fields[fieldIndex]);
+                if (const auto parsed = parseInt(raw))
+                {
+                    entry.varA = *parsed;
+                }
+                else
+                {
+                    entry.varAName = raw;
+                }
+            }
             fieldIndex++;
 
             // 14. varB
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.varB = std::stoi(util::trim(fields[fieldIndex]));
+            entry.varB = parseNum(fieldIndex, "varB");
             fieldIndex++;
 
             // 15. equipX
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.equipX = std::stoi(util::trim(fields[fieldIndex]));
+            entry.equipX = parseNum(fieldIndex, "equipX");
             fieldIndex++;
 
             // 16. equipY
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.equipY = std::stoi(util::trim(fields[fieldIndex]));
+            entry.equipY = parseNum(fieldIndex, "equipY");
             fieldIndex++;
 
             // 17. notes

@@ -122,3 +122,42 @@ MALFORMED	LINE
         REQUIRE(parser.getItems()[0].notes == "Notes");
     }
 }
+
+TEST_CASE("ItemsParser preserves artifact and special-enchant rows", "[items_parser]")
+{
+    runeharbor::util::ConsoleLogger logger;
+    runeharbor::formats::ItemsParser parser(logger);
+
+    // Rows 500/537/538 from the shipped ITEMS.TXT. The material column holds
+    // "Artifact"/"Special" and VarA holds a special-enchant name ("of Alchemy");
+    // the old std::stoi path dropped these rows entirely.
+    std::string sample_data =
+        R"ITEMS(Item #	Pic File	Name	Value	Equip Stat	Skill Group	Mod1	Mod2	material	ID/Rep/St	Not identified name	Sprite Index	VarA	VarB	Equip X	Equip Y	Notes
+500	item217	Puck	20000	Weapon	Sword	3d3	14	Artifact	20	Artifact	1	0	0	16	145	"(Speed +40, Swift)"
+537	item134	Clanker's Amulet	15000	Amulet	Misc	0	0	Special	0	Amulet	33	of Alchemy	15	0	0	"A mighty tool for alchemists."
+538	item013	Lieutenant's Cutlass	1500	Weapon	Sword	3d5	10	Special	0	Cutlass	4	of The Dragon	0	0	109	"A fine steel weapon."
+)ITEMS";
+
+    std::vector<uint8_t> data(sample_data.begin(), sample_data.end());
+    REQUIRE(parser.parse(data));
+    const auto& items = parser.getItems();
+    REQUIRE(items.size() == 3);
+
+    REQUIRE(items[0].id == 500);
+    REQUIRE(items[0].name == "Puck");
+    REQUIRE(items[0].material == 0);
+    REQUIRE(items[0].materialName == "Artifact");
+    REQUIRE(items[0].varA == 0);
+    REQUIRE(items[0].varAName.empty());
+
+    REQUIRE(items[1].id == 537);
+    REQUIRE(items[1].materialName == "Special");
+    REQUIRE(items[1].varA == 0);
+    REQUIRE(items[1].varAName == "of Alchemy");
+    REQUIRE(items[1].varB == 15);
+    REQUIRE(items[1].spriteIndex == 33);
+
+    REQUIRE(items[2].id == 538);
+    REQUIRE(items[2].varAName == "of The Dragon");
+    REQUIRE(items[2].equipY == 109);
+}
