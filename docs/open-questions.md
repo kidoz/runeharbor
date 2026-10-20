@@ -3,7 +3,7 @@ title: "Open Questions"
 summary: "Register of unresolved reverse-engineering questions and implementation gaps."
 doc_type: reference
 status: partial
-last_updated: 2026-08-01
+last_updated: 2026-10-20
 ---
 # Open Questions
 
@@ -40,8 +40,10 @@ belong on their canonical reference pages and must be removed from this register
   Armsmaster, or other weapon skill bonuses into hit/damage. MM7 does.
   **observed** gap.
 
-- **[Skill trainer (type 0x1F)](training-and-travel.md)**: RE'd but not implemented. Raises individual
-  skills for gold (distinct from level training). **observed**
+- **[Skill trainer (type 0x1F)](training-and-travel.md)**: Skill learning, mastery training, and
+  skill-point spending are implemented. The original delivers mastery training through NPC dialogue
+  topics; RuneHarbor currently exposes the same services in the Training Grounds/guild UI. NPC-hosted
+  trainer placement and the `0x4F06E6` level cap remain open. **observed**
 
 - **[NPCs as world actors](npc-dialogue.md)**: NPCs exist as dialogue text only. None walk,
   pathfind, or react spatially. MM7 has roaming NPCs in towns. **unknown**

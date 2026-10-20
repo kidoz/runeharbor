@@ -37,6 +37,39 @@ const SkillValue& merchantSkill(const Character& character)
     return character.skillLevels[static_cast<size_t>(SkillId::Merchant)];
 }
 
+// Guild -> magic school index (Fire=0 .. Dark=8). -1 for non-guild houses.
+int guildSchoolIndex(BuildingType type)
+{
+    switch (type)
+    {
+    case BuildingType::FireGuild:
+        return 0;
+    case BuildingType::AirGuild:
+        return 1;
+    case BuildingType::WaterGuild:
+        return 2;
+    case BuildingType::EarthGuild:
+        return 3;
+    case BuildingType::SpiritGuild:
+        return 4;
+    case BuildingType::MindGuild:
+        return 5;
+    case BuildingType::BodyGuild:
+        return 6;
+    case BuildingType::LightGuild:
+        return 7;
+    case BuildingType::DarkGuild:
+        return 8;
+    default:
+        return -1;
+    }
+}
+
+constexpr SkillId kSchoolSkillByIndex[] = {
+    SkillId::Fire, SkillId::Air,  SkillId::Water, SkillId::Earth, SkillId::Spirit,
+    SkillId::Mind, SkillId::Body, SkillId::Light, SkillId::Dark,
+};
+
 } // namespace
 
 int ShopSystem::merchantDiscountPct(const Character& character, int reputation)
@@ -604,6 +637,118 @@ std::expected<ShopReceipt, ShopError> ShopSystem::trainMember(const ShopContext&
     return receipt;
 }
 
+// -------- Skill trainer service --------
+
+int ShopSystem::skillLearningCost(BuildingType type, float buyMultiplier, float secondaryMultiplier,
+                                  int discountPct)
+{
+    const bool isGuild = type >= BuildingType::FireGuild && type <= BuildingType::DarkGuild;
+    const float multiplier = isGuild ? buyMultiplier : secondaryMultiplier;
+    const float safeMultiplier = multiplier > 0.0f ? multiplier : 1.0f;
+    const int base = std::max(1, floorToInt(500.0f * safeMultiplier));
+
+    int result = base * (100 - std::clamp(discountPct, 0, 100)) / 100;
+    result = std::max(result, base / 3);
+    return std::max(result, 1);
+}
+
+std::expected<ShopReceipt, ShopError>
+ShopSystem::learnSkill(const ShopContext& ctx, int characterIndex, SkillId skill) const
+{
+    if (ctx.building == nullptr || ctx.party == nullptr)
+    {
+        return std::unexpected(ShopError::InvalidArgument);
+    }
+    if (characterIndex < 0 || characterIndex >= kPartySize)
+    {
+        return std::unexpected(ShopError::InvalidArgument);
+    }
+
+    Character& member = ctx.party->member(characterIndex);
+    const size_t skillIndex = static_cast<size_t>(skill);
+    if (skillIndex >= member.skillLevels.size())
+    {
+        return std::unexpected(ShopError::InvalidArgument);
+    }
+
+    // UIHouses::learnSelectedSkill gates only on skillMaxMasteryPerClass.
+    if (maxMasteryForClass(member.charClass, skill) == SkillMastery::None)
+    {
+        return std::unexpected(ShopError::SkillNotAvailable);
+    }
+    if (member.skillLevels[skillIndex].learned())
+    {
+        return std::unexpected(ShopError::SkillAlreadyKnown);
+    }
+
+    const Character& negotiator = activeCharacter(*ctx.party);
+    const int discount = merchantDiscountPct(negotiator, ctx.party->reputation());
+    const int cost = skillLearningCost(ctx.building->buildingType, ctx.building->buyMultiplier,
+                                       ctx.building->secondaryMultiplier, discount);
+
+    if (ctx.party->gold() < cost)
+    {
+        return std::unexpected(ShopError::InsufficientGold);
+    }
+
+    (void)ctx.party->spendGold(cost);
+    member.skillLevels[skillIndex] = SkillValue{1, SkillMastery::Normal};
+
+    ShopReceipt receipt;
+    receipt.goldSpent = cost;
+    receipt.characterIndex = characterIndex;
+    receipt.building = ctx.building->buildingType;
+    return receipt;
+}
+
+std::expected<ShopReceipt, ShopError> ShopSystem::trainMastery(const ShopContext& ctx,
+                                                               int characterIndex, SkillId skill,
+                                                               SkillMastery target) const
+{
+    if (ctx.building == nullptr || ctx.party == nullptr)
+    {
+        return std::unexpected(ShopError::InvalidArgument);
+    }
+    if (characterIndex < 0 || characterIndex >= kPartySize)
+    {
+        return std::unexpected(ShopError::InvalidArgument);
+    }
+    if (target != SkillMastery::Expert && target != SkillMastery::Master &&
+        target != SkillMastery::GrandMaster)
+    {
+        return std::unexpected(ShopError::InvalidArgument);
+    }
+
+    Character& member = ctx.party->member(characterIndex);
+    if (maxMasteryForClass(member.charClass, skill) < target)
+    {
+        return std::unexpected(ShopError::MasteryUnavailable);
+    }
+    if (!meetsMasteryRequirements(member, skill, target))
+    {
+        return std::unexpected(ShopError::MasteryRequirementsNotMet);
+    }
+
+    const int cost = masteryTrainingCost(skill, target);
+    if (cost <= 0)
+    {
+        return std::unexpected(ShopError::MasteryUnavailable);
+    }
+    if (ctx.party->gold() < cost)
+    {
+        return std::unexpected(ShopError::InsufficientGold);
+    }
+
+    (void)ctx.party->spendGold(cost);
+    member.skillLevels[static_cast<size_t>(skill)].mastery = target;
+
+    ShopReceipt receipt;
+    receipt.goldSpent = cost;
+    receipt.characterIndex = characterIndex;
+    receipt.building = ctx.building->buildingType;
+    return receipt;
+}
+
 // -------- Travel service --------
 
 int ShopSystem::travelCost(BuildingType type, float shopMult, int discountPct)
@@ -693,30 +838,48 @@ std::expected<ShopReceipt, ShopError> ShopSystem::learnGuildSpell(const ShopCont
 {
     if (ctx.party == nullptr || ctx.building == nullptr)
         return std::unexpected(ShopError::InvalidArgument);
-    Character& member = ctx.party->member(std::clamp(ctx.party->activeMemberIndex(), 0, 3));
+
+    const int memberIndex = std::clamp(ctx.party->activeMemberIndex(), 0, kPartySize - 1);
+    Character& member = ctx.party->member(memberIndex);
     if (member.knowsSpell(spellId))
         return std::unexpected(ShopError::ItemAlreadyIdentified); // already known
+
+    // A guild only sells its own school. Spell IDs are contiguous in groups of
+    // 11 over the nine schools: Fire, Air, Water, Earth, Spirit, Mind, Body,
+    // Light, Dark.
+    const int guildSchool = guildSchoolIndex(ctx.building->buildingType);
+    if (guildSchool < 0 || spellId < 1 || spellId >= Character::kSpellCount)
+    {
+        // Non-guild houses have no spell stock in this model.
+        return std::unexpected(ShopError::NoSuchItem);
+    }
+    const int schoolBase = (spellId - 1) / 11;
+    if (schoolBase != guildSchool)
+        return std::unexpected(ShopError::NoSuchItem);
+
+    const SkillId school = kSchoolSkillByIndex[schoolBase];
+    const SkillValue& schoolSkill = member.skillLevels[static_cast<size_t>(school)];
+    if (!schoolSkill.learned())
+        return std::unexpected(ShopError::NothingToLearn);
+
+    // The guild's stock is limited by the character's mastery: Novice can
+    // learn spell levels 1-4, Expert 1-7, Master 1-10, Grandmaster 1-11
+    // (spellCountForMastery).
+    const int spellLevel = (spellId - 1) % 11 + 1;
+    if (spellLevel > spellsLearnableAtMastery(schoolSkill.mastery))
+        return std::unexpected(ShopError::NothingToLearn);
+
     // Cost scales with the building's multiplier (a flat guild fee).
     const int cost = std::max(1, floorToInt(ctx.building->buyMultiplier * 100));
     if (ctx.party->gold() < cost)
         return std::unexpected(ShopError::InsufficientGold);
-    // Gate: must know the spell's school. Map spell id to a school skill.
-    // Spell IDs are contiguous in groups of 11 over the nine schools:
-    // Fire, Air, Water, Earth, Spirit, Mind, Body, Light, Dark. The previous
-    // table assumed the SpellSchool enum's 11-slot gapped layout and therefore
-    // mapped Spirit..Dark to the wrong skills.
-    const int schoolBase = std::clamp((spellId - 1) / 11, 0, 8);
-    static constexpr SkillId kSchoolSkills[] = {
-        SkillId::Fire, SkillId::Air,  SkillId::Water, SkillId::Earth, SkillId::Spirit,
-        SkillId::Mind, SkillId::Body, SkillId::Light, SkillId::Dark,
-    };
-    const SkillId school = kSchoolSkills[schoolBase];
-    if (!member.learnSpell(spellId, school))
+
+    if (!member.learnSpell(spellId, school, spellLevel))
         return std::unexpected(ShopError::NothingToLearn);
     (void)ctx.party->spendGold(cost);
     ShopReceipt r;
     r.goldSpent = cost;
-    r.characterIndex = std::clamp(ctx.party->activeMemberIndex(), 0, 3);
+    r.characterIndex = memberIndex;
     r.building = ctx.building->buildingType;
     return r;
 }
@@ -775,6 +938,14 @@ std::string_view shopErrorText(ShopError error)
         return "Not enough experience to train";
     case ShopError::NoSuchDestination:
         return "No such destination";
+    case ShopError::SkillNotAvailable:
+        return "Your class cannot learn that skill";
+    case ShopError::SkillAlreadyKnown:
+        return "You already know that skill";
+    case ShopError::MasteryUnavailable:
+        return "No trainer teaches that mastery";
+    case ShopError::MasteryRequirementsNotMet:
+        return "You do not meet the training requirements";
     }
     return "Unknown error";
 }

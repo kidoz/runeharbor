@@ -556,6 +556,128 @@ TEST_CASE("training cost scales with level", "[shop][training]")
     REQUIRE(highCost > lowCost); // level 10 trains cost more than level 1
 }
 
+TEST_CASE("Skill trainer teaches class skills for gold", "[shop][skills]")
+{
+    Party party;
+    party.setActiveMemberIndex(0);
+    party.setGold(1000);
+    party.member(0).charClass = CharacterClass::Sorcerer;
+
+    auto shop = makeShop(BuildingType::FireGuild, 1.0f);
+    ShopContext ctx{&shop, &party, nullptr};
+    ShopSystem shopSystem;
+
+    REQUIRE(ShopSystem::skillLearningCost(BuildingType::FireGuild, 1.0f, 1.0f, 0) == 500);
+
+    auto result = shopSystem.learnSkill(ctx, 0, SkillId::Fire);
+    REQUIRE(result.has_value());
+    CHECK(result->goldSpent == 500);
+    CHECK(party.gold() == 500);
+
+    const auto& fire = party.member(0).skillLevels[static_cast<size_t>(SkillId::Fire)];
+    CHECK(fire.learned());
+    CHECK(fire.level == 1);
+    CHECK(fire.mastery == SkillMastery::Normal);
+
+    // Buying the same skill twice is rejected.
+    auto again = shopSystem.learnSkill(ctx, 0, SkillId::Fire);
+    REQUIRE_FALSE(again.has_value());
+    CHECK(again.error() == ShopError::SkillAlreadyKnown);
+}
+
+TEST_CASE("Skill trainer rejects skills the class can never learn", "[shop][skills]")
+{
+    Party party;
+    party.setGold(10000);
+    party.member(0).charClass = CharacterClass::Knight;
+
+    auto shop = makeShop(BuildingType::Training, 1.0f);
+    ShopContext ctx{&shop, &party, nullptr};
+    ShopSystem shopSystem;
+
+    auto result = shopSystem.learnSkill(ctx, 0, SkillId::Fire);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == ShopError::SkillNotAvailable);
+    CHECK(party.gold() == 10000);
+}
+
+TEST_CASE("Mastery training charges the flat tier cost", "[shop][skills]")
+{
+    Party party;
+    party.setGold(10000);
+    auto& ch = party.member(0);
+    ch.charClass = CharacterClass::Sorcerer;
+    learnSkill(ch, SkillId::Fire, 4);
+
+    auto shop = makeShop(BuildingType::Training, 1.0f);
+    ShopContext ctx{&shop, &party, nullptr};
+    ShopSystem shopSystem;
+
+    auto result = shopSystem.trainMastery(ctx, 0, SkillId::Fire, SkillMastery::Expert);
+    REQUIRE(result.has_value());
+    CHECK(result->goldSpent == 1000);
+    CHECK(party.gold() == 9000);
+    CHECK(ch.skillLevels[static_cast<size_t>(SkillId::Fire)].mastery == SkillMastery::Expert);
+
+    // Sorcerer caps Fire Magic at Expert.
+    auto master = shopSystem.trainMastery(ctx, 0, SkillId::Fire, SkillMastery::Master);
+    REQUIRE_FALSE(master.has_value());
+    CHECK(master.error() == ShopError::MasteryUnavailable);
+}
+
+TEST_CASE("Mastery trainer enforces level requirements", "[shop][skills]")
+{
+    Party party;
+    party.setGold(10000);
+    auto& ch = party.member(0);
+    ch.charClass = CharacterClass::Sorcerer;
+    learnSkill(ch, SkillId::Fire, 3);
+
+    auto shop = makeShop(BuildingType::Training, 1.0f);
+    ShopContext ctx{&shop, &party, nullptr};
+    ShopSystem shopSystem;
+
+    auto result = shopSystem.trainMastery(ctx, 0, SkillId::Fire, SkillMastery::Expert);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == ShopError::MasteryRequirementsNotMet);
+    CHECK(ch.skillLevels[static_cast<size_t>(SkillId::Fire)].mastery == SkillMastery::Normal);
+    CHECK(party.gold() == 10000);
+}
+
+TEST_CASE("Guild spell learning is school- and mastery-gated", "[shop][guild]")
+{
+    Party party;
+    party.setGold(10000);
+    auto& ch = party.member(0);
+    ch.charClass = CharacterClass::Sorcerer;
+    learnSkill(ch, SkillId::Fire, 2);
+
+    auto shop = makeShop(BuildingType::FireGuild, 1.0f);
+    ShopContext ctx{&shop, &party, nullptr};
+    ShopSystem shopSystem;
+
+    // A Fire Guild does not sell Air spells.
+    auto wrongSchool = shopSystem.learnGuildSpell(ctx, 12);
+    REQUIRE_FALSE(wrongSchool.has_value());
+    CHECK(wrongSchool.error() == ShopError::NoSuchItem);
+
+    // Fire Bolt (level 2) is within a Novice's 1-4 range.
+    auto bolt = shopSystem.learnGuildSpell(ctx, 2);
+    REQUIRE(bolt.has_value());
+    CHECK(ch.knowsSpell(2));
+    CHECK(party.gold() == 9900);
+
+    // Fireball (level 6) needs Expert mastery.
+    auto fireball = shopSystem.learnGuildSpell(ctx, 6);
+    REQUIRE_FALSE(fireball.has_value());
+    CHECK(fireball.error() == ShopError::NothingToLearn);
+
+    ch.skillLevels[static_cast<size_t>(SkillId::Fire)].mastery = SkillMastery::Expert;
+    auto expertFireball = shopSystem.learnGuildSpell(ctx, 6);
+    REQUIRE(expertFireball.has_value());
+    CHECK(ch.knowsSpell(6));
+}
+
 TEST_CASE("travel cost is flat per trip (stables > boats)", "[shop][travel]")
 {
     const int stablesCost = ShopSystem::travelCost(BuildingType::Stables, 1.0f, 0);

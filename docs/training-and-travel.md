@@ -3,7 +3,7 @@ title: "Training Grounds & Travel (Stables/Boats)"
 summary: "Training grounds, stables, and boats share building-service dispatch but perform distinct actions."
 doc_type: reference
 status: partial
-last_updated: 2026-08-01
+last_updated: 2026-10-20
 ---
 # Training Grounds & Travel (Stables/Boats)
 
@@ -40,8 +40,9 @@ building type** — stables (0x1B) and boats (0x1C) ARE the travel service.
 | `0x1C` (28) | `boa` | Boats (travel) | `0x4B68A6` |
 | `0x17` (23) | `tem` | Temple | `0x4B6FC1` (doc 30) |
 
-RuneHarbor's `building_type.hpp` currently has `Travel = 0x1E` / `Training =
-0x1F` — **these are swapped relative to the binary** and must be fixed.
+RuneHarbor originally had `Travel = 0x1E` / `Training = 0x1F` — swapped
+relative to the binary. `building_type.hpp` now uses `Training = 0x1E` and
+treats stables/boats as travel.
 
 ---
 
@@ -91,8 +92,9 @@ for confirmation; RuneHarbor ships uncapped with a TODO.
 This is what doc 29 §3.6 actually disassembled. Cost:
 `(type==0x12 ? 100 : 250) × shopMult`, then the standard finalizer. Executes
 by gating on class byte, marking a skill "trained" (`word[edi]=1`), debiting
-gold. Out of scope for RuneHarbor's training service (which is level-up, not
-skill training).
+gold. The same idea is implemented in `ShopSystem::learnSkill`; modern
+OpenEnroth sources price non-guild teaching at `500 × flt_24` (guilds at
+`500 × fPriceMultiplier`), which is the formula RuneHarbor uses.
 
 ---
 
@@ -156,32 +158,48 @@ The game clock jumps by `days × 1440` minutes.
 
 ## Integration notes
 
-Existing assets:
+Implemented in RuneHarbor:
 
-- `ShopFamily::Training` / `ShopFamily::Travel` + `shopFamily()` mappings
-  (but `BuildingType::Travel`/`Training` enum values are swapped — fix).
-- `Character::canLevelUp()` / `levelUp()` — the exact training primitives.
-- `serviceCost(Training, ...)` already returns a cost (currently the skill-
-  trainer 250× formula; replace with the level-scaling formula from §1.3).
-- The temple shop-family UI mode (`renderTemple`/`doHeal`/etc.) — the template
-  for `renderTraining`/`renderTravel`/`doTrain`/`doTravel`.
-- `GameWorld::advanceTime(minutes)` — the calendar-advance primitive for
-  travel time. `onChangeMap` callback / `pendingTransition_` — the map-
-  transition machinery (travel needs an `onTravel` hook into it).
+- `BuildingType::Training = 0x1E`; stables (0x1B) and boats (0x1C) are the
+  travel service. `2dEvents.txt` label `tra` maps to Training.
+- `Character::canLevelUp()` / `levelUp()` implement §1.1: `levelUp()` awards
+  `(newLevel / 10) + 5` skill points and heals HP/SP to the new maximum.
+- `ShopSystem::trainingCost()` / `trainMember()` implement §1.3 (level × class
+  tier × building multiplier, then the merchant finalizer) and the XP/gold
+  gates.
+- `ShopSystem::travelCost()` / `chargeTravel()`, the hand-authored destination
+  table, and the `onTravelRequest_` map-transition hook implement §3.
+- `ShopWindow` exposes Level Up and Skills pages (Tab switches), with Travel
+  and the other service families alongside them.
 
-What must be built:
+Skill progression:
 
-1. **Fix `BuildingType`**: `Travel = 0x1E` → Training, `Training = 0x1F` →
-   skill trainer. For RuneHarbor's purposes, map `Travel`/`Training` names to
-   the right codes so `2dEvents.txt` parsing + `shopFamily()` resolve.
-2. **`ShopSystem::trainMember(ctx, charIdx)`**: gate on `canLevelUp()`, cost
-   via the level-scaling formula, effect `levelUp()`.
-3. **`ShopSystem::travelCost(...)`** + a `doTravel` that charges the flat fee,
-   advances the calendar by `days`, and triggers a map transition via a new
-   `onTravel` callback (Application wires it to the transition machinery).
-4. **Hand-authored destination table** per stables/boat building (map name,
-   arrival coords, travel days). Seed a small sensible set.
-5. **Training + Travel shop-family UI modes** in ShopWindow.
+- Unspent points live in `Character::skillPoints`. Raising a learned skill one
+  level costs `current level + 1` points (the original's `UIMSG_SkillUp` path)
+  and caps at level 60. The character sheet's Skills page spends points.
+- `ShopSystem::learnSkill()` teaches any skill whose class cap is not
+  `SkillMastery::None`, for `500 × multiplier` with the merchant finalizer
+  (`UIHouses::learnSelectedSkill`). Training Grounds offer the class's
+  starting and creation-pick skills; guilds additionally offer their own magic
+  school, which is how Light/Dark become learnable after a path promotion.
+- `ShopSystem::trainMastery()` handles Expert/Master/Grandmaster with the flat
+  cost tables and the gates from the original: skill level 4/7/10, previous
+  tier, class cap (`skillMaxMasteryPerClass`), Personality/Endurance/Intellect
+  50 for Merchant/Bodybuilding/Learning, the armed/unarmed level-10 pair, and
+  the Light/Dark tier-3 class requirement.
+- `Character::promoteCharacter()` implements the base → tier-1 → light/dark
+  tier-2 class transitions; promotion quests and NPC wiring are still pending.
+- Skill points and mastery are persisted in save version 21.
+
+Remaining gaps:
+
+- Mastery trainers in the original are NPC dialogue options (topics
+  200..311); RuneHarbor currently hosts mastery training on the Training
+  Grounds' Skills page until NPC trainer data is wired. Guilds offer their own
+  school skill and spell levels.
+- The trainer level-cap table at `0x4F06E6` remains uncapped (§1.4).
+- Promotion quests, Light/Dark path selection, and class-change NPCs are not
+  yet implemented; `promoteCharacter()` is the engine primitive.
 
 ### Function/global additions for `docs/data/`
 

@@ -48,6 +48,11 @@ enum class ShopError
     // Training / travel errors.
     NothingToLearn,    // character lacks the XP to level up
     NoSuchDestination, // travel building has no destinations / bad index
+    // Skill progression errors.
+    SkillNotAvailable,         // class can never learn this skill
+    SkillAlreadyKnown,         // skill is already at Normal or above
+    MasteryUnavailable,        // no next tier for this class/skill
+    MasteryRequirementsNotMet, // level/attribute/promotion gate failed
 };
 
 // Outcome of a successful transaction.
@@ -155,6 +160,29 @@ class ShopSystem
     // level-up button, not an XP grant.
     std::expected<ShopReceipt, ShopError> trainMember(const ShopContext& ctx,
                                                       int characterIndex) const;
+
+    // -------- Skill trainer service (UIHouses::learnSelectedSkill) --------
+
+    // Price to learn a new skill. Guilds use their primary multiplier, other
+    // teaching houses the secondary one, both as 500 * multiplier (the
+    // Mercenary Guild's flat 250 is not modelled yet), then the merchant
+    // discount finalizer with the usual base/3 floor.
+    static int skillLearningCost(BuildingType type, float buyMultiplier, float secondaryMultiplier,
+                                 int discountPct);
+
+    // Teach a class-available skill at Normal mastery. Fails when the class
+    // can never learn the skill, the character already knows it, or the party
+    // cannot pay.
+    std::expected<ShopReceipt, ShopError> learnSkill(const ShopContext& ctx, int characterIndex,
+                                                     SkillId skill) const;
+
+    // Train a learned skill to the next mastery tier (Expert/Master/
+    // Grandmaster). Gold is the flat trainer price from the original's cost
+    // tables, with no merchant discount. Requirements are checked by
+    // meetsMasteryRequirements (class cap, minimum level, previous tier, and
+    // the special attribute/class gates).
+    std::expected<ShopReceipt, ShopError> trainMastery(const ShopContext& ctx, int characterIndex,
+                                                       SkillId skill, SkillMastery target) const;
 
     // -------- Travel service (stables/boats, FUN_004B68A6) --------
 
