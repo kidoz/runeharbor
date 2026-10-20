@@ -94,6 +94,7 @@ test_sources = files(
     'graphics/texture_coordinates_test.cpp',
     'graphics/occlusion_test.cpp',
     'graphics/hud_test.cpp',
+    'graphics/camera_test.cpp',
     'ui/save_load_widget_test.cpp',
     'ui/choice_list_widget_test.cpp',
 )

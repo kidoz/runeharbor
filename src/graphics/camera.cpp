@@ -74,8 +74,12 @@ void Camera::setPosition(const Vec3& position)
 
     if (distance > 0.0001f)
     {
-        // Calculate yaw (horizontal angle)
-        yaw = std::atan2(-dir.x, -dir.z);
+        // Invert getPosition()'s orbit offset:
+        //   offset = (d*cos(pitch)*sin(yaw), d*sin(pitch), d*cos(pitch)*cos(yaw))
+        // so yaw = atan2(dir.x, dir.z). The previous atan2(-dir.x, -dir.z)
+        // added 180 degrees, putting the camera on the opposite side of the
+        // target and making the party appear to look backwards.
+        yaw = std::atan2(dir.x, dir.z);
 
         // Calculate pitch (vertical angle)
         pitch = std::asin(dir.y / distance);
