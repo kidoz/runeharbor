@@ -398,15 +398,20 @@ void updatePartyPhysics(game::Party& party, const formats::BLVMapData* blv,
                 processFaces(state, bldg.faces, bldg.vertices);
             }
 
-            // Check outdoor terrain
+            // Check outdoor terrain and model floors (docks, bridges, building
+            // floors). The marker for Emerald Island's start sits on the pier
+            // model above the water heightmap, so terrain alone would drop the
+            // party into the sea.
             Vector3 newPosLo = state.positionLo + state.direction * state.adjustedMoveDistance;
-            float terrainZ = sampleOutdoorTerrainHeight(*odm, newPosLo.x, newPosLo.y);
-            if (newPosLo.z - state.radiusLo <= terrainZ)
+            const float floorZ =
+                sampleOutdoorFloorHeight(*odm, newPosLo.x, newPosLo.y,
+                                         state.positionLo.z - state.radiusLo + config.stepHeight);
+            if (newPosLo.z - state.radiusLo <= floorZ)
             {
                 float distToFloor =
-                    (terrainZ - (state.positionLo.z - state.radiusLo)) / state.direction.z;
+                    (floorZ - (state.positionLo.z - state.radiusLo)) / state.direction.z;
                 // If distToFloor is negative, the party's feet are already at or
-                // below the terrain (e.g. stepped uphill). Treat that as an
+                // below the floor (e.g. stepped uphill). Treat that as an
                 // immediate collision so the snap-up below runs — without this,
                 // the guard silently lets the party pass under the surface.
                 if (distToFloor < 0.0f)
@@ -415,8 +420,8 @@ void updatePartyPhysics(game::Party& party, const formats::BLVMapData* blv,
                 {
                     state.adjustedMoveDistance = distToFloor;
                     state.hit.type = HitType::Terrain;
-                    state.hit.normal = {0.0f, 0.0f, 1.0f}; // Simplified terrain normal
-                    state.collisionPos = {newPosLo.x, newPosLo.y, terrainZ};
+                    state.hit.normal = {0.0f, 0.0f, 1.0f}; // Simplified floor normal
+                    state.collisionPos = {newPosLo.x, newPosLo.y, floorZ};
                 }
             }
         }
@@ -481,8 +486,9 @@ void updatePartyPhysics(game::Party& party, const formats::BLVMapData* blv,
     {
         const bool wasOverWater = isOutdoorWaterAt(*odm, party.worldX(), party.worldY());
         const bool nowOverWater = isOutdoorWaterAt(*odm, pos.x, pos.y);
-        const float terrainZ = sampleOutdoorTerrainHeight(*odm, pos.x, pos.y);
-        const bool onTerrain = pos.z <= terrainZ + 8.0f;
+        const float floorZ =
+            sampleOutdoorFloorHeight(*odm, pos.x, pos.y, pos.z + config.stepHeight);
+        const bool onTerrain = pos.z <= floorZ + 8.0f;
         if (!wasOverWater && nowOverWater && onTerrain)
         {
             pos.x = party.worldX();
@@ -501,10 +507,11 @@ void updatePartyPhysics(game::Party& party, const formats::BLVMapData* blv,
     // it so the party can hover above the ground.
     if (odm && !config.flying)
     {
-        const float terrainZ = sampleOutdoorTerrainHeight(*odm, pos.x, pos.y);
-        if (pos.z < terrainZ)
+        const float floorZ =
+            sampleOutdoorFloorHeight(*odm, pos.x, pos.y, pos.z + config.stepHeight);
+        if (pos.z < floorZ)
         {
-            pos.z = terrainZ;
+            pos.z = floorZ;
             if (vel.z < 0)
                 vel.z = 0;
         }

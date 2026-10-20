@@ -51,6 +51,95 @@ inline float sampleOutdoorTerrainHeight(const formats::ODMMapData& odmData, floa
     return h0 + fy * (h1 - h0);
 }
 
+// Highest walkable surface (terrain or an outdoor model such as a dock, bridge,
+// or building floor) at or below `maxZ`. The terrain-only sampler is not
+// enough at places like the Emerald Island pier, where the party starts on a
+// model floor above the water heightmap.
+inline float sampleOutdoorFloorHeight(const formats::ODMMapData& odmData, float worldX,
+                                      float worldY, float maxZ)
+{
+    float best = sampleOutdoorTerrainHeight(odmData, worldX, worldY);
+
+    for (const auto& building : odmData.buildings)
+    {
+        // Building bounds are stored relative to the model anchor in the
+        // shipped data; accept absolute bounds as a fallback for robustness.
+        const float relMinX = static_cast<float>(building.worldX + building.minX);
+        const float relMaxX = static_cast<float>(building.worldX + building.maxX);
+        const float relMinY = static_cast<float>(building.worldY + building.minY);
+        const float relMaxY = static_cast<float>(building.worldY + building.maxY);
+        const float absMinX = static_cast<float>(building.minX);
+        const float absMaxX = static_cast<float>(building.maxX);
+        const float absMinY = static_cast<float>(building.minY);
+        const float absMaxY = static_cast<float>(building.maxY);
+
+        const bool inRel =
+            worldX >= relMinX && worldX <= relMaxX && worldY >= relMinY && worldY <= relMaxY;
+        const bool inAbs =
+            worldX >= absMinX && worldX <= absMaxX && worldY >= absMinY && worldY <= absMaxY;
+        if (!inRel && !inAbs)
+        {
+            continue;
+        }
+
+        for (const auto& face : building.faces)
+        {
+            if (face.isPortal() || face.isInvisible() || face.isWater() || face.isLava() ||
+                face.normalFZ <= 0.5f || face.vertexIndices.size() < 3)
+            {
+                continue;
+            }
+
+            bool validIndices = true;
+            for (const uint16_t index : face.vertexIndices)
+            {
+                if (index >= building.vertices.size())
+                {
+                    validIndices = false;
+                    break;
+                }
+            }
+            if (!validIndices)
+            {
+                continue;
+            }
+
+            const float planeZ =
+                (face.normalFDist - face.normalFX * worldX - face.normalFY * worldY) /
+                face.normalFZ;
+            if (planeZ > maxZ || planeZ < best)
+            {
+                continue;
+            }
+
+            // 2D point-in-polygon in XY.
+            bool inside = false;
+            const size_t count = face.vertexIndices.size();
+            for (size_t i = 0, j = count - 1; i < count; j = i++)
+            {
+                const auto& vi = building.vertices[face.vertexIndices[i]];
+                const auto& vj = building.vertices[face.vertexIndices[j]];
+                const float vyi = static_cast<float>(vi.y);
+                const float vyj = static_cast<float>(vj.y);
+                if (((vyi > worldY) != (vyj > worldY)) &&
+                    (worldX < (static_cast<float>(vj.x) - static_cast<float>(vi.x)) *
+                                      (worldY - vyi) / (vyj - vyi) +
+                                  static_cast<float>(vi.x)))
+                {
+                    inside = !inside;
+                }
+            }
+
+            if (inside)
+            {
+                best = planeZ;
+            }
+        }
+    }
+
+    return best;
+}
+
 // True when the terrain cell under the world position uses the water tileset.
 // RuneHarbor has no depth/shoreline classification, so water cells are treated
 // as impassable without Water Walk.
@@ -91,7 +180,7 @@ inline float clampOutdoorPartyZ(const formats::ODMMapData& odmData, float worldX
         return currentZ;
     }
 
-    const float floor = sampleOutdoorTerrainHeight(odmData, worldX, worldY);
+    const float floor = sampleOutdoorFloorHeight(odmData, worldX, worldY, currentZ + 48.0f);
     return std::max(currentZ, floor);
 }
 
