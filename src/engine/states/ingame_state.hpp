@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include <array>
+
 #include "../../game/spells.hpp"
 #include "../../game/travel_destinations.hpp"
 #include "../../graphics/primitives.hpp"
@@ -67,6 +69,8 @@ class InGameState : public IGameState
     void closeAllPanels();
     void handleHudAction(ui::HudAction action);
     bool handleInventoryTabClick(int screenX, int screenY);
+    std::optional<GameStateId> handleGameOverInput();
+    void renderGameOver();
 
     StateContext& ctx;
 
@@ -120,6 +124,12 @@ class InGameState : public IGameState
 
     // Set by the travel callback; update() transitions to Loading next frame.
     bool pendingTravel_ = false;
+
+    // Party-wipe overlay. GameWorld::isGameOver() is polled every frame; while
+    // set, world simulation freezes and only the Load/Title/Quit actions run.
+    bool gameOver_ = false;
+    int gameOverSelection_ = 0;
+    std::array<graphics::Rect, 3> gameOverButtons_{};
 };
 
 } // namespace runeharbor::engine

@@ -3,7 +3,7 @@ title: "Combat System"
 summary: "Combat resolves attacks through hit checks, damage calculation, resistance, and recovery."
 doc_type: reference
 status: partial
-last_updated: 2026-10-19
+last_updated: 2026-10-20
 ---
 # Combat System
 
@@ -1165,6 +1165,9 @@ Read via: `GetPrivateProfileIntA("debug", "nodamage", 0, ...)`
   hit chance and physical damage reduction read the resulting `armorClass`.
   Elemental damage uses `Character::effectiveResistance()`, which sums base,
   equipment, and timed buffs.
+- A party wipe (every member dead/stoned/eradicated) is detected from
+  `GameWorld::isGameOver()`. `InGameState` freezes simulation and shows a
+  Load Game / Return to Title / Quit overlay.
 
 ### Architecture Mapping
 

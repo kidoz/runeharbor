@@ -123,6 +123,9 @@ void InGameState::enter()
     fpsFrameCounter_ = 0;
     displayedFps_ = 0.0f;
     skipActorCaptureOnExit_ = false;
+    gameOver_ = false;
+    gameOverSelection_ = 0;
+    gameOverButtons_ = {};
 
     inventory_.setVisible(false);
     characterStats_.setVisible(false);
@@ -203,6 +206,16 @@ void InGameState::enter()
     if (ctx.shared)
     {
         hud_.setMapScene(ctx.shared->mapScene);
+    }
+
+    // QA/screenshot hook: force a party wipe to exercise the game-over overlay.
+    if (SDL_getenv("RUNEHARBOR_GAME_OVER") && ctx.shared && ctx.shared->gameWorld)
+    {
+        auto& party = ctx.shared->gameWorld->party();
+        for (int i = 0; i < game::kPartySize; ++i)
+        {
+            party.member(i).setCondition(game::ConditionIndex::Dead, 1);
+        }
     }
 
     // QA/screenshot hook: equip every starting item that passes the skill gate.
@@ -458,6 +471,125 @@ void InGameState::closeAllPanels()
     saveLoadWidget_.setVisible(false);
 }
 
+std::optional<GameStateId> InGameState::handleGameOverInput()
+{
+    if (ctx.isKeyPressed(SDL_SCANCODE_UP))
+    {
+        gameOverSelection_ = (gameOverSelection_ + 2) % 3;
+    }
+    if (ctx.isKeyPressed(SDL_SCANCODE_DOWN))
+    {
+        gameOverSelection_ = (gameOverSelection_ + 1) % 3;
+    }
+
+    int activated = -1;
+    if (ctx.isKeyPressed(SDL_SCANCODE_L))
+    {
+        activated = 0;
+    }
+    else if (ctx.isKeyPressed(SDL_SCANCODE_T))
+    {
+        activated = 1;
+    }
+    else if (ctx.isKeyPressed(SDL_SCANCODE_Q))
+    {
+        activated = 2;
+    }
+    else if (ctx.isKeyPressed(SDL_SCANCODE_RETURN) || ctx.isKeyPressed(SDL_SCANCODE_SPACE))
+    {
+        activated = gameOverSelection_;
+    }
+
+    if (activated < 0 && ctx.window.wasMousePressed(platform::MouseButton::Left))
+    {
+        const auto mouse = ctx.window.getMouseState();
+        for (size_t i = 0; i < gameOverButtons_.size(); ++i)
+        {
+            const auto& rect = gameOverButtons_[i];
+            if (mouse.x >= rect.x && mouse.x < rect.x + rect.width && mouse.y >= rect.y &&
+                mouse.y < rect.y + rect.height)
+            {
+                gameOverSelection_ = static_cast<int>(i);
+                activated = static_cast<int>(i);
+                break;
+            }
+        }
+    }
+
+    switch (activated)
+    {
+    case 0:
+        return GameStateId::LoadGame;
+    case 1:
+        return GameStateId::TitleScreen;
+    case 2:
+        return GameStateId::Quit;
+    default:
+        return std::nullopt;
+    }
+}
+
+void InGameState::renderGameOver()
+{
+    if (!gameOver_ || !ctx.renderer || !ctx.debugText)
+    {
+        return;
+    }
+
+    SDL_Renderer* sdl = ctx.renderer->getSDLRenderer();
+    if (sdl == nullptr)
+    {
+        return;
+    }
+
+    const int viewportW = std::max(1, ctx.viewportWidth);
+    const int viewportH = std::max(1, ctx.viewportHeight);
+    ctx.renderer->drawFilledRect(0, 0, viewportW, viewportH, 0, 0, 0, 190);
+
+    constexpr int kPanelW = 460;
+    constexpr int kPanelH = 250;
+    const int panelX = (viewportW - kPanelW) / 2;
+    const int panelY = (viewportH - kPanelH) / 2;
+    ctx.renderer->drawFilledRect(panelX, panelY, kPanelW, kPanelH, 32, 20, 18, 252);
+    ctx.renderer->drawRect(panelX, panelY, kPanelW, kPanelH, 180, 40, 30, 255);
+    ctx.renderer->drawRect(panelX + 2, panelY + 2, kPanelW - 4, kPanelH - 4, 90, 55, 40, 220);
+
+    const int titleScale = 2;
+    const std::string title = "THE PARTY HAS FALLEN";
+    const int titleW = ctx.debugText->measureTextWidth(title, titleScale);
+    ctx.debugText->drawText(sdl, panelX + (kPanelW - titleW) / 2, panelY + 20, titleScale, 235, 90,
+                            70, title);
+
+    const std::string subtitle = "ALL MEMBERS ARE DEAD OR STONED OR ERADICATED";
+    const int subtitleW = ctx.debugText->measureTextWidth(subtitle, 1);
+    ctx.debugText->drawText(sdl, panelX + (kPanelW - subtitleW) / 2, panelY + 58, 1, 210, 190, 180,
+                            subtitle);
+
+    constexpr int kButtonW = 300;
+    constexpr int kButtonH = 30;
+    constexpr int kButtonGap = 12;
+    const int buttonX = panelX + (kPanelW - kButtonW) / 2;
+    const char* labels[3] = {"LOAD GAME", "RETURN TO TITLE", "QUIT"};
+    for (int i = 0; i < 3; ++i)
+    {
+        const int y = panelY + 90 + i * (kButtonH + kButtonGap);
+        const bool selected = i == gameOverSelection_;
+        ctx.renderer->drawFilledRect(buttonX, y, kButtonW, kButtonH, selected ? 120 : 65,
+                                     selected ? 55 : 42, selected ? 40 : 36, 240);
+        ctx.renderer->drawRect(buttonX, y, kButtonW, kButtonH, selected ? 235 : 130,
+                               selected ? 190 : 100, selected ? 120 : 80, 255);
+        const int labelW = ctx.debugText->measureTextWidth(labels[i], 1);
+        ctx.debugText->drawText(sdl, buttonX + (kButtonW - labelW) / 2, y + 10, 1, 240, 230, 210,
+                                labels[i]);
+        gameOverButtons_[static_cast<size_t>(i)] = {buttonX, y, kButtonW, kButtonH};
+    }
+
+    const std::string hint = "UP/DOWN THEN ENTER. L T Q. OR CLICK";
+    const int hintW = ctx.debugText->measureTextWidth(hint, 1);
+    ctx.debugText->drawText(sdl, panelX + (kPanelW - hintW) / 2, panelY + kPanelH - 22, 1, 150, 145,
+                            140, hint);
+}
+
 void InGameState::handleHudAction(ui::HudAction action)
 {
     if (!ctx.shared)
@@ -643,6 +775,23 @@ std::optional<GameStateId> InGameState::update()
         fpsAccumulatorMs_ = 0.0f;
         fpsFrameCounter_ = 0;
     }
+
+    // Party wipe: freeze the world and show the game-over menu. Checked before
+    // the clock/events so a dead party cannot keep simulating or resting.
+    if (ctx.shared && ctx.shared->gameWorld && ctx.shared->gameWorld->isGameOver())
+    {
+        if (!gameOver_)
+        {
+            gameOver_ = true;
+            gameOverSelection_ = 0;
+            closeAllPanels();
+            shopWindow_.close();
+            dialogue_.close();
+            statusLine_ = "The party has fallen.";
+        }
+        return handleGameOverInput();
+    }
+    gameOver_ = false;
 
     if (ctx.shared && ctx.shared->gameWorld)
     {
@@ -1825,6 +1974,8 @@ void InGameState::render()
             ctx.shared ? ctx.shared->inventory : nullptr);
         shopWindow_.render(*ctx.renderer, *ctx.debugText, ctx.viewportWidth, ctx.viewportHeight);
     }
+
+    renderGameOver();
 }
 
 void InGameState::updateCameraInput(float deltaMs)

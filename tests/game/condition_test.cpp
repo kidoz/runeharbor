@@ -52,3 +52,22 @@ TEST_CASE("Condition timers damage and expire over game time", "[game][condition
         CHECK(ch.canAct());
     }
 }
+
+TEST_CASE("Game over requires every member to be dead", "[game][conditions][gameover]")
+{
+    GameWorld world;
+    CHECK_FALSE(world.isGameOver());
+
+    for (int i = 0; i < kPartySize; ++i)
+    {
+        world.party().member(i).setCondition(ConditionIndex::Dead, 1);
+    }
+    CHECK(world.isGameOver());
+
+    world.party().member(2).clearCondition(ConditionIndex::Dead);
+    CHECK_FALSE(world.isGameOver());
+
+    world.party().member(2).setCondition(ConditionIndex::Stoned, 1);
+    CHECK(world.isGameOver());
+}
+
