@@ -149,9 +149,11 @@ void InGameState::enter()
             spellbook_.setActiveCharacter(findActivePartyMember());
             spellbook_.setVisible(true);
         }
-        else if (name == "character")
+        else if (name == "character" || name == "skills")
         {
             characterStats_.setActiveCharacter(findActivePartyMember());
+            characterStats_.setTab(name == "skills" ? ui::CharacterStatsWidget::Tab::Skills
+                                                    : ui::CharacterStatsWidget::Tab::Stats);
             characterStats_.setVisible(true);
         }
         else if (name == "map")
@@ -165,6 +167,32 @@ void InGameState::enter()
         else if (name == "rest")
         {
             restWidget_.setVisible(true);
+        }
+        else if (name == "training" || name == "training-skills")
+        {
+            formats::TwoDEventEntry building;
+            building.buildingType = game::BuildingType::Training;
+            building.name = "Training Grounds";
+            building.buyMultiplier = 1.0f;
+            building.secondaryMultiplier = 1.0f;
+            shopWindow_.show(building, std::vector<formats::ItemEntry>{});
+            if (name == "training-skills")
+            {
+                shopWindow_.showTrainingSkillsPage();
+            }
+        }
+        else if (name == "guild")
+        {
+            formats::TwoDEventEntry building;
+            building.buildingType = game::BuildingType::BodyGuild;
+            building.name = "Body Guild";
+            building.buyMultiplier = 1.0f;
+            building.secondaryMultiplier = 1.0f;
+            shopWindow_.show(building, std::vector<formats::ItemEntry>{});
+            if (ctx.shared && ctx.shared->gameWorld)
+            {
+                ctx.shared->gameWorld->party().setActiveMemberIndex(3); // Alexis, Cleric
+            }
         }
     }
 
@@ -212,6 +240,16 @@ void InGameState::enter()
 
     // Shop window status feedback -> on-screen status line.
     shopWindow_.setStatusCallback(
+        [this](const std::string& message)
+        {
+            statusLine_ = message;
+            if (ctx.shared)
+            {
+                ctx.shared->statusMessage = message;
+            }
+        });
+    // Character sheet status feedback (skill-point spending).
+    characterStats_.setStatusCallback(
         [this](const std::string& message)
         {
             statusLine_ = message;
@@ -467,6 +505,7 @@ void InGameState::handleHudAction(ui::HudAction action)
         if (!wasOpen)
         {
             characterStats_.setActiveCharacter(findActivePartyMember());
+            characterStats_.setTab(ui::CharacterStatsWidget::Tab::Stats);
             characterStats_.setVisible(true);
         }
         break;
@@ -542,6 +581,8 @@ bool InGameState::handleInventoryTabClick(int screenX, int screenY)
     case 1:
         closeAllPanels();
         characterStats_.setActiveCharacter(findActivePartyMember());
+        characterStats_.setTab(tab == 0 ? ui::CharacterStatsWidget::Tab::Stats
+                                        : ui::CharacterStatsWidget::Tab::Skills);
         characterStats_.setVisible(true);
         return true;
     case 2:
@@ -951,6 +992,21 @@ std::optional<GameStateId> InGameState::update()
             {
                 ui::UIEvent ev{ui::UIEventType::KeyDown, 0, 0, platform::MouseButton::Left, key};
                 (void)spellbook_.handleEvent(ev);
+            }
+        }
+    }
+
+    // Character sheet keyboard: Up/Down selects a skill, Enter/Space spends a
+    // skill point, Tab switches between the Stats and Skills pages.
+    if (characterStats_.visible())
+    {
+        for (const SDL_Scancode key : {SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_RETURN,
+                                       SDL_SCANCODE_SPACE, SDL_SCANCODE_TAB})
+        {
+            if (ctx.isKeyPressed(key))
+            {
+                ui::UIEvent ev{ui::UIEventType::KeyDown, 0, 0, platform::MouseButton::Left, key};
+                (void)characterStats_.handleEvent(ev);
             }
         }
     }

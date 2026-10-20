@@ -79,6 +79,96 @@ std::string conditionLabel(game::ConditionIndex c)
     return "Unknown";
 }
 
+int guildSchoolIndexFor(game::BuildingType type)
+{
+    switch (type)
+    {
+    case game::BuildingType::FireGuild:
+        return 0;
+    case game::BuildingType::AirGuild:
+        return 1;
+    case game::BuildingType::WaterGuild:
+        return 2;
+    case game::BuildingType::EarthGuild:
+        return 3;
+    case game::BuildingType::SpiritGuild:
+        return 4;
+    case game::BuildingType::MindGuild:
+        return 5;
+    case game::BuildingType::BodyGuild:
+        return 6;
+    case game::BuildingType::LightGuild:
+        return 7;
+    case game::BuildingType::DarkGuild:
+        return 8;
+    default:
+        return -1;
+    }
+}
+
+game::SkillId schoolSkillForIndex(int index)
+{
+    static constexpr game::SkillId kSkills[] = {
+        game::SkillId::Fire,  game::SkillId::Air,    game::SkillId::Water,
+        game::SkillId::Earth, game::SkillId::Spirit, game::SkillId::Mind,
+        game::SkillId::Body,  game::SkillId::Light,  game::SkillId::Dark,
+    };
+    return kSkills[std::clamp(index, 0, 8)];
+}
+
+std::string_view schoolDisplayName(int index)
+{
+    static constexpr std::string_view kNames[] = {"Fire", "Air",  "Water", "Earth", "Spirit",
+                                                  "Mind", "Body", "Light", "Dark"};
+    return kNames[std::clamp(index, 0, 8)];
+}
+
+// Short explanation for why a mastery offer is greyed out.
+std::string unmetMasteryNote(const game::Character& character, game::SkillId skill,
+                             game::SkillMastery target)
+{
+    if (game::maxMasteryForClass(character.charClass, skill) < target)
+    {
+        return "needs promotion";
+    }
+
+    const auto& value = character.skillLevels[static_cast<size_t>(skill)];
+    const int requiredLevel =
+        target == game::SkillMastery::Expert ? 4 : (target == game::SkillMastery::Master ? 7 : 10);
+    if (value.level < requiredLevel)
+    {
+        return std::format("needs level {}", requiredLevel);
+    }
+
+    const game::SkillMastery requiredPrevious = target == game::SkillMastery::Master
+                                                    ? game::SkillMastery::Expert
+                                                    : game::SkillMastery::Master;
+    if (target != game::SkillMastery::Expert && value.mastery < requiredPrevious)
+    {
+        return std::format("needs {}", game::masteryName(requiredPrevious));
+    }
+
+    switch (skill)
+    {
+    case game::SkillId::Merchant:
+        return "needs Personality 50";
+    case game::SkillId::BodyBuilding:
+        return "needs Endurance 50";
+    case game::SkillId::Learning:
+        return "needs Intellect 50";
+    case game::SkillId::Light:
+        return "needs Light path class";
+    case game::SkillId::Dark:
+        return "needs Dark path class";
+    case game::SkillId::Dodging:
+        return "needs Unarmed 10";
+    case game::SkillId::Unarmed:
+        return "needs Dodging 10";
+    default:
+        return "requirements not met";
+    }
+}
+
 } // namespace
 
 void ShopWindow::drawRightAligned(const graphics::DebugText& debugText, SDL_Renderer* sdl,
@@ -169,9 +259,17 @@ void ShopWindow::show(const formats::TwoDEventEntry& building,
         proprietor_ += building.title;
     }
     buyMultiplier_ = building.buyMultiplier > 0.0f ? building.buyMultiplier : 1.0f;
+    secondaryMultiplier_ =
+        building.secondaryMultiplier > 0.0f ? building.secondaryMultiplier : 1.0f;
     activeTab_ = ShopTab::Buy;
     listSelection_ = 0;
     scrollOffset_ = 0;
+    trainingView_ = TrainingView::LevelUp;
+    skillSelection_ = 0;
+    skillScroll_ = 0;
+    skillOffers_.clear();
+    guildOffers_.clear();
+    offerRowRects_.clear();
     buyList_.clear();
     sellList_.clear();
     // Only item shops stock a buy list; temples/travel render their own UI.
@@ -321,6 +419,24 @@ bool ShopWindow::handleClick(int mouseX, int mouseY)
         }
     }
 
+    // Skill/guild list rows select the offer that the action button applies.
+    if ((family_ == game::ShopFamily::Training && trainingView_ == TrainingView::Skills) ||
+        family_ == game::ShopFamily::Guild)
+    {
+        for (const auto& row : offerRowRects_)
+        {
+            if (mouseX >= row.x && mouseX < row.x + row.w && mouseY >= row.y &&
+                mouseY < row.y + row.h)
+            {
+                if (family_ == game::ShopFamily::Guild)
+                    listSelection_ = row.index;
+                else
+                    skillSelection_ = row.index;
+                return true;
+            }
+        }
+    }
+
     // Button hit-test (rects cached from the last render).
     for (const auto& btn : buttonRects_)
     {
@@ -339,8 +455,20 @@ bool ShopWindow::handleClick(int mouseX, int mouseY)
             }
             else if (family_ == game::ShopFamily::Training)
             {
-                if (btn.label == "Train")
-                    doTrain();
+                if (btn.label == "Level Up")
+                    trainingView_ = TrainingView::LevelUp;
+                else if (btn.label == "Skills")
+                {
+                    trainingView_ = TrainingView::Skills;
+                    skillSelection_ = 0;
+                }
+                else if (btn.label == "Train" || btn.label == "Apply")
+                {
+                    if (trainingView_ == TrainingView::LevelUp)
+                        doTrain();
+                    else
+                        applySkillOffer();
+                }
                 else if (btn.label == "Close" || btn.label == "Exit")
                     close();
             }
@@ -369,8 +497,8 @@ bool ShopWindow::handleClick(int mouseX, int mouseY)
             }
             else if (family_ == game::ShopFamily::Guild)
             {
-                if (btn.label == "Learn Spell")
-                    doLearnSpell();
+                if (btn.label == "Learn")
+                    doLearnSelectedSpell();
                 else if (btn.label == "Close" || btn.label == "Exit")
                     close();
             }
@@ -453,12 +581,78 @@ bool ShopWindow::handleKey(int scancode)
         return true; // modal: consume all other keys
     }
 
-    // Training mode: Up/Down selects a member, Enter/T trains.
+    // Training mode: Tab switches Level Up / Skills. Level Up uses Up/Down to
+    // pick a party member; Skills uses Up/Down to pick an offer. Enter/T
+    // applies the selected action.
     if (family_ == game::ShopFamily::Training)
     {
+        if (scancode == SDL_SCANCODE_TAB)
+        {
+            trainingView_ = trainingView_ == TrainingView::LevelUp ? TrainingView::Skills
+                                                                   : TrainingView::LevelUp;
+            skillSelection_ = 0;
+            return true;
+        }
+        if (trainingView_ == TrainingView::LevelUp)
+        {
+            if (scancode == SDL_SCANCODE_DOWN)
+            {
+                if (listSelection_ < game::kPartySize - 1)
+                    listSelection_++;
+                return true;
+            }
+            if (scancode == SDL_SCANCODE_UP)
+            {
+                if (listSelection_ > 0)
+                    listSelection_--;
+                return true;
+            }
+            if (scancode == SDL_SCANCODE_T || scancode == SDL_SCANCODE_RETURN ||
+                scancode == SDL_SCANCODE_SPACE)
+            {
+                doTrain();
+                return true;
+            }
+            return true;
+        }
+
+        buildSkillOffers(listSelection_);
+        clampSkillSelection(static_cast<int>(skillOffers_.size()));
+        const int count = static_cast<int>(skillOffers_.size());
         if (scancode == SDL_SCANCODE_DOWN)
         {
-            if (listSelection_ < game::kPartySize - 1)
+            if (skillSelection_ < count - 1)
+                skillSelection_++;
+            return true;
+        }
+        if (scancode == SDL_SCANCODE_UP)
+        {
+            if (skillSelection_ > 0)
+                skillSelection_--;
+            return true;
+        }
+        if (scancode == SDL_SCANCODE_T || scancode == SDL_SCANCODE_RETURN ||
+            scancode == SDL_SCANCODE_SPACE)
+        {
+            applySkillOffer();
+            return true;
+        }
+        return true;
+    }
+
+    // Guild mode: Up/Down selects a spell, Enter/L learns it.
+    if (family_ == game::ShopFamily::Guild)
+    {
+        buildGuildOffers();
+        if (!guildOffers_.empty())
+        {
+            listSelection_ =
+                std::clamp(listSelection_, 0, static_cast<int>(guildOffers_.size()) - 1);
+        }
+        const int count = static_cast<int>(guildOffers_.size());
+        if (scancode == SDL_SCANCODE_DOWN)
+        {
+            if (listSelection_ < count - 1)
                 listSelection_++;
             return true;
         }
@@ -468,10 +662,10 @@ bool ShopWindow::handleKey(int scancode)
                 listSelection_--;
             return true;
         }
-        if (scancode == SDL_SCANCODE_T || scancode == SDL_SCANCODE_RETURN ||
+        if (scancode == SDL_SCANCODE_L || scancode == SDL_SCANCODE_RETURN ||
             scancode == SDL_SCANCODE_SPACE)
         {
-            doTrain();
+            doLearnSelectedSpell();
             return true;
         }
         return true;
@@ -689,10 +883,12 @@ void ShopWindow::doTrain()
     auto result = shop_.trainMember(ctx, member);
     if (onStatus_)
     {
-        onStatus_(result.has_value()
-                      ? std::format("Trained member {} for {} gold (now level {}).", member + 1,
-                                    result->goldSpent, party_->member(member).level)
-                      : std::format("Cannot train: {}.", game::shopErrorText(result.error())));
+        onStatus_(
+            result.has_value()
+                ? std::format("Trained member {} for {} gold - now level {} with {} skill points.",
+                              member + 1, result->goldSpent, party_->member(member).level,
+                              party_->member(member).skillPoints)
+                : std::format("Cannot train: {}.", game::shopErrorText(result.error())));
     }
 }
 
@@ -765,8 +961,12 @@ void ShopWindow::render(graphics::IRenderer& renderer, const graphics::DebugText
         renderTravel(renderer, debugText);
         return;
     }
-    if (family_ == game::ShopFamily::Bank || family_ == game::ShopFamily::Tavern ||
-        family_ == game::ShopFamily::Guild)
+    if (family_ == game::ShopFamily::Guild)
+    {
+        renderGuild(renderer, debugText);
+        return;
+    }
+    if (family_ == game::ShopFamily::Bank || family_ == game::ShopFamily::Tavern)
     {
         renderSimpleService(renderer, debugText);
         return;
@@ -957,14 +1157,28 @@ void ShopWindow::renderTraining(graphics::IRenderer& renderer, const graphics::D
         return;
     int y = chrome.contentY;
 
-    // Train + Close buttons.
     buttonRects_.clear();
     const int by = y;
-    drawButton(renderer, debugText, sdl, kWindowX + kPadding, by, kButtonWidth, "Train", 60, 90,
-               130);
+    int bx = kWindowX + kPadding;
+    const bool levelUpView = trainingView_ == TrainingView::LevelUp;
+    drawButton(renderer, debugText, sdl, bx, by, kButtonWidth, "Level Up", levelUpView ? 60 : 40,
+               levelUpView ? 90 : 45, levelUpView ? 130 : 55);
+    bx += kButtonWidth + kPadding;
+    drawButton(renderer, debugText, sdl, bx, by, kButtonWidth, "Skills", !levelUpView ? 60 : 40,
+               !levelUpView ? 90 : 45, !levelUpView ? 130 : 55);
+    bx += kButtonWidth + kPadding;
+    drawButton(renderer, debugText, sdl, bx, by, kButtonWidth, levelUpView ? "Train" : "Apply", 70,
+               110, 70);
     drawButton(renderer, debugText, sdl, kWindowX + kWindowW - kPadding - kButtonWidth, by,
                kButtonWidth, "Close", 90, 40, 40);
     y = by + kButtonHeight + kPadding;
+
+    if (!levelUpView)
+    {
+        renderTrainingSkills(renderer, debugText,
+                             std::clamp(listSelection_, 0, game::kPartySize - 1), y);
+        return;
+    }
 
     // Party roster with level / XP-to-go / cost / can-level indicator.
     const int rosterX = kWindowX + kPadding;
@@ -1002,7 +1216,214 @@ void ShopWindow::renderTraining(graphics::IRenderer& renderer, const graphics::D
 
     const int hintY = kWindowY + kWindowH - kPadding - debugText.lineHeight(kTextScale);
     debugText.drawText(sdl, kWindowX + kPadding, hintY, kTextScale, 160, 160, 170,
-                       "Up/Dn: select member   T/Enter: train   Esc: close");
+                       "Up/Dn: select member   T/Enter: train   Tab: skills   Esc: close");
+}
+
+void ShopWindow::buildSkillOffers(int memberIndex)
+{
+    skillOffers_.clear();
+    if (party_ == nullptr)
+    {
+        return;
+    }
+
+    memberIndex = std::clamp(memberIndex, 0, game::kPartySize - 1);
+    const game::Character& ch = party_->member(memberIndex);
+    const int negotiator = std::clamp(party_->activeMemberIndex(), 0, game::kPartySize - 1);
+    const int discount =
+        game::ShopSystem::merchantDiscountPct(party_->member(negotiator), party_->reputation());
+    const int learnCost = game::ShopSystem::skillLearningCost(buildingType_, buyMultiplier_,
+                                                              secondaryMultiplier_, discount);
+
+    // New skills a Training Ground can teach: the class's starting skills
+    // plus the nine creation-pick skills from the original [9][37] table.
+    const auto addLearn = [this, &ch, learnCost](game::SkillId skill)
+    {
+        const size_t index = static_cast<size_t>(skill);
+        if (ch.skillLevels[index].learned() ||
+            game::maxMasteryForClass(ch.charClass, skill) == game::SkillMastery::None)
+        {
+            return;
+        }
+        for (const auto& existing : skillOffers_)
+        {
+            if (existing.learn && existing.skill == skill)
+                return;
+        }
+        skillOffers_.push_back({skill, true, game::SkillMastery::Normal, learnCost, true, "learn"});
+    };
+
+    const int base = game::baseClassIndex(ch.charClass);
+    for (const game::SkillId skill : game::classStartingSkills(base))
+    {
+        addLearn(skill);
+    }
+    for (const game::SkillId skill : game::classAvailableSkills(base))
+    {
+        addLearn(skill);
+    }
+
+    // Mastery tiers for skills the character already knows.
+    for (int i = 0; i < static_cast<int>(game::SkillId::Count); ++i)
+    {
+        const auto skill = static_cast<game::SkillId>(i);
+        if (!ch.skillLevels[static_cast<size_t>(skill)].learned())
+            continue;
+
+        const auto target = game::nextMastery(ch, skill);
+        if (!target.has_value())
+            continue;
+        const int cost = game::masteryTrainingCost(skill, *target);
+        if (cost <= 0)
+            continue; // no trainer exists for this tier (Diplomacy/Thievery)
+
+        const bool available = game::meetsMasteryRequirements(ch, skill, *target);
+        skillOffers_.push_back({skill, false, *target, cost, available,
+                                available ? "ready" : unmetMasteryNote(ch, skill, *target)});
+    }
+}
+
+void ShopWindow::renderTrainingSkills(graphics::IRenderer& renderer,
+                                      const graphics::DebugText& debugText, int memberIndex,
+                                      int startY)
+{
+    buildSkillOffers(memberIndex);
+
+    SDL_Renderer* sdl = renderer.getSDLRenderer();
+    if (sdl == nullptr)
+        return;
+
+    if (party_ == nullptr)
+        return;
+
+    const game::Character& ch = party_->member(memberIndex);
+    const int textX = kWindowX + kPadding;
+    int y = startY;
+    debugText.drawText(sdl, textX, y, kTextScale, 255, 220, 120,
+                       std::format("Skills for {}   Skill points: {}", ch.name, ch.skillPoints));
+    y += kRowHeight + 4;
+    debugText.drawText(sdl, textX, y, kTextScale, 200, 200, 160,
+                       "  Skill          Train        Cost   Status");
+    y += kRowHeight + 2;
+
+    clampSkillSelection(static_cast<int>(skillOffers_.size()));
+
+    const int bottomY = kWindowY + kWindowH - kPadding - debugText.lineHeight(kTextScale) - 6;
+    const int visibleRows = std::max(1, (bottomY - y) / kRowHeight);
+    const int maxScroll = std::max(0, static_cast<int>(skillOffers_.size()) - visibleRows);
+    if (skillSelection_ < skillScroll_)
+        skillScroll_ = skillSelection_;
+    if (skillSelection_ >= skillScroll_ + visibleRows)
+        skillScroll_ = skillSelection_ - visibleRows + 1;
+    skillScroll_ = std::clamp(skillScroll_, 0, maxScroll);
+
+    offerRowRects_.clear();
+    if (skillOffers_.empty())
+    {
+        debugText.drawText(sdl, textX, y, kTextScale, 190, 190, 190,
+                           "No skills or mastery upgrades available.");
+    }
+
+    for (int row = 0; row < visibleRows; ++row)
+    {
+        const int index = skillScroll_ + row;
+        if (index >= static_cast<int>(skillOffers_.size()))
+            break;
+
+        const auto& offer = skillOffers_[static_cast<size_t>(index)];
+        const bool selected = index == skillSelection_;
+        const bool affordable = party_->gold() >= offer.cost;
+        const int rowY = y + row * kRowHeight;
+        if (selected)
+        {
+            renderer.drawFilledRect(kWindowX + kPadding - 2, rowY - 1, kWindowW - kPadding * 2 + 4,
+                                    kRowHeight, 70, 60, 30, 220);
+        }
+
+        const std::string trainLabel =
+            offer.learn ? std::string("Learn") : std::string(game::masteryName(offer.target));
+        const std::string line =
+            std::format("  {:<14} {:<12} {:>5}   {}", game::skillDisplayName(offer.skill),
+                        trainLabel, offer.cost, offer.note);
+
+        uint8_t r = 230;
+        uint8_t g = 230;
+        uint8_t b = 210;
+        if (!offer.available)
+        {
+            r = 160;
+            g = 160;
+            b = 150;
+        }
+        else if (!affordable)
+        {
+            r = 230;
+            g = 170;
+            b = 120;
+        }
+        if (selected)
+        {
+            r = 255;
+            g = 235;
+            b = 170;
+        }
+        debugText.drawText(sdl, textX, rowY, kTextScale, r, g, b, line);
+
+        offerRowRects_.push_back(
+            {index, kWindowX + kPadding - 2, rowY - 1, kWindowW - kPadding * 2 + 4, kRowHeight});
+    }
+
+    const int hintY = kWindowY + kWindowH - kPadding - debugText.lineHeight(kTextScale);
+    debugText.drawText(sdl, kWindowX + kPadding, hintY, kTextScale, 160, 160, 170,
+                       "Up/Dn: select   T/Enter: buy   Tab: level up   Esc: close");
+}
+
+void ShopWindow::applySkillOffer()
+{
+    if (party_ == nullptr)
+        return;
+
+    buildSkillOffers(listSelection_);
+    if (skillOffers_.empty())
+        return;
+    clampSkillSelection(static_cast<int>(skillOffers_.size()));
+
+    const SkillOffer offer = skillOffers_[static_cast<size_t>(skillSelection_)];
+    const int memberIndex = std::clamp(listSelection_, 0, game::kPartySize - 1);
+
+    formats::TwoDEventEntry building;
+    building.buildingType = buildingType_;
+    building.buyMultiplier = buyMultiplier_;
+    building.secondaryMultiplier = secondaryMultiplier_;
+    game::ShopContext ctx{&building, party_, nullptr};
+
+    auto result = offer.learn ? shop_.learnSkill(ctx, memberIndex, offer.skill)
+                              : shop_.trainMastery(ctx, memberIndex, offer.skill, offer.target);
+
+    if (onStatus_)
+    {
+        if (result.has_value())
+        {
+            if (offer.learn)
+            {
+                onStatus_(std::format("Learned {} for {} gold.",
+                                      game::skillDisplayName(offer.skill), result->goldSpent));
+            }
+            else
+            {
+                onStatus_(std::format("{} trained to {} for {} gold.",
+                                      game::skillDisplayName(offer.skill),
+                                      game::masteryName(offer.target), result->goldSpent));
+            }
+        }
+        else
+        {
+            onStatus_(std::format("Cannot train: {}.", game::shopErrorText(result.error())));
+        }
+    }
+
+    buildSkillOffers(listSelection_);
+    clampSkillSelection(static_cast<int>(skillOffers_.size()));
 }
 
 void ShopWindow::renderTravel(graphics::IRenderer& renderer, const graphics::DebugText& debugText)
@@ -1100,14 +1521,6 @@ void ShopWindow::renderSimpleService(graphics::IRenderer& renderer,
                            std::format("Rest for the night ({} gold). Restores HP and SP.", cost));
         drawButton(renderer, debugText, sdl, bx, by, kButtonWidth, "Rest", 70, 110, 70);
     }
-    else // Guild
-    {
-        const int cost = std::max(1, static_cast<int>(buyMultiplier_ * 100));
-        debugText.drawText(
-            sdl, kWindowX + kPadding, y + kButtonHeight + kPadding, kTextScale, 200, 200, 200,
-            std::format("Learn a spell ({} gold). Requires the matching school skill.", cost));
-        drawButton(renderer, debugText, sdl, bx, by, kButtonWidth, "Learn Spell", 90, 70, 130);
-    }
     drawButton(renderer, debugText, sdl, kWindowX + kWindowW - kPadding - kButtonWidth, by,
                kButtonWidth, "Close", 90, 40, 40);
 
@@ -1162,35 +1575,227 @@ void ShopWindow::doRestInn()
                       : std::format("Cannot rest: {}.", game::shopErrorText(r.error())));
 }
 
-void ShopWindow::doLearnSpell()
+void ShopWindow::clampSkillSelection(int count)
+{
+    if (count <= 0)
+    {
+        skillSelection_ = 0;
+        skillScroll_ = 0;
+        return;
+    }
+    skillSelection_ = std::clamp(skillSelection_, 0, count - 1);
+    skillScroll_ = std::clamp(skillScroll_, 0, std::max(0, count - 1));
+}
+
+void ShopWindow::buildGuildOffers()
+{
+    guildOffers_.clear();
+    if (party_ == nullptr)
+    {
+        return;
+    }
+
+    const int schoolIndex = guildSchoolIndexFor(buildingType_);
+    if (schoolIndex < 0)
+    {
+        return;
+    }
+
+    const int memberIndex = std::clamp(party_->activeMemberIndex(), 0, game::kPartySize - 1);
+    const game::Character& ch = party_->member(memberIndex);
+    const game::SkillId schoolSkill = schoolSkillForIndex(schoolIndex);
+    const auto& schoolValue = ch.skillLevels[static_cast<size_t>(schoolSkill)];
+
+    // Guilds in the original also teach their magic skill to class-eligible
+    // characters that do not know it yet (learnSelectedSkill).
+    if (!schoolValue.learned() &&
+        game::maxMasteryForClass(ch.charClass, schoolSkill) != game::SkillMastery::None)
+    {
+        const int negotiator = std::clamp(party_->activeMemberIndex(), 0, game::kPartySize - 1);
+        const int discount =
+            game::ShopSystem::merchantDiscountPct(party_->member(negotiator), party_->reputation());
+        const int learnCost = game::ShopSystem::skillLearningCost(buildingType_, buyMultiplier_,
+                                                                  secondaryMultiplier_, discount);
+        guildOffers_.push_back({0, 0, learnCost, true, "learn skill"});
+    }
+
+    const int levelCap =
+        schoolValue.learned() ? game::spellsLearnableAtMastery(schoolValue.mastery) : 0;
+    const int spellCost = std::max(1, static_cast<int>(buyMultiplier_ * 100.0f));
+
+    for (int level = 1; level <= 11; ++level)
+    {
+        const int spellId = schoolIndex * 11 + level;
+        if (ch.knowsSpell(spellId))
+        {
+            continue;
+        }
+
+        const bool learnable = schoolValue.learned() && level <= levelCap;
+        std::string note;
+        if (!schoolValue.learned())
+            note = "needs school skill";
+        else if (level > levelCap)
+            note = "needs higher mastery";
+        else
+            note = "ready";
+
+        guildOffers_.push_back({spellId, level, spellCost, learnable, std::move(note)});
+    }
+}
+
+void ShopWindow::renderGuild(graphics::IRenderer& renderer, const graphics::DebugText& debugText)
+{
+    auto chrome = renderChrome(renderer, debugText, 640, 480, 26, 22, 38, false);
+    SDL_Renderer* sdl = chrome.sdl;
+    if (sdl == nullptr)
+        return;
+
+    buttonRects_.clear();
+    const int by = chrome.contentY;
+    drawButton(renderer, debugText, sdl, kWindowX + kPadding, by, kButtonWidth, "Learn", 90, 70,
+               130);
+    drawButton(renderer, debugText, sdl, kWindowX + kWindowW - kPadding - kButtonWidth, by,
+               kButtonWidth, "Close", 90, 40, 40);
+
+    int y = by + kButtonHeight + kPadding;
+    const int schoolIndex = guildSchoolIndexFor(buildingType_);
+    if (party_ == nullptr || schoolIndex < 0)
+    {
+        return;
+    }
+
+    buildGuildOffers();
+    listSelection_ = guildOffers_.empty()
+                         ? 0
+                         : std::clamp(listSelection_, 0, static_cast<int>(guildOffers_.size()) - 1);
+
+    const int memberIndex = std::clamp(party_->activeMemberIndex(), 0, game::kPartySize - 1);
+    const auto& member = party_->member(memberIndex);
+    debugText.drawText(
+        sdl, kWindowX + kPadding, y, kTextScale, 255, 220, 120,
+        std::format("{} Magic spells for {}", schoolDisplayName(schoolIndex), member.name));
+    y += kRowHeight + 4;
+    debugText.drawText(sdl, kWindowX + kPadding, y, kTextScale, 200, 200, 160,
+                       "  Spell                     Cost   Status");
+    y += kRowHeight + 2;
+
+    offerRowRects_.clear();
+    if (guildOffers_.empty())
+    {
+        debugText.drawText(sdl, kWindowX + kPadding, y, kTextScale, 190, 190, 190,
+                           "No spells in stock.");
+        return;
+    }
+
+    const int bottomY = kWindowY + kWindowH - kPadding - debugText.lineHeight(kTextScale) - 6;
+    const int visibleRows = std::max(1, (bottomY - y) / kRowHeight);
+    const int first = std::clamp(listSelection_ - visibleRows + 1, 0,
+                                 std::max(0, static_cast<int>(guildOffers_.size()) - visibleRows));
+    for (int row = 0; row < visibleRows; ++row)
+    {
+        const int index = first + row;
+        if (index >= static_cast<int>(guildOffers_.size()))
+            break;
+
+        const auto& offer = guildOffers_[static_cast<size_t>(index)];
+        const bool selected = index == listSelection_;
+        const bool affordable = party_->gold() >= offer.cost;
+        const int rowY = y + row * kRowHeight;
+        if (selected)
+        {
+            renderer.drawFilledRect(kWindowX + kPadding - 2, rowY - 1, kWindowW - kPadding * 2 + 4,
+                                    kRowHeight, 70, 60, 30, 220);
+        }
+
+        const std::string label =
+            offer.spellId == 0
+                ? std::format("Learn {} Magic", schoolDisplayName(schoolIndex))
+                : std::format("{} Magic level {}", schoolDisplayName(schoolIndex), offer.level);
+        const std::string line = std::format("  {:<26}{:>5}   {}", label, offer.cost, offer.note);
+
+        uint8_t r = 230, g = 230, b = 210;
+        if (!offer.learnable)
+        {
+            r = 160;
+            g = 160;
+            b = 150;
+        }
+        else if (!affordable)
+        {
+            r = 230;
+            g = 170;
+            b = 120;
+        }
+        if (selected)
+        {
+            r = 255;
+            g = 235;
+            b = 170;
+        }
+        debugText.drawText(sdl, kWindowX + kPadding, rowY, kTextScale, r, g, b, line);
+        offerRowRects_.push_back(
+            {index, kWindowX + kPadding - 2, rowY - 1, kWindowW - kPadding * 2 + 4, kRowHeight});
+    }
+
+    const int hintY = kWindowY + kWindowH - kPadding - debugText.lineHeight(kTextScale);
+    debugText.drawText(sdl, kWindowX + kPadding, hintY, kTextScale, 160, 160, 170,
+                       "Up/Dn: select   L/Enter: learn   Esc: close");
+}
+
+void ShopWindow::doLearnSelectedSpell()
 {
     if (party_ == nullptr)
         return;
+
+    buildGuildOffers();
+    if (guildOffers_.empty())
+    {
+        if (onStatus_)
+            onStatus_("No spells in stock.");
+        return;
+    }
+    listSelection_ = std::clamp(listSelection_, 0, static_cast<int>(guildOffers_.size()) - 1);
+    const GuildOffer offer = guildOffers_[static_cast<size_t>(listSelection_)];
+
+    const int memberIndex = std::clamp(party_->activeMemberIndex(), 0, game::kPartySize - 1);
+    const int schoolIndex = guildSchoolIndexFor(buildingType_);
+    if (schoolIndex < 0)
+    {
+        return;
+    }
+
     formats::TwoDEventEntry building;
     building.buildingType = buildingType_;
     building.buyMultiplier = buyMultiplier_;
+    building.secondaryMultiplier = secondaryMultiplier_;
     game::ShopContext ctx{&building, party_, nullptr};
-    // Placeholder selection: learn the first unknown spell (spellId 1..99),
-    // ignoring the guild's school and the member's known school skill. The
-    // real guild UI lets the player pick from a school-specific list and the
-    // skill gate lives in ShopSystem::learnGuildSpell; this just finds a gap.
-    const int member = std::clamp(party_->activeMemberIndex(), 0, 3);
-    for (int spellId = 1; spellId < 100; spellId++)
+
+    auto result = offer.spellId == 0
+                      ? shop_.learnSkill(ctx, memberIndex, schoolSkillForIndex(schoolIndex))
+                      : shop_.learnGuildSpell(ctx, offer.spellId);
+
+    if (onStatus_)
     {
-        if (!party_->member(member).knowsSpell(spellId))
+        if (result.has_value())
         {
-            auto r = shop_.learnGuildSpell(ctx, spellId);
-            if (onStatus_)
-            {
-                onStatus_(r.has_value()
-                              ? std::format("Learned spell #{} for {} gold.", spellId, r->goldSpent)
-                              : std::format("Cannot learn: {}.", game::shopErrorText(r.error())));
-            }
-            return;
+            onStatus_(offer.spellId == 0
+                          ? std::format("Learned {} Magic for {} gold.",
+                                        schoolDisplayName(schoolIndex), result->goldSpent)
+                          : std::format("Learned {} Magic level {} for {} gold.",
+                                        schoolDisplayName(schoolIndex), offer.level,
+                                        result->goldSpent));
+        }
+        else
+        {
+            onStatus_(std::format("Cannot learn: {}.", game::shopErrorText(result.error())));
         }
     }
-    if (onStatus_)
-        onStatus_("All spells already known.");
+
+    buildGuildOffers();
+    listSelection_ = guildOffers_.empty()
+                         ? 0
+                         : std::clamp(listSelection_, 0, static_cast<int>(guildOffers_.size()) - 1);
 }
 
 } // namespace runeharbor::ui

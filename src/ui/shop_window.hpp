@@ -71,6 +71,10 @@ class ShopWindow
     void close();
     bool isOpen() const { return open_; }
 
+    // Opens the Training Grounds on its Skills page (skill learning and
+    // mastery training). The default page remains the level-up roster.
+    void showTrainingSkillsPage() { trainingView_ = TrainingView::Skills; }
+
     // Wire the game state in (called each frame while open, like other widgets).
     void setContext(game::Party* party, game::Inventory* inventory)
     {
@@ -148,6 +152,7 @@ class ShopWindow
     std::string shopName_;
     std::string proprietor_;
     float buyMultiplier_ = 1.0f;
+    float secondaryMultiplier_ = 1.0f;
 
     ShopTab activeTab_ = ShopTab::Buy;
     int listSelection_ = 0; // item list (Buy/Sell) OR temple member index
@@ -194,7 +199,48 @@ class ShopWindow
     void doDeposit();
     void doWithdraw();
     void doRestInn();
-    void doLearnSpell();
+
+    // -------- Skill training / guild spell lists --------
+    enum class TrainingView
+    {
+        LevelUp,
+        Skills,
+    };
+
+    struct SkillOffer
+    {
+        game::SkillId skill = game::SkillId::Staff;
+        bool learn = false; // true = learn the skill, false = train mastery
+        game::SkillMastery target = game::SkillMastery::None;
+        int cost = 0;
+        bool available = false; // non-gold requirements met
+        std::string note;
+    };
+
+    struct GuildOffer
+    {
+        int spellId = 0;
+        int level = 0;
+        int cost = 0;
+        bool learnable = false;
+        std::string note;
+    };
+
+    void renderTrainingSkills(graphics::IRenderer& renderer, const graphics::DebugText& debugText,
+                              int memberIndex, int startY);
+    void buildSkillOffers(int memberIndex);
+    void clampSkillSelection(int count);
+    void applySkillOffer();
+    void renderGuild(graphics::IRenderer& renderer, const graphics::DebugText& debugText);
+    void buildGuildOffers();
+    void doLearnSelectedSpell();
+
+    TrainingView trainingView_ = TrainingView::LevelUp;
+    int skillSelection_ = 0;
+    int skillScroll_ = 0;
+    std::vector<SkillOffer> skillOffers_;
+    std::vector<GuildOffer> guildOffers_;
+    std::vector<RowRect> offerRowRects_;
 
     // Travel destinations offered by the current building (built on show()).
     std::vector<game::TravelDestination> travelDestinations_;
