@@ -71,3 +71,24 @@ TEST_CASE("Game over requires every member to be dead", "[game][conditions][game
     CHECK(world.isGameOver());
 }
 
+TEST_CASE("Advancing world time expires timed buffs", "[game][conditions][clock]")
+{
+    GameWorld world;
+    auto& ch = world.party().member(0);
+    world.processConditions(); // establish the baseline tick
+
+    TimedEffect shield;
+    shield.spellId = 45;
+    shield.name = "Shield";
+    shield.armorClassBonus = 5;
+    shield.expiresAtTicks = world.calendar().totalTicks + GameCalendar::kTicksPerHour;
+    ch.addTimedEffect(shield);
+    REQUIRE(ch.hasTimedEffect(45));
+
+    const int64_t before = world.calendar().totalTicks;
+    world.advanceTime(8 * 60); // 8 hours, as used by rest/inn
+
+    CHECK(world.calendar().totalTicks == before + 8 * 60 * GameCalendar::kTicksPerMinute);
+    CHECK_FALSE(ch.hasTimedEffect(45));
+    CHECK(ch.armorClass == std::max(0, (ch.stats.speed - 10) / 2));
+}

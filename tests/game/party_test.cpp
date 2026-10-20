@@ -211,12 +211,13 @@ TEST_CASE("Party rest", "[game][party]")
         REQUIRE(party.food() == 7);
     }
 
-    SECTION("rest advances game time")
+    SECTION("rest leaves the legacy party clock to GameWorld")
     {
+        // Party::gameTime_ is a compatibility-save field; GameWorld::calendar()
+        // is the authoritative clock and is advanced by the rest widget/inn.
         uint64_t timeBefore = party.gameTime();
         party.rest(1);
-        uint64_t ticksPerHour = 3600ULL * 128ULL;
-        REQUIRE(party.gameTime() == timeBefore + ticksPerHour);
+        REQUIRE(party.gameTime() == timeBefore);
     }
 }
 

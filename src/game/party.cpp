@@ -254,13 +254,9 @@ bool Party::rest(int hours)
         m.rest(hours);
     }
 
-    // 128 ticks per real second. Let's assume 1 hour game time = 3600 real seconds?
-    // Actually from docs: "128 Ticks per second (time multiplier)", "0xE10 (3600) Seconds per hour"
-    // Game time advances. We just add roughly 3600 seconds per hour to game time?
-    // Wait, the docs say: 3600 seconds per hour. So 3600 * 128 ticks per hour?
-    uint64_t ticksPerHour = 3600ULL * 128ULL;
-    advanceTime(hours * ticksPerHour);
-
+    // GameWorld::calendar() is the authoritative clock. Callers that consume
+    // world time (rest widget, inn service, travel) advance it explicitly.
+    // Party::gameTime_ is a legacy saved field and deliberately not updated.
     return true;
 }
 

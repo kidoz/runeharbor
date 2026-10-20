@@ -753,7 +753,7 @@ void ShopWindow::doBuy()
     building.id = 0;
     building.buildingType = buildingType_;
     building.buyMultiplier = buyMultiplier_;
-    game::ShopContext ctx{&building, party_, inventory_};
+    game::ShopContext ctx{&building, party_, inventory_, gameWorld_};
 
     const int charIdx = std::clamp(party_->activeMemberIndex(), 0, 3);
     const int itemId = buyList_[listSelection_].itemId;
@@ -787,7 +787,7 @@ void ShopWindow::doSell()
     building.id = 0;
     building.buildingType = buildingType_;
     building.buyMultiplier = buyMultiplier_;
-    game::ShopContext ctx{&building, party_, inventory_};
+    game::ShopContext ctx{&building, party_, inventory_, gameWorld_};
 
     const int charIdx = std::clamp(party_->activeMemberIndex(), 0, 3);
     const int slot = sellList_[listSelection_].backpackSlot;
@@ -815,7 +815,7 @@ void ShopWindow::doHeal()
     building.id = 0;
     building.buildingType = buildingType_;
     building.buyMultiplier = buyMultiplier_;
-    game::ShopContext ctx{&building, party_, inventory_};
+    game::ShopContext ctx{&building, party_, inventory_, gameWorld_};
 
     auto result = shop_.healParty(ctx);
     if (onStatus_)
@@ -835,7 +835,7 @@ void ShopWindow::doResurrect()
     building.id = 0;
     building.buildingType = buildingType_;
     building.buyMultiplier = buyMultiplier_;
-    game::ShopContext ctx{&building, party_, inventory_};
+    game::ShopContext ctx{&building, party_, inventory_, gameWorld_};
 
     const int member = std::clamp(listSelection_, 0, game::kPartySize - 1);
     auto result = shop_.resurrectMember(ctx, member);
@@ -857,7 +857,7 @@ void ShopWindow::doDonate()
     building.id = 0;
     building.buildingType = buildingType_;
     building.buyMultiplier = buyMultiplier_;
-    game::ShopContext ctx{&building, party_, inventory_};
+    game::ShopContext ctx{&building, party_, inventory_, gameWorld_};
 
     auto result = shop_.donate(ctx);
     if (onStatus_)
@@ -877,7 +877,7 @@ void ShopWindow::doTrain()
     building.id = 0;
     building.buildingType = buildingType_;
     building.buyMultiplier = buyMultiplier_;
-    game::ShopContext ctx{&building, party_, inventory_};
+    game::ShopContext ctx{&building, party_, inventory_, gameWorld_};
 
     const int member = std::clamp(listSelection_, 0, game::kPartySize - 1);
     auto result = shop_.trainMember(ctx, member);
@@ -907,7 +907,7 @@ void ShopWindow::doTravel()
     building.id = 0;
     building.buildingType = buildingType_;
     building.buyMultiplier = buyMultiplier_;
-    game::ShopContext ctx{&building, party_, inventory_};
+    game::ShopContext ctx{&building, party_, inventory_, gameWorld_};
 
     // Charge via ShopSystem so the gold math lives with the rest of the economy.
     auto result = shop_.chargeTravel(ctx);
@@ -1395,7 +1395,7 @@ void ShopWindow::applySkillOffer()
     building.buildingType = buildingType_;
     building.buyMultiplier = buyMultiplier_;
     building.secondaryMultiplier = secondaryMultiplier_;
-    game::ShopContext ctx{&building, party_, nullptr};
+    game::ShopContext ctx{&building, party_, nullptr, gameWorld_};
 
     auto result = offer.learn ? shop_.learnSkill(ctx, memberIndex, offer.skill)
                               : shop_.trainMastery(ctx, memberIndex, offer.skill, offer.target);
@@ -1538,7 +1538,7 @@ void ShopWindow::doDeposit()
     // pass ctx.shared->inventory here.
     formats::TwoDEventEntry building;
     building.buildingType = game::BuildingType::Bank;
-    game::ShopContext ctx{&building, party_, nullptr};
+    game::ShopContext ctx{&building, party_, nullptr, gameWorld_};
     auto r = shop_.depositGold(ctx, 100);
     if (onStatus_)
         onStatus_(r.has_value()
@@ -1552,7 +1552,7 @@ void ShopWindow::doWithdraw()
         return;
     formats::TwoDEventEntry building;
     building.buildingType = game::BuildingType::Bank;
-    game::ShopContext ctx{&building, party_, nullptr};
+    game::ShopContext ctx{&building, party_, nullptr, gameWorld_};
     auto r = shop_.withdrawGold(ctx, 100);
     if (onStatus_)
         onStatus_(r.has_value()
@@ -1567,7 +1567,7 @@ void ShopWindow::doRestInn()
     formats::TwoDEventEntry building;
     building.buildingType = game::BuildingType::Tavern;
     building.buyMultiplier = buyMultiplier_;
-    game::ShopContext ctx{&building, party_, nullptr};
+    game::ShopContext ctx{&building, party_, nullptr, gameWorld_};
     auto r = shop_.restAtInn(ctx);
     if (onStatus_)
         onStatus_(r.has_value()
@@ -1769,7 +1769,7 @@ void ShopWindow::doLearnSelectedSpell()
     building.buildingType = buildingType_;
     building.buyMultiplier = buyMultiplier_;
     building.secondaryMultiplier = secondaryMultiplier_;
-    game::ShopContext ctx{&building, party_, nullptr};
+    game::ShopContext ctx{&building, party_, nullptr, gameWorld_};
 
     auto result = offer.spellId == 0
                       ? shop_.learnSkill(ctx, memberIndex, schoolSkillForIndex(schoolIndex))

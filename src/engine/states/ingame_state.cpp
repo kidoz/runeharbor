@@ -871,7 +871,8 @@ std::optional<GameStateId> InGameState::update()
         // the shop window. Stock the buy list from the loaded item table.
         if (ctx.shared->inventory && ctx.shared->gameWorld)
         {
-            shopWindow_.setContext(&ctx.shared->gameWorld->party(), ctx.shared->inventory);
+            shopWindow_.setContext(&ctx.shared->gameWorld->party(), ctx.shared->inventory,
+                                   ctx.shared->gameWorld);
             shopWindow_.show(ctx.shared->pendingShopBuilding, ctx.shared->inventory->itemTable());
         }
         ctx.shared->openShop = false;
@@ -1971,7 +1972,8 @@ void InGameState::render()
     {
         shopWindow_.setContext(
             (ctx.shared && ctx.shared->gameWorld) ? &ctx.shared->gameWorld->party() : nullptr,
-            ctx.shared ? ctx.shared->inventory : nullptr);
+            ctx.shared ? ctx.shared->inventory : nullptr,
+            (ctx.shared && ctx.shared->gameWorld) ? ctx.shared->gameWorld : nullptr);
         shopWindow_.render(*ctx.renderer, *ctx.debugText, ctx.viewportWidth, ctx.viewportHeight);
     }
 

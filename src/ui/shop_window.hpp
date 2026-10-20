@@ -32,6 +32,7 @@ class DebugText;
 
 namespace runeharbor::game
 {
+class GameWorld;
 class Inventory;
 class Party;
 } // namespace runeharbor::game
@@ -76,10 +77,12 @@ class ShopWindow
     void showTrainingSkillsPage() { trainingView_ = TrainingView::Skills; }
 
     // Wire the game state in (called each frame while open, like other widgets).
-    void setContext(game::Party* party, game::Inventory* inventory)
+    void setContext(game::Party* party, game::Inventory* inventory,
+                    game::GameWorld* world = nullptr)
     {
         party_ = party;
         inventory_ = inventory;
+        gameWorld_ = world;
     }
 
     // Status-line feedback (e.g. "Purchased Short Sword for 68 gold").
@@ -163,6 +166,7 @@ class ShopWindow
 
     game::Party* party_ = nullptr;
     game::Inventory* inventory_ = nullptr;
+    game::GameWorld* gameWorld_ = nullptr;
     game::ShopSystem shop_;
 
     std::vector<ButtonRect> buttonRects_;

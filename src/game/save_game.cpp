@@ -1358,8 +1358,9 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
     writeFloat(out, party.yaw());
     writeFloat(out, party.pitch());
 
-    // Game time
-    writeU64(out, party.gameTime());
+    // Game time. The calendar is authoritative; the legacy per-party field is
+    // written from it so old readers and new saves agree.
+    writeU64(out, static_cast<uint64_t>(std::max<int64_t>(0, world.calendar().totalTicks)));
 
     // Characters
     for (int i = 0; i < kPartySize; i++)

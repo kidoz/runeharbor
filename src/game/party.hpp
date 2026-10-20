@@ -93,7 +93,9 @@ class Party
     float pitch() const { return pitch_; }
     void setOrientation(float yaw, float pitch);
 
-    // Time tracking
+    // Legacy saved clock field. GameWorld::calendar() is authoritative for
+    // gameplay (events, spells, day/night, rest, travel); this value is kept
+    // only so older save payloads still round-trip.
     uint64_t gameTime() const { return gameTime_; }
     void advanceTime(uint64_t ticks) { gameTime_ += ticks; }
     void setGameTime(uint64_t ticks) { gameTime_ = ticks; }

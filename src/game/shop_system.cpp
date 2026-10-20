@@ -6,6 +6,8 @@
 
 #include <cmath>
 
+#include "game_world.hpp"
+
 namespace runeharbor::game
 {
 
@@ -823,8 +825,13 @@ std::expected<ShopReceipt, ShopError> ShopSystem::restAtInn(const ShopContext& c
     if (ctx.party->gold() < cost)
         return std::unexpected(ShopError::InsufficientGold);
     (void)ctx.party->spendGold(cost);
-    // Rest 8 hours: full HP/SP restoration.
+    // Rest 8 hours: full HP/SP restoration, then advance the authoritative
+    // world calendar so buffs expire and day/night/events stay in sync.
     ctx.party->rest(8);
+    if (ctx.world != nullptr)
+    {
+        ctx.world->advanceTime(8 * 60);
+    }
     ShopReceipt r;
     r.goldSpent = cost;
     r.building = BuildingType::Tavern;

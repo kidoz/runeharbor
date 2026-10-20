@@ -200,6 +200,10 @@ Remaining gaps:
 - The trainer level-cap table at `0x4F06E6` remains uncapped (§1.4).
 - Promotion quests, Light/Dark path selection, and class-change NPCs are not
   yet implemented; `promoteCharacter()` is the engine primitive.
+- `GameWorld::calendar()` is the single gameplay clock. Camp and inn rest call
+  `GameWorld::advanceTime(8 * 60)`, which expires timed buffs and advances
+  day/night/events. Level-up training does not yet consume in-game time (the
+  original rests the party until the next dawn plus several hours).
 
 ### Function/global additions for `docs/data/`
 

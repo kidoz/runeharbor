@@ -31,6 +31,8 @@
 namespace runeharbor::game
 {
 
+class GameWorld;
+
 // Reason a shop transaction could not complete.
 enum class ShopError
 {
@@ -73,6 +75,9 @@ struct ShopContext
     const formats::TwoDEventEntry* building = nullptr;
     Party* party = nullptr;
     Inventory* inventory = nullptr;
+    // Optional: when present, services that consume world time (inn rest)
+    // advance GameWorld::calendar(), the authoritative clock.
+    GameWorld* world = nullptr;
 };
 
 class ShopSystem

@@ -1168,6 +1168,9 @@ Read via: `GetPrivateProfileIntA("debug", "nodamage", 0, ...)`
 - A party wipe (every member dead/stoned/eradicated) is detected from
   `GameWorld::isGameOver()`. `InGameState` freezes simulation and shows a
   Load Game / Return to Title / Quit overlay.
+- `GameWorld::calendar()` is the authoritative clock. Camp rest and inn rest
+  advance it with `GameWorld::advanceTime()` (which also expires timed buffs);
+  `Party::gameTime_` is only a legacy save field.
 
 ### Architecture Mapping
 

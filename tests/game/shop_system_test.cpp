@@ -9,6 +9,7 @@
 #include "../../src/formats/items_parser.hpp"
 #include "../../src/formats/two_d_events_parser.hpp"
 #include "../../src/game/character.hpp"
+#include "../../src/game/game_world.hpp"
 #include "../../src/game/inventory.hpp"
 #include "../../src/game/party.hpp"
 #include "../../src/game/shop_system.hpp"
@@ -676,6 +677,26 @@ TEST_CASE("Guild spell learning is school- and mastery-gated", "[shop][guild]")
     auto expertFireball = shopSystem.learnGuildSpell(ctx, 6);
     REQUIRE(expertFireball.has_value());
     CHECK(ch.knowsSpell(6));
+}
+
+TEST_CASE("Inn rest restores the party and advances the world calendar", "[shop][tavern][clock]")
+{
+    GameWorld world;
+    auto& party = world.party();
+    party.setGold(1000);
+    party.member(0).hitPoints = 1;
+    party.member(0).spellPoints = 0;
+
+    auto shop = makeShop(BuildingType::Tavern, 1.0f);
+    ShopContext ctx{&shop, &party, nullptr, &world};
+    ShopSystem shopSystem;
+
+    const int64_t before = world.calendar().totalTicks;
+    auto result = shopSystem.restAtInn(ctx);
+    REQUIRE(result.has_value());
+
+    CHECK(party.member(0).hitPoints == party.member(0).maxHitPoints);
+    CHECK(world.calendar().totalTicks == before + 8 * 60 * GameCalendar::kTicksPerMinute);
 }
 
 TEST_CASE("travel cost is flat per trip (stables > boats)", "[shop][travel]")
