@@ -153,3 +153,46 @@ MALFORMED	LINE
         REQUIRE(parser.getMonsters().size() == 2); // 2 items parsed (malformed line skipped)
     }
 }
+
+TEST_CASE("MonstersParser keeps special-attack rows", "[monsters_parser]")
+{
+    runeharbor::util::ConsoleLogger logger;
+    runeharbor::formats::MonstersParser parser(logger);
+
+    // Previously dropped rows: Obsidian Gargoyle and the three Oozes. They use
+    // bonus strings (Paralyze/Brkweapon) and a quoted spell attack, but all
+    // numeric columns are present.
+    std::string sample_data =
+        R"(Default Monster Data					Stats								Movement and Combat					Attack 1			Attack 2			    Spell Attack		    Spell Attack 2		Resistances										Misc
+#	Name	Picture	LVL	 HP 	AC	 EXP 	Treasure	Quest	Fly	Move	AI Type	Hst	Spd	Rec	Pref	Bonus	Type	Damage	Miss	Att%	Type	Damage	Miss	Use%	"Spl,Mas,Skil"	Use%	"Spl,Mas,Skil"	Fire	Air	Water	Earth	Mind	Spirit	Body	Light	Dark	Phys	Special
+66	Obsidian Gargoyle	Gargoyle C	33	207	26	1419	20%25D10+L3Amulet	0	Y	Med	Suicidal	3	350	70	0	Paralyze	Phys	2D12+8	0	0	0	0	0	0	0	0	0	50	50	50	70	Imm	Imm	Imm	0	0	Imm	0
+113	Sapphire Ooze	Ooze B	18	86	10	504	5%L3	0	N	Free	Suicidal	1	140	100	0	BrkArmor	Water	3D6	0	0	0	0	0	0	0	10	"Toxic Cloud,E,1"	0	0	0	0	0	0	Imm	Imm	Imm	0	0	Imm	0
+)";
+
+    std::vector<uint8_t> data(sample_data.begin(), sample_data.end());
+    REQUIRE(parser.parse(data));
+    const auto& monsters = parser.getMonsters();
+    REQUIRE(monsters.size() == 2);
+
+    REQUIRE(monsters[0].id == 66);
+    REQUIRE(monsters[0].name == "Obsidian Gargoyle");
+    REQUIRE(monsters[0].level == 33);
+    REQUIRE(monsters[0].hitPoints == 207);
+    REQUIRE(monsters[0].treasure == "20%25D10+L3Amulet");
+    REQUIRE(monsters[0].bonus == "Paralyze");
+    REQUIRE(monsters[0].attack1.type == "Phys");
+    REQUIRE(monsters[0].attack1.damage == "2D12+8");
+    REQUIRE(monsters[0].resistFire == 50);
+    REQUIRE(monsters[0].resistMind == 100); // Imm
+
+    REQUIRE(monsters[1].id == 113);
+    REQUIRE(monsters[1].name == "Sapphire Ooze");
+    REQUIRE(monsters[1].bonus == "BrkArmor");
+    REQUIRE(monsters[1].spellAttack1.usePercent == 0);
+    REQUIRE(monsters[1].spellAttack2.usePercent == 10);
+    REQUIRE(monsters[1].spellAttack2.spellMasterySkill == "Toxic Cloud,E,1");
+    REQUIRE(monsters[1].resistMind == 0);
+    REQUIRE(monsters[1].resistBody == 100); // Imm
+    REQUIRE(monsters[1].resistLight == 100);
+    REQUIRE(monsters[1].resistDark == 100);
+}

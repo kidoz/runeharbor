@@ -2,13 +2,40 @@
 #include "monsters_parser.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <format>
+#include <optional>
 #include <sstream> // For std::istringstream and std::getline
+#include <string_view>
 
 #include "../util/string_utils.hpp"
 
 namespace runeharbor::formats
 {
+
+namespace
+{
+
+std::optional<int> parseInt(std::string_view text)
+{
+    const std::string trimmed = util::trim(std::string(text));
+    if (trimmed.empty())
+    {
+        return 0;
+    }
+
+    int value = 0;
+    const char* begin = trimmed.data();
+    const char* end = trimmed.data() + trimmed.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, value);
+    if (ec != std::errc{} || ptr != end)
+    {
+        return std::nullopt;
+    }
+    return value;
+}
+
+} // namespace
 
 MonstersParser::MonstersParser(util::ILogger& logger) : logger(logger) {}
 
@@ -118,9 +145,30 @@ bool MonstersParser::parse(const std::vector<uint8_t>& data)
         {
             size_t fieldIndex = 0;
 
+            const auto parseNum = [&](size_t index, const char* fieldName, bool clean = false,
+                                      int fallback = 0) -> int
+            {
+                if (index >= fields.size())
+                {
+                    return fallback;
+                }
+                const std::string raw = util::trim(fields[index]);
+                if (raw.empty())
+                {
+                    return fallback;
+                }
+                const std::string candidate = clean ? util::cleanNumericString(raw) : raw;
+                if (const auto parsed = parseInt(candidate))
+                {
+                    return *parsed;
+                }
+                logger.warning(std::format("Monster {} field '{}' ('{}') is not numeric", entry.id,
+                                           fieldName, raw));
+                return fallback;
+            };
+
             // 1. id
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.id = std::stoi(util::trim(fields[fieldIndex]));
+            entry.id = parseNum(fieldIndex, "id");
             fieldIndex++;
 
             // 2. name
@@ -134,25 +182,19 @@ bool MonstersParser::parse(const std::vector<uint8_t>& data)
             fieldIndex++;
 
             // 4. level
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.level = std::stoi(util::trim(fields[fieldIndex]));
+            entry.level = parseNum(fieldIndex, "level");
             fieldIndex++;
 
-            // 5. hitPoints (clean numeric string)
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.hitPoints =
-                    std::stoi(util::cleanNumericString(util::trim(fields[fieldIndex])));
+            // 5. hitPoints (clean numeric string; retail uses "1,300")
+            entry.hitPoints = parseNum(fieldIndex, "hitPoints", true);
             fieldIndex++;
 
             // 6. armorClass
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.armorClass = std::stoi(util::trim(fields[fieldIndex]));
+            entry.armorClass = parseNum(fieldIndex, "armorClass");
             fieldIndex++;
 
-            // 7. experience (clean numeric string)
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.experience =
-                    std::stoi(util::cleanNumericString(util::trim(fields[fieldIndex])));
+            // 7. experience (clean numeric string; retail uses "11,000")
+            entry.experience = parseNum(fieldIndex, "experience", true);
             fieldIndex++;
 
             // 8. treasure
@@ -161,8 +203,7 @@ bool MonstersParser::parse(const std::vector<uint8_t>& data)
             fieldIndex++;
 
             // 9. quest
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.quest = std::stoi(util::trim(fields[fieldIndex]));
+            entry.quest = parseNum(fieldIndex, "quest");
             fieldIndex++;
 
             // 10. canFly
@@ -181,18 +222,15 @@ bool MonstersParser::parse(const std::vector<uint8_t>& data)
             fieldIndex++;
 
             // 13. haste
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.haste = std::stoi(util::trim(fields[fieldIndex]));
+            entry.haste = parseNum(fieldIndex, "haste");
             fieldIndex++;
 
             // 14. speed
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.speed = std::stoi(util::trim(fields[fieldIndex]));
+            entry.speed = parseNum(fieldIndex, "speed");
             fieldIndex++;
 
             // 15. recovery
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.recovery = std::stoi(util::trim(fields[fieldIndex]));
+            entry.recovery = parseNum(fieldIndex, "recovery");
             fieldIndex++;
 
             // 16. preferences
@@ -219,8 +257,7 @@ bool MonstersParser::parse(const std::vector<uint8_t>& data)
                 entry.attack1.miss = util::trim(fields[fieldIndex]);
             fieldIndex++;
             // 21. attack1.attPercent
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.attack1.attPercent = std::stoi(util::trim(fields[fieldIndex]));
+            entry.attack1.attPercent = parseNum(fieldIndex, "attack1.attPercent");
             fieldIndex++;
 
             // Attack 2
@@ -239,8 +276,7 @@ bool MonstersParser::parse(const std::vector<uint8_t>& data)
 
             // Spell Attack 1
             // 25. spellAttack1.usePercent
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.spellAttack1.usePercent = std::stoi(util::trim(fields[fieldIndex]));
+            entry.spellAttack1.usePercent = parseNum(fieldIndex, "spellAttack1.usePercent");
             fieldIndex++;
             // 26. spellAttack1.spellMasterySkill
             if (fieldIndex < fields.size())
@@ -249,83 +285,46 @@ bool MonstersParser::parse(const std::vector<uint8_t>& data)
 
             // Spell Attack 2
             // 27. spellAttack2.usePercent
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.spellAttack2.usePercent = std::stoi(util::trim(fields[fieldIndex]));
+            entry.spellAttack2.usePercent = parseNum(fieldIndex, "spellAttack2.usePercent");
             fieldIndex++;
             // 28. spellAttack2.spellMasterySkill
             if (fieldIndex < fields.size())
                 entry.spellAttack2.spellMasterySkill = util::trim(fields[fieldIndex]);
             fieldIndex++;
 
-            // Resistances
-            // 29. resistFire
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
+            // Resistances. "Imm" means 100% resistance.
+            const auto parseResist = [&](const char* fieldName, int& target)
             {
-                std::string s = util::trim(fields[fieldIndex]);
-                entry.resistFire =
-                    (s == "Imm" ? 100 : std::stoi(s)); // Assuming Imm means 100% resistance
-            }
-            fieldIndex++;
-            // 30. resistAir
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-            {
-                std::string s = util::trim(fields[fieldIndex]);
-                entry.resistAir = (s == "Imm" ? 100 : std::stoi(s));
-            }
-            fieldIndex++;
-            // 31. resistWater
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-            {
-                std::string s = util::trim(fields[fieldIndex]);
-                entry.resistWater = (s == "Imm" ? 100 : std::stoi(s));
-            }
-            fieldIndex++;
-            // 32. resistEarth
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-            {
-                std::string s = util::trim(fields[fieldIndex]);
-                entry.resistEarth = (s == "Imm" ? 100 : std::stoi(s));
-            }
-            fieldIndex++;
-            // 33. resistMind
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-            {
-                std::string s = util::trim(fields[fieldIndex]);
-                entry.resistMind = (s == "Imm" ? 100 : std::stoi(s));
-            }
-            fieldIndex++;
-            // 34. resistSpirit
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-            {
-                std::string s = util::trim(fields[fieldIndex]);
-                entry.resistSpirit = (s == "Imm" ? 100 : std::stoi(s));
-            }
-            fieldIndex++;
-            // 35. resistBody
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-            {
-                std::string s = util::trim(fields[fieldIndex]);
-                entry.resistBody = (s == "Imm" ? 100 : std::stoi(s));
-            }
-            fieldIndex++;
-            // 36. resistLight
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-            {
-                std::string s = util::trim(fields[fieldIndex]);
-                entry.resistLight = (s == "Imm" ? 100 : std::stoi(s));
-            }
-            fieldIndex++;
-            // 37. resistDark
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-            {
-                std::string s = util::trim(fields[fieldIndex]);
-                entry.resistDark = (s == "Imm" ? 100 : std::stoi(s));
-            }
-            fieldIndex++;
-            // 38. resistPhysical
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.resistPhysical = std::stoi(util::trim(fields[fieldIndex]));
-            fieldIndex++;
+                if (fieldIndex >= fields.size())
+                {
+                    fieldIndex++;
+                    return;
+                }
+                const std::string raw = util::trim(fields[fieldIndex]);
+                if (!raw.empty())
+                {
+                    if (raw == "Imm")
+                    {
+                        target = 100;
+                    }
+                    else
+                    {
+                        target = parseNum(fieldIndex, fieldName);
+                    }
+                }
+                fieldIndex++;
+            };
+
+            parseResist("resistFire", entry.resistFire);
+            parseResist("resistAir", entry.resistAir);
+            parseResist("resistWater", entry.resistWater);
+            parseResist("resistEarth", entry.resistEarth);
+            parseResist("resistMind", entry.resistMind);
+            parseResist("resistSpirit", entry.resistSpirit);
+            parseResist("resistBody", entry.resistBody);
+            parseResist("resistLight", entry.resistLight);
+            parseResist("resistDark", entry.resistDark);
+            parseResist("resistPhysical", entry.resistPhysical);
 
             // 39. special
             if (fieldIndex < fields.size())
