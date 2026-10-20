@@ -2,8 +2,10 @@
 #include "autonote_parser.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <format>
 #include <sstream> // For std::istringstream and std::getline
+#include <string_view>
 
 #include "../util/string_utils.hpp"
 
@@ -55,40 +57,35 @@ bool AutonoteParser::parse(const std::vector<uint8_t>& data)
         std::vector<std::string> fields =
             util::splitString(line, '	', '"'); // Split by tab, handle quotes
 
-        // We expect at least 3 fields. More fields will be ignored.
-        if (fields.size() < 3)
+        if (fields.empty())
+        {
+            continue;
+        }
+
+        // The shipped table ends with reserved note-bit rows that contain only
+        // the bit number (e.g. "208") and no text/category. Preserve those as
+        // empty notes instead of dropping them.
+        const std::string bitText = util::trim(fields[0]);
+        int noteBit = 0;
+        const auto [ptr, ec] =
+            std::from_chars(bitText.data(), bitText.data() + bitText.size(), noteBit);
+        if (ec != std::errc{} || ptr != bitText.data() + bitText.size())
         {
             logger.warning(
-                std::format("Skipping malformed Autonote line (too few fields): {}", line));
+                std::format("Skipping malformed Autonote line (bad note bit): {}", line));
             continue;
         }
 
-        try
+        entry.noteBit = noteBit;
+        if (fields.size() > 1)
         {
-            size_t fieldIndex = 0;
-
-            // 1. Note bit
-            if (fieldIndex < fields.size() && !fields[fieldIndex].empty())
-                entry.noteBit = std::stoi(util::trim(fields[fieldIndex]));
-            fieldIndex++;
-
-            // 2. Autonote Text
-            if (fieldIndex < fields.size())
-                entry.autonoteText = util::trim(fields[fieldIndex]);
-            fieldIndex++;
-
-            // 3. Category
-            if (fieldIndex < fields.size())
-                entry.category = util::trim(fields[fieldIndex]);
-            fieldIndex++;
-
-            entries.push_back(entry);
+            entry.autonoteText = util::trim(fields[1]);
         }
-        catch (const std::exception& e)
+        if (fields.size() > 2)
         {
-            logger.error(std::format("Error parsing Autonote line '{}': {}", line, e.what()));
-            continue;
+            entry.category = util::trim(fields[2]);
         }
+        entries.push_back(entry);
     }
 
     logger.info(std::format("Successfully parsed {} Autonote entries", entries.size()));

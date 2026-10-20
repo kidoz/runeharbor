@@ -76,17 +76,35 @@ TEST_CASE("AutonoteParser parsing AUTONOTE.TXT", "[autonote_parser]")
         REQUIRE(parser.getAutonoteEntries().empty());
     }
 
-    SECTION("Malformed data line (too few fields) is skipped")
+    SECTION("Text-only line is accepted with an empty category")
     {
-        std::string malformed_line_data = R"(Note bit	Autonote Text	Category
+        std::string short_line_data = R"(Note bit	Autonote Text	Category
 1	"Some text"
 MALFORMED
 2	"Another text"	Stat
 )";
-        std::vector<uint8_t> malformed_vec(malformed_line_data.begin(), malformed_line_data.end());
-        REQUIRE(parser.parse(malformed_vec));
+        std::vector<uint8_t> short_vec(short_line_data.begin(), short_line_data.end());
+        REQUIRE(parser.parse(short_vec));
         const auto& entries = parser.getAutonoteEntries();
-        REQUIRE(entries.size() == 1); // Only entry 2 parsed (entry 1 and MALFORMED skipped)
-        REQUIRE(entries[0].noteBit == 2);
+        REQUIRE(entries.size() == 2); // entry 1 (no category) and entry 2
+        REQUIRE(entries[0].noteBit == 1);
+        REQUIRE(entries[0].autonoteText == "Some text");
+        REQUIRE(entries[0].category.empty());
+        REQUIRE(entries[1].noteBit == 2);
+    }
+
+    SECTION("Reserved note-bit row with no text is preserved")
+    {
+        std::string reserved_data = R"(Note bit	Autonote Text	Category
+1	"Some text"	Misc
+208
+)";
+        std::vector<uint8_t> reserved_vec(reserved_data.begin(), reserved_data.end());
+        REQUIRE(parser.parse(reserved_vec));
+        const auto& entries = parser.getAutonoteEntries();
+        REQUIRE(entries.size() == 2);
+        REQUIRE(entries[1].noteBit == 208);
+        REQUIRE(entries[1].autonoteText.empty());
+        REQUIRE(entries[1].category.empty());
     }
 }

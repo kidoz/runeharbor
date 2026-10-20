@@ -165,3 +165,31 @@ MALFORMED	LINE
         REQUIRE(parser.getMapStats().size() == 2); // 2 items parsed (malformed line skipped)
     }
 }
+
+TEST_CASE("MapStatsParser accepts dungeon rows with omitted trailing columns", "[mapstats_parser]")
+{
+    runeharbor::util::ConsoleLogger logger;
+    runeharbor::formats::MapStatsParser parser(logger);
+
+    // Shipped dungeon rows omit the final "in area" column (31 fields instead
+    // of 32); the parser used to skip all of them.
+    std::string sample_data =
+        R"(	Map Stats			First					x5	D20's		Random Encounter																					
+			Reset	Visit	Per	Refil	Alert	Steal	Lock	Trap	Tres	Enc	M1	M2	M3			Dif	Appear			Dif	Appear			Dif	Appear	Redbook					
+#	Name	File name	#	Day	0-20	Days	Days	Perm	0-20	0-10	0-6	%	%	%	%	Mon1 Pic	Mon 1	 1-5	#	Mon2 Pic	Mon 2	 1-5	#	Mon3 Pic	Mon 3	 1-5	#	Track	EAX Environments	Map Designer	Notes	in area	
+62	Barrow XIII	mdt05.blv	0	0	5	672	7	10	5	3	1	10	50	50	0	Ghoul	Ghoul	2	 1-3	Bat	Bat	3	 1-3	0	0	1	 1-3	5	CAVE	0
+)";
+
+    std::vector<uint8_t> data(sample_data.begin(), sample_data.end());
+    REQUIRE(parser.parse(data));
+    const auto& maps = parser.getMapStats();
+    REQUIRE(maps.size() == 1);
+    REQUIRE(maps[0].id == 62);
+    REQUIRE(maps[0].name == "Barrow XIII");
+    REQUIRE(maps[0].fileName == "mdt05.blv");
+    REQUIRE(maps[0].refillDays == 672);
+    REQUIRE(maps[0].monster1.name == "Ghoul");
+    REQUIRE(maps[0].monster2.name == "Bat");
+    REQUIRE(maps[0].monster3.name == "0");
+    REQUIRE(maps[0].inArea.empty());
+}

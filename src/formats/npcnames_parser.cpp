@@ -54,22 +54,19 @@ bool NPCNamesParser::parse(const std::vector<uint8_t>& data)
 
         std::vector<std::string> fields = util::splitString(line, '\t'); // Split by tab, no quotes
 
-        // We expect exactly 2 fields
-        if (fields.size() != 2)
+        // The shipped table has 2 columns, but the tail of the male list has
+        // single-column entries with no female counterpart (e.g. "Lester").
+        // Preserve those as male names with an empty female slot.
+        if (fields.empty() || fields.size() > 2)
         {
             logger.warning(
-                std::format("Skipping malformed NPCNames line (expected 2 fields, got {}): {}",
+                std::format("Skipping malformed NPCNames line (expected 1-2 fields, got {}): {}",
                             fields.size(), line));
             continue;
         }
 
-        // Male Name (first field)
-        std::string male_name = (fields.size() > 0) ? util::trim(fields[0]) : "";
-        names.maleNames.push_back(male_name);
-
-        // Female Name (second field, optional)
-        std::string female_name = (fields.size() > 1) ? util::trim(fields[1]) : "";
-        names.femaleNames.push_back(female_name);
+        names.maleNames.push_back(util::trim(fields[0]));
+        names.femaleNames.push_back(fields.size() > 1 ? util::trim(fields[1]) : std::string{});
     }
 
     logger.info(std::format("Successfully parsed {} male and {} female NPC names",

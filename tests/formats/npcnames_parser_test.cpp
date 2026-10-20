@@ -56,11 +56,11 @@ Aaron	Alice
         REQUIRE(parser.getNPCNames().femaleNames.empty());
     }
 
-    SECTION("Malformed data line (too few fields) is skipped")
+    SECTION("Malformed data line (too many fields) is skipped")
     {
         std::string malformed_line_data = R"(Male	Female
 Aaron	Alice
-MALFORMED_LINE
+MALFORMED	LINE	EXTRA
 Abe	Allison
 )";
         std::vector<uint8_t> malformed_vec(malformed_line_data.begin(), malformed_line_data.end());
@@ -73,4 +73,23 @@ Abe	Allison
         REQUIRE(names.maleNames[1] == "Abe");
         REQUIRE(names.femaleNames[1] == "Allison");
     }
+}
+TEST_CASE("NPCNamesParser accepts male-only single-column names", "[npcnames_parser]")
+{
+    runeharbor::util::ConsoleLogger logger;
+    runeharbor::formats::NPCNamesParser parser(logger);
+
+    std::string data_text = "Male\tFemale\nAaron\tAlice\nLester\nYancy\n";
+    std::vector<uint8_t> data(data_text.begin(), data_text.end());
+
+    REQUIRE(parser.parse(data));
+    const auto& names = parser.getNPCNames();
+    REQUIRE(names.maleNames.size() == 3);
+    REQUIRE(names.femaleNames.size() == 3);
+    REQUIRE(names.maleNames[0] == "Aaron");
+    REQUIRE(names.femaleNames[0] == "Alice");
+    REQUIRE(names.maleNames[1] == "Lester");
+    REQUIRE(names.femaleNames[1].empty());
+    REQUIRE(names.maleNames[2] == "Yancy");
+    REQUIRE(names.femaleNames[2].empty());
 }

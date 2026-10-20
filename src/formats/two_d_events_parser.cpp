@@ -188,7 +188,15 @@ bool TwoDEventsParser::parse(const std::vector<uint8_t>& data)
 
         if (entry.displayName.empty())
         {
-            logger_.warning(std::format("Skipping 2dEvents line {}: no display fields", lineNo));
+            // The shipped table has a few all-empty placeholder records.
+            const bool hasAnyValue =
+                std::any_of(entry.columns.begin(), entry.columns.end(),
+                            [](const std::string& value) { return !value.empty(); });
+            if (hasAnyValue)
+            {
+                logger_.warning(
+                    std::format("Skipping 2dEvents line {}: no display fields", lineNo));
+            }
             continue;
         }
 

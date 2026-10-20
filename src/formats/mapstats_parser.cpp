@@ -66,8 +66,10 @@ bool MapStatsParser::parse(const std::vector<uint8_t>& data)
         std::vector<std::string> fields =
             util::splitString(line, '	', '"'); // Split by tab, handle quotes
 
-        // We expect at least 33 fields, making the last field 'inArea' optional.
-        if (fields.size() < 32) // Use < 32 for robustness
+        // The shipped dungeon rows omit optional trailing columns (for example
+        // the final "in area"); the field reads below are all bounds-checked.
+        // Require only the 16 map-level columns.
+        if (fields.size() < 16)
         {
             logger.warning(
                 std::format("Skipping malformed mapstats line (too few fields): {}", line));

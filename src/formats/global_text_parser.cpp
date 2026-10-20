@@ -33,7 +33,7 @@ bool GlobalTextParser::parse(const std::vector<uint8_t>& data)
         logger.error("Failed to read header line.");
         return false;
     }
-    if (line != "Global Text")
+    if (util::trim(line) != "Global Text")
     {
         logger.warning(std::format(
             "Expected 'Global Text' header, got '{}'. Attempting to parse anyway.", line));
