@@ -774,9 +774,10 @@ CheckResult checkSoundArchive(const fs::path& installRoot, const fs::path& dataR
             result.metrics["extractFailures"]++;
             if (isAcceptedFailure(filename))
             {
+                // Known retail defect, tracked as a metric rather than a
+                // warning so strict mode still fails on new data problems.
                 result.metrics["acceptedFailures"]++;
                 acceptedCorruptEntry = true;
-                addWarning(result, "accepted corrupt sound entry " + filename);
                 continue;
             }
             if (result.errors.size() < 25)
