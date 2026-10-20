@@ -21,12 +21,16 @@
 
 #include "../../src/formats/game_lod_archive.hpp"
 #include "../../src/formats/quests_parser.hpp"
+#include "../../src/formats/spells_parser.hpp"
+#include "../../src/formats/two_d_events_parser.hpp"
 #include "../../src/game/character.hpp"
 #include "../../src/game/combat.hpp"
 #include "../../src/game/game_world.hpp"
 #include "../../src/game/inventory.hpp"
 #include "../../src/game/quest_log.hpp"
 #include "../../src/game/save_game.hpp"
+#include "../../src/game/shop_system.hpp"
+#include "../../src/game/spells.hpp"
 #include "../../src/util/ilogger.hpp"
 
 using namespace runeharbor::game;
@@ -137,6 +141,7 @@ void seedWorld(GameWorld& world)
     ch.stats.intellect = 45;
     ch.baseStats = ch.stats;
     ch.fireResistance = 50;
+    learnSkill(ch, SkillId::Fire, 12, SkillMastery::Expert);
     // Spellbook: set knownSpells directly (public array) so the test doesn't
     // depend on the skill-gated learnSpell path. The round-trip only needs the
     // bits to survive.
@@ -144,6 +149,7 @@ void seedWorld(GameWorld& world)
     ch.knownSpells[20] = true;
     ch.setQuickbarSpell(0, 15); // quickbar round-trip
     ch.setQuickbarSpell(1, 20);
+    ch.skillPoints = 17; // v21 field
 
     world.setCurrentMap("out01.odm");
 }
@@ -216,6 +222,10 @@ TEST_CASE("Save/Load round-trips party, character, inventory, and quest state", 
         REQUIRE(ch.stats.might == 30);
         REQUIRE(ch.stats.intellect == 45);
         REQUIRE(ch.fireResistance == 50);
+        REQUIRE(ch.skillPoints == 17); // v21: unspent skill points
+        const auto& fire = ch.skillLevels[static_cast<size_t>(SkillId::Fire)];
+        REQUIRE(fire.level == 12);
+        REQUIRE(fire.mastery == SkillMastery::Expert);
     }
 
     SECTION("spellbook and quickbar survive (v12 regression)")
@@ -794,4 +804,80 @@ TEST_CASE("Save/Load round-trips acquired awards and autonotes", "[game][save][j
     CHECK(dstQuests.hasAutonote(42));
     CHECK_FALSE(dstQuests.hasAutonote(2));
     CHECK(dstQuests.acquiredAutonotes().size() == 2);
+}
+
+TEST_CASE("Trained skills, mastery resources, and spells survive a save", "[game][save][skills]")
+{
+    // End-to-end acceptance: a level-1 Sorcerer trains to level 2 at a
+    // Training Ground (earning 5 points), spends 2 points to raise Fire Magic
+    // to level 2, learns Fire Bolt (spell level 2) at the Fire Guild, can cast
+    // it, and keeps all of that across a save/load.
+    NullLogger logger;
+    TempSaveDir dir;
+    SaveGame save(logger);
+    save.setSaveDirectory(dir.path.string());
+
+    GameWorld src;
+    auto& party = src.party();
+    party.setGold(10000);
+    party.setActiveMemberIndex(0);
+
+    auto& ch = party.member(0);
+    ch.charClass = CharacterClass::Sorcerer;
+    ch.level = 1;
+    ch.experience = ch.xpRequiredForNextLevel();
+    ch.recalculateDerived();
+    ch.hitPoints = ch.maxHitPoints;
+    ch.maxSpellPoints = 200;
+    ch.spellPoints = 200;
+    learnSkill(ch, SkillId::Fire, 1);
+
+    runeharbor::formats::TwoDEventEntry training;
+    training.buildingType = BuildingType::Training;
+    training.buyMultiplier = 1.0f;
+    ShopContext trainingCtx{&training, &party, nullptr};
+    ShopSystem shop;
+
+    REQUIRE(shop.trainMember(trainingCtx, 0).has_value());
+    REQUIRE(ch.level == 2);
+    REQUIRE(ch.skillPoints == 5);
+
+    REQUIRE(ch.raiseSkill(SkillId::Fire));
+    REQUIRE(ch.skillLevels[static_cast<size_t>(SkillId::Fire)].level == 2);
+    REQUIRE(ch.skillPoints == 3);
+
+    runeharbor::formats::TwoDEventEntry guild;
+    guild.buildingType = BuildingType::FireGuild;
+    guild.buyMultiplier = 1.0f;
+    ShopContext guildCtx{&guild, &party, nullptr};
+    REQUIRE(shop.learnGuildSpell(guildCtx, 2).has_value()); // Fire Bolt
+    REQUIRE(ch.knowsSpell(2));
+
+    runeharbor::formats::SpellEntry fireBolt;
+    fireBolt.id = 2;
+    fireBolt.name = "Fire Bolt";
+    fireBolt.shortName = "Fire Bolt";
+    fireBolt.level = 2;
+
+    SpellSystem srcSpells(logger);
+    srcSpells.setGameWorld(&src);
+    srcSpells.loadSpellData({fireBolt});
+    REQUIRE(srcSpells.canCast(0, 2));
+
+    REQUIRE(save.save(src, 0));
+
+    GameWorld dst;
+    REQUIRE(save.load(dst, 0));
+
+    const auto& loaded = dst.party().member(0);
+    CHECK(loaded.level == 2);
+    CHECK(loaded.skillPoints == 3);
+    CHECK(loaded.skillLevels[static_cast<size_t>(SkillId::Fire)].level == 2);
+    CHECK(loaded.skillLevels[static_cast<size_t>(SkillId::Fire)].mastery == SkillMastery::Normal);
+    CHECK(loaded.knowsSpell(2));
+
+    SpellSystem dstSpells(logger);
+    dstSpells.setGameWorld(&dst);
+    dstSpells.loadSpellData({fireBolt});
+    CHECK(dstSpells.canCast(0, 2));
 }

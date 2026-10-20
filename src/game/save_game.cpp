@@ -1733,6 +1733,13 @@ bool SaveGame::serializeWorld(const GameWorld& world, std::vector<uint8_t>& out)
         writeI32(out, npc.hireCost);
     }
 
+    // v21: unspent skill points, one entry per party member. Kept at the tail
+    // (like the other post-v15 additions) so pre-v21 payloads still align.
+    for (int i = 0; i < kPartySize; ++i)
+    {
+        writeI32(out, party.member(i).skillPoints);
+    }
+
     // v16: CRC-32 over the complete payload (header included), followed by a
     // trailer magic so a truncated or corrupted save is rejected before any
     // state is applied.
@@ -2550,6 +2557,18 @@ bool SaveGame::deserializeWorld(GameWorld& world, const std::vector<uint8_t>& da
                 }
                 party.hireNpc(std::move(npc));
             }
+        }
+    }
+
+    // v21: unspent skill points, one entry per party member.
+    if (header.version >= 21)
+    {
+        for (int i = 0; i < kPartySize; ++i)
+        {
+            int32_t skillPoints = 0;
+            if (!readI32(ptr, end, skillPoints))
+                return false;
+            party.member(i).skillPoints = std::max(0, skillPoints);
         }
     }
 

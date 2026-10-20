@@ -40,7 +40,8 @@ struct SaveHeader
     //  18  — Lloyd's Beacon location
     //  19  — per-map monster runtime state (health/position/AI)
     //  20  — hired NPC roster
-    static constexpr uint32_t kVersion = 20;
+    //  21  — per-character unspent skill points
+    static constexpr uint32_t kVersion = 21;
 
     uint32_t magic = kMagic;
     uint32_t version = kVersion;
